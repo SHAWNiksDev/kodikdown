@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kodikdown"
+version = "2.0.0"
+description = "Terminal app for resolving and downloading videos from Kodik players"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "SHAWNiks" }]
+requires-python = ">=3.11"
+keywords = ["kodik", "downloader", "tui", "hls"]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Video",
+]
+dependencies = [
+    "httpx>=0.27",
+    "platformdirs>=4.3",
+    "textual>=1.0",
+    "typer>=0.12",
+    "yt-dlp>=2024.12.13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.13",
+    "pyinstaller>=6.11",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "respx>=0.21",
+    "ruff>=0.8",
+]
+
+[project.scripts]
+kodikdown = "kodikdown.cli:main"
+
+[project.urls]
+Repository = "https://github.com/SHAWNiksDev/kodikdown"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kodikdown"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Translation strings are intentionally full of Cyrillic look-alikes.
+"src/kodikdown/i18n.py" = ["RUF001", "RUF002", "RUF003"]
+
+[tool.mypy]
+strict = true
+mypy_path = "src"
+packages = ["kodikdown"]
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["yt_dlp.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"

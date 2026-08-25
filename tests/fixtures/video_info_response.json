@@ -1,0 +1,308 @@
+{
+  "advert_script": "",
+  "domain": "kodikplayer.com",
+  "default": 360,
+  "links": {
+    "360": [
+      {
+        "src": "iPZ0kPU6Tg9eUBQck29aj2ZrHO4cG29bT3UdjA9pANQeG0pVVsf5WExqZhsfEsU1muQgmPHiZ05zGus1iuQgUPHsEM5aG25El2RPWEpiAM12BFxzVC1bAu1HDOb0B1lRU055ULJXZ1D5BNZwjDsgZFZXD1RzEu1NVM9CBBJHDOkfThNsUBZtVBQfUBRuVhC2GhNpGhHrUEHqVLG2UuRtVrYfVuYeVrprHLHtVhCfHLo0HONpUBJtVLY4WEMhGrDtGhY6UrIgVrI4UrCfVK8hVrIcjFI0WupakhxbGE5xHuDhlK5bU3C4",
+        "type": "application/x-mpegURL"
+      }
+    ],
+    "480": [
+      {
+        "src": "iPZ0kPU6Tg9eUBQck29aj2ZrHO4cG29bT3UdjA9pANQeG0pVVsf5WExqZhsfEsU1muQgmPHiZ05zGus1iuQgUPHsEM5aG25El2RPWEpiAM12BFxzVC1bAu1HDOb0B1lRU055ULJXZ1D5BNZwjDsgZFZXD1RzEu1NVM9CBBJHDOkfThNsUBZtVBQfUBRuVhC2GhNpGhHrUEHqVLG2UuRtVrYfVuYeVrprHLHtVhCfHLo0HONpUBJtVLY4WEMhGrDtGhY6UrIgVrI4UrCfVK80WLIcjFI0WupakhxbGE5xHuDhlK5bU3C4",
+        "type": "application/x-mpegURL"
+      }
+    ],
+    "720": [
+      {
+        "src": "iPZ0kPU6Tg9eUBQck29aj2ZrHO4cG29bT3UdjA9pANQeG0pVVsf5WExqZhsfEsU1muQgmPHiZ05zGus1iuQgUPHsEM5aG25El2RPWEpiAM12BFxzVC1bAu1HDOb0B1lRU055ULJXZ1D5BNZwjDsgZFZXD1RzEu1NVM9CBBJHDOkfThNsUBZtVBQfUBRuVhC2GhNpGhHrUEHqVLG2UuRtVrYfVuYeVrprHLHtVhCfHLo0HONpUBJtVLY4WEMhGrDtGhY6UrIgVrI4UrCfVK83UrIcjFI0WupakhxbGE5xHuDhlK5bU3C4",
+        "type": "application/x-mpegURL"
+      }
+    ]
+  },
+  "vast": [
+    {
+      "title_small": "bu-t",
+      "src": "https://exchange.buzzoola.com/ad/1285159",
+      "hide_interface": true,
+      "async_load": true,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10
+    }
+  ],
+  "reserve_vast": [
+    {
+      "title_small": "bu-m",
+      "src": "https://exchange.buzzoola.com/ad/1267453",
+      "hide_interface": true,
+      "async_load": true,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10
+    },
+    {
+      "title_small": "mp_c",
+      "src": "https://wrapper.bracdn.online/wrapper2.php?vast=//yandex.ru/ads/adfox/12359998/getCode?p1=dgbygamp;p2=jjsh",
+      "async_load": true,
+      "max_length": 40,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10,
+      "hide_interface": true
+    },
+    {
+      "title_small": "adp",
+      "src": "https://a.snsv.ru/vast/62cab44c2577409d95e12bfb",
+      "max_length": 60,
+      "vpaid_max_load_time": 10,
+      "vpaid_max_start_time": 20,
+      "vpaid_start_event": "AdVideoStart",
+      "vpaid_impression_event": "adp_ads_viewed",
+      "vpaid_target_event": "adp_ads_viewed",
+      "hide_interface": true,
+      "async_load": true
+    },
+    {
+      "title_small": "bu-a",
+      "src": "https://exchange.buzzoola.com/ad/1217814",
+      "hide_interface": true,
+      "async_load": true,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10
+    },
+    {
+      "title_small": "adp_u",
+      "src": "https://a.snsv.ru/vast/65f9b797a27aa6f0b7f6b69f",
+      "max_length": 60,
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10,
+      "vpaid_start_event": "AdVideoStart",
+      "vpaid_impression_event": "adp_ads_viewed",
+      "vpaid_target_event": "adp_ads_viewed",
+      "hide_interface": true,
+      "async_load": true
+    },
+    {
+      "title_small": "mv_t",
+      "src": "https://code.moviead55.ru/ovpaid.php?v=d90808d9b555b246706da7b29cf0b8aa&position=pre&cp.referer=https%3A%2F%2Fkodikplayer.com%2F",
+      "vpaid_max_load_time": 10,
+      "vpaid_max_start_time": 10,
+      "max_length": 60,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_start_event": [
+        "AdImpression",
+        "AdVideoStart"
+      ],
+      "async_load": true,
+      "hide_interface": true,
+      "send_stat_method": "image",
+      "timer": 15
+    },
+    {
+      "title_small": "adp_t",
+      "src": "https://a.snsv.ru/vast/65168a386caa69d54ab8d07c",
+      "max_length": 60,
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10,
+      "vpaid_start_event": "AdVideoStart",
+      "vpaid_impression_event": "adp_ads_viewed",
+      "vpaid_target_event": "adp_ads_viewed",
+      "hide_interface": true,
+      "async_load": true
+    },
+    {
+      "title_small": "iz",
+      "async_load": true,
+      "timer": 15,
+      "src": "https://code.21wiz.com/ovpaid.php?v=a13cf7df8058e05a3ee2f5479b694d8b&position=pre",
+      "max_length": 60,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10,
+      "hide_interface": true
+    },
+    {
+      "title_small": "mp_c_2",
+      "src": "https://wrapper.bracdn.online/wrapper2.php?vast=//yandex.ru/ads/adfox/12359998/getCode?p1=dgbyfamp;p2=jjsh",
+      "async_load": true,
+      "max_length": 40,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10,
+      "hide_interface": true
+    },
+    {
+      "title_small": "mp_uzaz_2",
+      "src": "https://adx.stack.bidster.net/vast/ca2437da-3e84-4d17-842d-581f8edcf8d2?domain=doramy.club",
+      "async_load": true,
+      "max_length": 60,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10,
+      "hide_interface": true
+    },
+    {
+      "title_small": "vib-a-f",
+      "src": "https://vidalak.com/api/vpaid?userId=314261&format=4&sig=cf5e8f98c44764eb",
+      "async_load": true,
+      "hide_interface": true,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 10,
+      "vpaid_max_start_time": 20
+    },
+    {
+      "title_small": "adp_m",
+      "src": "https://a.snsv.ru/vast/658089f07412859dd2802be9",
+      "max_length": 60,
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10,
+      "vpaid_start_event": "AdVideoStart",
+      "vpaid_impression_event": "adp_ads_viewed",
+      "vpaid_target_event": "adp_ads_viewed",
+      "hide_interface": true,
+      "async_load": true
+    },
+    {
+      "title_small": "abt-o",
+      "src": "https://z.cdn.traffmovie.com/load?o=v&z=2100321148&random=[random]#vGfN3j79AX",
+      "max_length": 30,
+      "vpaid_max_load_time": 10,
+      "vpaid_max_start_time": 20,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_ad_skippable_state": false,
+      "send_stat_method": "image",
+      "timer": 15
+    },
+    {
+      "title_small": "mp",
+      "src": "https://yandex.ru/ads/adfox/12359998/getCode?p1=dgbye&p2=jjsh",
+      "async_load": true,
+      "max_length": 40,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 10,
+      "vpaid_max_start_time": 20,
+      "hide_interface": true
+    },
+    {
+      "title_small": "wip",
+      "async_load": true,
+      "timer": 15,
+      "src": "https://flyroll.ru/vast/vpaid.xml?host=doramy.club&rnd=387182",
+      "max_length": 40,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10,
+      "send_stat_method": "image",
+      "hide_interface": true
+    },
+    {
+      "title_small": "tm4",
+      "async_load": true,
+      "timer": 15,
+      "src": "https://ssp.surfy.space/ssp/vast?ssp=255",
+      "max_length": 60,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10,
+      "hide_interface": true
+    },
+    {
+      "title_small": "mp2",
+      "src": "https://yandex.ru/ads/adfox/12359998/getCode?p1=dgbyd&p2=jjsh",
+      "async_load": true,
+      "max_length": 40,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 10,
+      "vpaid_max_start_time": 20,
+      "hide_interface": true
+    },
+    {
+      "title_small": "mp_uzaz",
+      "src": "https://adx.stack.bidster.net/vast/a2995884-f8cf-4fa4-bd76-ca460bd687f1?domain=doramy.club",
+      "async_load": true,
+      "max_length": 60,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10,
+      "hide_interface": true
+    },
+    {
+      "title_small": "moe_res",
+      "src": "https://ad.moe.video/vast?pid=10187&vpt=pre&advertCount=1&backendCount=3&vt=vpaid&vl=1&deviceMode=all&background=none&rnd=5175&referer=https%3A%2F%2Fkodikplayer.com%2F&vcu=https%3A%2F%2Fkodikplayer.com%2F&vcd=1200",
+      "async_load": true,
+      "max_length": 40,
+      "vpaid_start_event": "AdVideoStart",
+      "vpaid_timer_start_event": "AdVideoStart",
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 20,
+      "vpaid_max_start_time": 120,
+      "hide_interface": true,
+      "advert_id": "moevideo_ult",
+      "start_muted": true
+    },
+    {
+      "title_small": "adp",
+      "src": "https://xcec.ru/vpaids/vpaid50B.php?id=2353",
+      "max_length": 60,
+      "vpaid_max_load_time": 10,
+      "vpaid_max_start_time": 20,
+      "vpaid_start_event": "AdVideoStart",
+      "vpaid_impression_event": "adp_ads_viewed",
+      "vpaid_target_event": "adp_ads_viewed",
+      "hide_interface": true,
+      "async_load": true
+    },
+    {
+      "title_small": "seed-n",
+      "src": "https://ssp.adseedtech.com/vast/e60f8a3a-ccdc-4d5f-b2eb-26268f630605?domain=kodikplayer.com&page=https%3A%2F%2Fkodikplayer.com%2F",
+      "async_load": true,
+      "max_length": 30,
+      "vpaid_start_event": "AdImpression",
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 5,
+      "vpaid_max_start_time": 10,
+      "timer": 15
+    },
+    {
+      "title_small": "rock-a",
+      "src": "https://vast.ufouxbwn.com/vast.php?partner_id=5639530&ad_type=native&tip=white,gray,black&ref=https%3A%2F%2Fkodikplayer.com%2F&real_source=https%3A%2F%2Fkodikplayer.com%2F&cid=8228,tt0113568#2rSBPW8YPAp",
+      "vpaid_max_load_time": 10,
+      "vpaid_max_start_time": 20,
+      "vpaid_start_event": "AdStarted",
+      "vpaid_target_event": "AdImpression",
+      "hide_interface": true,
+      "async_load": true,
+      "start_muted": false,
+      "timer": 20,
+      "stop_timer_on_pause": true,
+      "send_stat_method": "image"
+    },
+    {
+      "title_small": "view_ru",
+      "async_load": true,
+      "timer": 10,
+      "src": "https://r5.adstag0102.xyz/code/video-steam/?id=15&vast=3&channel1=kodikplayer.com",
+      "max_length": 40,
+      "vpaid_target_event": "AdImpression",
+      "vpaid_max_load_time": 10,
+      "vpaid_max_start_time": 20
+    },
+    {
+      "title_small": "adp",
+      "src": "https://xcec.ru/vpaids/vpaid50B.php?id=2175",
+      "max_length": 60,
+      "vpaid_max_load_time": 10,
+      "vpaid_max_start_time": 20,
+      "vpaid_start_event": "AdVideoStart",
+      "vpaid_impression_event": "adp_ads_viewed",
+      "vpaid_target_event": "adp_ads_viewed",
+      "hide_interface": true,
+      "async_load": true
+    }
+  ],
+  "ip": "31.76.20.11"
+}

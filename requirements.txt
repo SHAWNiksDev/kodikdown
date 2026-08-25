@@ -1,4 +1,0 @@
-yt-dlp
-playwright
-colorama
-requests
