@@ -5,6 +5,7 @@ import re
 from typing import ClassVar
 
 import httpx
+import pyperclip
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -49,6 +50,21 @@ class KodikDownApp(App[None]):
     }
     #url-input:focus { border: round $accent; }
     .url-row Button { min-width: 14; }
+    #paste-btn { min-width: 10; }
+    /* The default tall button borders (eighth blocks) look like dotted
+       lines in the stock Windows console font, so use solid ones. */
+    Button, Button:hover, Button:focus, Button:disabled {
+        border: solid $panel !important;
+    }
+    Button.-primary, Button.-primary:hover, Button.-primary:focus {
+        border: solid $primary !important;
+    }
+    Button.-success, Button.-success:hover, Button.-success:focus {
+        border: solid $success !important;
+    }
+    Button.-error, Button.-error:hover, Button.-error:focus {
+        border: solid $error !important;
+    }
     #status {
         height: auto; margin-bottom: 1; padding: 0 1;
         color: $text-muted; width: 1fr;
@@ -122,6 +138,7 @@ class KodikDownApp(App[None]):
         with VerticalScroll(id="main-scroll"):
             with Horizontal(classes="url-row"):
                 yield Input(placeholder=t("url_placeholder"), id="url-input")
+                yield Button(t("paste"), id="paste-btn")
                 yield Button(t("resolve"), variant="primary", id="resolve-btn")
                 yield Button(t("settings_title"), id="settings-btn")
             yield Static("", id="status")
@@ -157,6 +174,22 @@ class KodikDownApp(App[None]):
     @on(Button.Pressed, "#settings-btn")
     def _settings_button(self) -> None:
         self.action_open_settings()
+
+    @on(Button.Pressed, "#paste-btn")
+    def _paste_clicked(self) -> None:
+        try:
+            text = (pyperclip.paste() or "").strip()
+        except Exception:
+            self.notify(t("paste_failed"), severity="error")
+            return
+        if not text:
+            self.notify(t("paste_empty"), severity="warning")
+            return
+        field = self.query_one("#url-input", Input)
+        pos = min(field.cursor_position, len(field.value))
+        field.value = field.value[:pos] + text + field.value[pos:]
+        field.cursor_position = pos + len(text)
+        field.focus()
 
     @on(Button.Pressed, "#resolve-btn")
     def _resolve_clicked(self) -> None:
