@@ -26,8 +26,11 @@ def decode_stream_url(encoded: str) -> str | None:
     The player rotates latin letters by an unknown shift and hides the result
     in base64, so we brute-force the shift and keep whatever yields a URL.
     """
+    text = encoded.strip().replace(" ", "").replace("\n", "")
+    if not text or len(text) < 8:
+        return None
     for shift in range(_SHIFT_BOUND):
-        padded = caesar(encoded, shift)
+        padded = caesar(text, shift)
         padded += "=" * (-len(padded) % 4)
         try:
             decoded = base64.b64decode(padded).decode("utf-8")

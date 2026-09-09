@@ -59,6 +59,7 @@ class KodikClient:
             timeout=httpx.Timeout(15.0),
             follow_redirects=True,
         )
+        self._owns_http = http is None
         self._endpoint_cache: dict[str, str] = {}
 
     async def __aenter__(self) -> KodikClient:
@@ -68,7 +69,8 @@ class KodikClient:
         await self.close()
 
     async def close(self) -> None:
-        await self._http.aclose()
+        if self._owns_http:
+            await self._http.aclose()
 
     async def resolve(self, raw_url: str) -> ResolvedVideo:
         embed = extract_embed(raw_url)
@@ -108,8 +110,7 @@ class KodikClient:
 
             if isinstance(body, dict):
                 return body
-
-            last_error = PageStructureError(f"unexpected video-info reply: {str(body)[:120]!r}")
+            raise PageStructureError(f"unexpected video-info reply: {str(body)[:120]!r}")
         raise RequestFailedError(f"video-info request failed: {last_error}") from last_error
 
     async def _endpoint_for(self, domain: str, payload: PlayerPayload, html: str) -> str:
@@ -117,13 +118,15 @@ class KodikClient:
         if cached:
             return cached
         js_path = extract_player_js_path(html)
-        player_js = await self._get_text(f"https://{domain}/{js_path}")
+        player_js = await self._get_text(
+            f"https://{domain}/{js_path}", referer=f"https://{domain}/"
+        )
         self._endpoint_cache[domain] = extract_endpoint(player_js)
         return self._endpoint_cache[domain]
 
-    async def _get_text(self, url: str) -> str:
+    async def _get_text(self, url: str, referer: str | None = None) -> str:
         try:
-            response = await self._http.get(url, headers={"Referer": url})
+            response = await self._http.get(url, headers={"Referer": referer or url})
             response.raise_for_status()
             return response.text
         except httpx.HTTPStatusError as exc:

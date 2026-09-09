@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import re
 from typing import ClassVar
 
 import httpx
@@ -8,7 +9,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Footer, Header, Input, Label, RadioSet, Static
+from textual.widgets import Button, Footer, Header, Input, Label, RadioButton, RadioSet, Static
 
 from kodikdown import __version__
 from kodikdown.config import ConfigStore, Settings
@@ -22,9 +23,11 @@ from kodikdown.kodik.errors import (
     PageStructureError,
     RequestFailedError,
 )
-from kodikdown.kodik.models import ResolvedVideo
+from kodikdown.kodik.models import ResolvedVideo, referer_for
 from kodikdown.ui.settings import SettingsScreen
 from kodikdown.ui.widgets import DownloadCard
+
+_QUALITY_NUM_RE = re.compile(r"(\d+)")
 
 
 class KodikDownApp(App[None]):
@@ -197,7 +200,10 @@ class KodikDownApp(App[None]):
         self._chosen_quality = resolved.variants[0].quality
 
         container = self.query_one("#result", VerticalScroll)
-        options = [self._quality_option(variant.quality) for variant in resolved.variants]
+        options = [
+            RadioButton(f"{variant.quality}p", value=(i == 0))
+            for i, variant in enumerate(resolved.variants)
+        ]
         title = resolved.title or t("title_unknown")
         if len(title) > 62:
             title = title[:61].rstrip() + "…"
@@ -211,21 +217,18 @@ class KodikDownApp(App[None]):
         container.add_class("populated")
         container.scroll_visible()
 
-    @staticmethod
-    def _quality_option(quality: int) -> str:
-        return f"{quality}p"
-
     def _clear_result(self) -> None:
         self._resolved = None
+        self._chosen_quality = None
         container = self.query_one("#result", VerticalScroll)
         container.remove_class("populated")
         container.remove_children()
 
     @on(RadioSet.Changed, "#quality-set")
     def _quality_selected(self, event: RadioSet.Changed) -> None:
-        label = str(event.pressed.label).strip().rstrip("pP")
-        if label.isdigit():
-            self._chosen_quality = int(label)
+        found = _QUALITY_NUM_RE.search(str(event.pressed.label))
+        if found:
+            self._chosen_quality = int(found.group(1))
 
     @on(Button.Pressed, "#download-btn")
     def _start_download(self) -> None:
@@ -243,13 +246,12 @@ class KodikDownApp(App[None]):
         card = DownloadCard(title, variant.quality, url=variant.url)
         self.query_one("#downloads", Vertical).mount(card)
 
-        referer = f"https://{variant.url.split('//', 1)[-1].split('/', 1)[0]}/"
         downloader = Downloader(
             output_dir=self.settings.download_dir,
             listener=functools.partial(self.call_from_thread, card.push_progress),
             cancel_event=card.cancel_event,
         )
-        self._run_download(downloader, card, variant.url, title, referer)
+        self._run_download(downloader, card, variant.url, title, referer_for(variant.url))
 
     @work(thread=True, exclusive=False, group="downloads")
     def _run_download(

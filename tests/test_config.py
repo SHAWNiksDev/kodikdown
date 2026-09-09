@@ -46,3 +46,9 @@ def test_updated_returns_new_instance(tmp_path: Path) -> None:
     changed = base.updated(download_dir=tmp_path / "other")
     assert base.download_dir == tmp_path / "videos"
     assert changed.download_dir == tmp_path / "other"
+
+
+def test_load_falls_back_on_bad_type(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"download_dir": 12345}), encoding="utf-8")
+    assert ConfigStore(path).load().download_dir == default_download_dir()

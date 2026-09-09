@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from kodikdown.kodik.models import EmbedInfo, ResolvedVideo, StreamVariant
+from kodikdown.kodik.models import EmbedInfo, ResolvedVideo, StreamVariant, referer_for
 
 HASH = "a" * 32
 
@@ -31,6 +31,18 @@ def test_pick_falls_back_to_closest_lower(resolved: ResolvedVideo) -> None:
 
 def test_pick_without_preference_returns_best(resolved: ResolvedVideo) -> None:
     assert resolved.pick(None).quality == 720
+
+
+def test_pick_below_all_returns_smallest(resolved: ResolvedVideo) -> None:
+    assert resolved.pick(200).quality == 360
+
+
+def test_referer_for_uses_manifest_host() -> None:
+    assert (
+        referer_for("https://cdn.example.com/a/720.mp4:hls:manifest.m3u8")
+        == "https://cdn.example.com/"
+    )
+    assert referer_for("//cdn.example.com/x.m3u8") == "https://cdn.example.com/"
 
 
 def test_embed_page_url_appends_quality_only_when_known() -> None:

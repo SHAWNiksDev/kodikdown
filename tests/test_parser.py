@@ -70,6 +70,15 @@ def test_extract_endpoint_from_bundle(player_js_snippet: str) -> None:
     assert extract_endpoint(player_js_snippet) == "/ftor"
 
 
+def test_extract_endpoint_skips_decoy_atob() -> None:
+    import base64
+
+    decoy = base64.b64encode(b"/static/logo.png").decode()
+    real = base64.b64encode(b"/ftor").decode()
+    bundle = f'var img=atob("{decoy}");$.ajax({{url:atob("{real}")}});'
+    assert extract_endpoint(bundle) == "/ftor"
+
+
 def test_extract_endpoint_raises_on_unrelated_script() -> None:
     with pytest.raises(PageStructureError):
         extract_endpoint("console.log('hello'); $.ajax({type:'POST'});")
@@ -78,3 +87,29 @@ def test_extract_endpoint_raises_on_unrelated_script() -> None:
 def test_extract_title_ignores_generic_names() -> None:
     assert extract_title("<title>Kodik Player</title>") is None
     assert extract_title("<title>Ван-Пис 1024 серия</title>") == "Ван-Пис 1024 серия"
+
+
+def test_extract_title_unescapes_entities() -> None:
+    assert extract_title("<title>Fish &amp; Chips</title>") == "Fish & Chips"
+
+
+def test_extract_title_falls_back_to_og_title() -> None:
+    page = '<html><head><meta property="og:title" content="Моё видео"></head></html>'
+    assert extract_title(page) == "Моё видео"
+
+
+def test_extract_embed_bare_domain_without_scheme() -> None:
+    info = extract_embed(f"kodik.info/video/91873/{HASH}/720p")
+    assert info.domain == "kodik.info"
+    assert info.quality == 720
+
+
+def test_extract_embed_new_mirror_domain() -> None:
+    info = extract_embed(f"https://aniqit.com/video/27068/{HASH}/720p")
+    assert info.domain == "aniqit.com"
+    assert info.page_url == f"https://aniqit.com/video/27068/{HASH}/720p"
+
+
+def test_extract_player_js_fallback_pattern() -> None:
+    page = '<script src="/assets/js/app.custom_player.123.js"></script>'
+    assert extract_player_js_path(page) == "assets/js/app.custom_player.123.js"

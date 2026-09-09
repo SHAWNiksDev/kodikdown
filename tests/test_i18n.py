@@ -13,5 +13,13 @@ def test_t_unknown_key_returns_key() -> None:
 
 
 def test_catalog_covers_cli_and_ui_messages() -> None:
-    for key in ("resolve", "download", "settings_title", "cli_download_done", "cancel"):
+    for key in (
+        "resolve",
+        "download",
+        "settings_title",
+        "cli_download_done",
+        "cli_quality_fallback",
+        "cli_qualities",
+        "cancel",
+    ):
         assert key in _CATALOG

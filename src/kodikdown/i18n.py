@@ -33,6 +33,8 @@ _CATALOG: Translations = {
     "cli_invalid_url": "Could not recognize the player link.",
     "cli_download_done": "Saved to {path}",
     "cli_quality_unavailable": "Available qualities: {list}",
+    "cli_quality_fallback": "Wanted {wanted}p, using {picked}p. Available: {list}",
+    "cli_qualities": "{title}: {list}",
 }
 
 

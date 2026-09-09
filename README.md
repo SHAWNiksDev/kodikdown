@@ -59,6 +59,8 @@ For scripts and one-off downloads there is a CLI:
 
 ```bash
 kodikdown download "https://kodik.info/video/91873/060c.../720p" -q 720 -o ~/Videos
+kodikdown download "<url>" --list-qualities   # just show what the server has
+kodikdown download "<url>" --print-url -q 480  # print the direct manifest URL
 ```
 
 Settings live in the standard config location (`~/.config/kodikdown/settings.json`
@@ -81,7 +83,7 @@ discovered from the live bundle on every lookup and cached per domain.
 
 ```bash
 pip install -e '.[dev]'
-pytest          # 48 tests, includes a real HLS download through a local server
+pytest          # 57 tests, includes a real HLS download through a local server
 ruff check src tests
 ruff format --check src tests
 mypy            # strict mode
@@ -147,6 +149,8 @@ kodikdown
 
 ```bash
 kodikdown download "https://kodik.info/video/91873/060c.../720p" -q 720 -o ~/Видео
+kodikdown download "<ссылка>" --list-qualities   # только показать качества
+kodikdown download "<ссылка>" --print-url -q 480  # напечатать прямую ссылку
 ```
 
 ## Как это устроено

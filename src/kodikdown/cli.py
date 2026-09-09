@@ -19,7 +19,7 @@ from kodikdown.kodik.errors import (
     PageStructureError,
     RequestFailedError,
 )
-from kodikdown.kodik.models import ResolvedVideo
+from kodikdown.kodik.models import ResolvedVideo, referer_for
 from kodikdown.ui.app import launch_tui
 
 app = typer.Typer(
@@ -55,6 +55,12 @@ def download(
         Path | None,
         typer.Option("--output", "-o", file_okay=False, dir_okay=True),
     ] = None,
+    list_qualities: Annotated[
+        bool, typer.Option("--list-qualities", "-l", help="Show qualities and exit.")
+    ] = False,
+    print_url: Annotated[
+        bool, typer.Option("--print-url", help="Print the direct manifest URL and exit.")
+    ] = False,
 ) -> None:
     """Resolve one link and save the video without opening the interface."""
     settings: Settings = ConfigStore().load()
@@ -71,21 +77,27 @@ def download(
         typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(4) from None
 
-    variant = resolved.pick(quality)
-    if (
-        quality is not None
-        and variant.quality != quality
-        and quality not in {v.quality for v in resolved.variants}
-    ):
+    if list_qualities:
         available = ", ".join(f"{v.quality}p" for v in resolved.variants)
-        typer.echo(t("cli_quality_unavailable", list=available))
+        typer.echo(t("cli_qualities", title=resolved.title or "video", list=available))
+        return
+
+    variant = resolved.pick(quality)
+    if print_url:
+        typer.echo(variant.url)
+        return
+
+    if quality is not None and variant.quality != quality:
+        available = ", ".join(f"{v.quality}p" for v in resolved.variants)
+        typer.echo(
+            t("cli_quality_fallback", wanted=quality, picked=variant.quality, list=available)
+        )
 
     title = resolved.title or "kodik-video"
-    referer = f"https://{variant.url.split('//', 1)[-1].split('/', 1)[0]}/"
     downloader = Downloader(output_dir=target_dir)
 
     try:
-        path = downloader.download_blocking(variant.url, title, referer)
+        path = downloader.download_blocking(variant.url, title, referer_for(variant.url))
     except (KeyboardInterrupt, DownloadCancelled):
         downloader.cancel()
         typer.secho("cancelled", fg=typer.colors.YELLOW, err=True)

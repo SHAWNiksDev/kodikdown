@@ -21,12 +21,25 @@ ProgressListener = Callable[[ProgressSnapshot], None]
 
 _ILLEGAL_FS_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
+# Windows does not allow these names even with a fine extension.
+_RESERVED_NAMES = {
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
+
 
 def safe_filename(name: str, fallback: str = "video") -> str:
     cleaned = _ILLEGAL_FS_CHARS.sub("_", name).strip(" .")
     cleaned = re.sub(r"\s+", " ", cleaned)[:120]
     if not cleaned or set(cleaned) == {"_"}:
         return fallback
+    base = cleaned.split(".", 1)[0].strip().lower()
+    if base in _RESERVED_NAMES:
+        cleaned = f"_{cleaned}"
     return cleaned
 
 
@@ -62,14 +75,23 @@ class Downloader:
         return await asyncio.to_thread(self.download_blocking, url, title, referer)
 
     def download_blocking(self, url: str, title: str, referer: str) -> Path:
+        if self.cancelled:
+            raise DownloadCancelled
         stem = safe_filename(title)
         target_base = self.output_dir / stem
+        before = (
+            set(target_base.parent.glob(f"{target_base.name}.*"))
+            if target_base.parent.exists()
+            else set()
+        )
         options = {
             "format": "best",
             "outtmpl": f"{target_base}.%(ext)s",
-            "concurrent_fragment_downloads": 16,
+            "concurrent_fragment_downloads": 8,
             "retries": 10,
             "fragment_retries": 10,
+            # Short timeout so a stalled server (or a cancel during a stall)
+            # fails fast instead of hanging.
             "socket_timeout": 10,
             "http_chunk_size": 10 * 1024 * 1024,
             "hls_prefer_native": True,
@@ -78,6 +100,7 @@ class Downloader:
             "noprogress": True,
             "http_headers": {"Referer": referer},
             "progress_hooks": [self._hook],
+            "postprocessor_hooks": [self._pp_hook],
         }
         self.output_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -88,9 +111,11 @@ class Downloader:
         except yt_dlp.utils.DownloadError as exc:
             raise DownloadFailed(str(exc).replace("ERROR: ", "", 1)) from exc
 
-        produced = sorted(
+        after = sorted(
             target_base.parent.glob(f"{target_base.name}.*"), key=lambda p: p.stat().st_mtime
         )
+        fresh = [p for p in after if p not in before]
+        produced = fresh or after
         if not produced:
             raise FileNotFoundError(f"yt-dlp finished but no file matched {target_base.name}.*")
         return produced[-1].resolve()
@@ -102,6 +127,12 @@ class Downloader:
             return
         downloaded = status.get("downloaded_bytes")
         total = status.get("total_bytes") or status.get("total_bytes_estimate")
+        # HLS downloads sometimes report only fragment counters.
+        if downloaded is None:
+            index = status.get("fragment_index")
+            count = status.get("fragment_count")
+            if isinstance(index, (int, float)) and isinstance(count, (int, float)) and count:
+                downloaded, total = int(index), int(count)
         speed = status.get("speed")
         self._listener(
             ProgressSnapshot(
@@ -110,3 +141,9 @@ class Downloader:
                 speed=float(speed) if isinstance(speed, (int, float)) else None,
             )
         )
+
+    def _pp_hook(self, status: dict[str, object]) -> None:
+        # Postprocessors (ffmpeg fixup/merge) report rarely, but when they do,
+        # a pending cancel should still stop the job.
+        if self.cancelled:
+            raise yt_dlp.utils.DownloadCancelled()

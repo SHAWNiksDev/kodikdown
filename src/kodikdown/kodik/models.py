@@ -1,6 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import urlparse
+
+
+def referer_for(stream_url: str) -> str:
+    """Referer header yt-dlp should send for a resolved manifest URL."""
+    host = urlparse(stream_url).hostname or ""
+    if not host:
+        # Fallback for protocol-relative or odd URLs.
+        tail = stream_url.split("//", 1)[-1]
+        host = tail.split("/", 1)[0]
+    return f"https://{host}/" if host else "https://kodik.info/"
 
 
 @dataclass(frozen=True)
@@ -55,9 +66,13 @@ class ResolvedVideo:
 
     @property
     def best(self) -> StreamVariant:
+        if not self.variants:
+            raise IndexError("no variants available")
         return self.variants[0]
 
     def pick(self, quality: int | None) -> StreamVariant:
+        if not self.variants:
+            raise IndexError("no variants available")
         if quality is not None:
             exact = [v for v in self.variants if v.quality == quality]
             if exact:
@@ -65,4 +80,7 @@ class ResolvedVideo:
             lower = [v for v in self.variants if v.quality < quality]
             if lower:
                 return lower[0]
+            # Asked for less than we have (e.g. 200p when only 360p+ exists):
+            # give the smallest file instead of the biggest one.
+            return self.variants[-1]
         return self.best

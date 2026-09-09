@@ -39,9 +39,9 @@ class ConfigStore:
             stored = {}
 
         raw_directory = stored.get("download_dir")
-        return Settings(
-            download_dir=Path(str(raw_directory)) if raw_directory else default_download_dir(),
-        )
+        if isinstance(raw_directory, str) and raw_directory.strip():
+            return Settings(download_dir=Path(raw_directory).expanduser())
+        return Settings(download_dir=default_download_dir())
 
     def save(self, settings: Settings) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

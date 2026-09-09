@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import threading
 
 from textual.app import ComposeResult
@@ -65,16 +66,19 @@ class DownloadCard(Widget):
             yield Button(t("cancel"), variant="error", classes="card-cancel", id="card-cancel")
 
     def push_progress(self, snapshot: ProgressSnapshot) -> None:
-        if self._bar is None:
-            self._bar = self.query_one(".card-progress", ProgressBar)
-        if snapshot.total:
-            self._bar.update(total=snapshot.total, progress=snapshot.downloaded)
-        else:
-            self._bar.update(progress=snapshot.downloaded)
-        speed_text = format_speed(snapshot.speed)
-        if self._speed_label is None:
-            self._speed_label = self.query_one(".card-speed", Label)
-        self._speed_label.update(speed_text)
+        try:
+            if self._bar is None:
+                self._bar = self.query_one(".card-progress", ProgressBar)
+            if snapshot.total:
+                self._bar.update(total=snapshot.total, progress=snapshot.downloaded)
+            else:
+                self._bar.update(progress=snapshot.downloaded)
+            if self._speed_label is None:
+                self._speed_label = self.query_one(".card-speed", Label)
+            self._speed_label.update(format_speed(snapshot.speed))
+        except Exception:
+            # Card was already closed or not mounted yet.
+            return
 
     def mark_done(self, path: str) -> None:
         self._finish_with(t("saved_to", path=path))
@@ -90,9 +94,11 @@ class DownloadCard(Widget):
 
     def _finish_with(self, message: str) -> None:
         self.cancel_event.set()
-        self.remove_children()
+        for child in list(self.children):
+            child.remove()
         self.add_class("card-done")
-        self.mount(Label(message, classes="card-status"))
+        with contextlib.suppress(Exception):
+            self.mount(Label(message, classes="card-status"))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
