@@ -39,6 +39,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Install ffmpeg (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
       - run: pip install -e '.[dev]'
+      - run: ffmpeg -version
+      - run: ffprobe -version
       - run: pytest
