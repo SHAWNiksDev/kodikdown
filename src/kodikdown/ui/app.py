@@ -6,7 +6,7 @@ from typing import ClassVar
 
 import httpx
 import pyperclip
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -129,9 +129,13 @@ class KodikDownApp(App[None]):
         super().__init__()
         self.store = store or ConfigStore()
         self.settings: Settings = self.store.load()
+        self._client = KodikClient()
         self._resolved: ResolvedVideo | None = None
         self._chosen_quality: int | None = None
         self._active_urls: set[str] = set()
+
+    async def on_unmount(self, event: events.Unmount) -> None:
+        await self._client.close()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -211,8 +215,7 @@ class KodikDownApp(App[None]):
     @work(exclusive=True, group="resolve")
     async def _resolve_worker(self, raw: str) -> None:
         try:
-            async with KodikClient() as client:
-                resolved = await client.resolve(raw)
+            resolved = await self._client.resolve(raw)
         except InvalidUrlError:
             self._set_status("invalid_url", error=True)
         except NoStreamsError:
@@ -225,6 +228,8 @@ class KodikDownApp(App[None]):
             self._set_status("network_error", error=True, detail=str(exc.__cause__ or exc))
         except KodikError as exc:
             self._set_status("failed", error=True, detail=str(exc))
+        except Exception as exc:
+            self._set_status("unexpected_error", error=True, detail=str(exc))
         else:
             self._show_result(resolved)
 

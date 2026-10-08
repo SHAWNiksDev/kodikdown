@@ -25,6 +25,7 @@ _CATALOG: Translations = {
     "cancelled": "Download cancelled",
     "saved_to": "Done: {path}",
     "failed": "Download failed: {detail}",
+    "unexpected_error": "Something went wrong: {detail}",
     "already_downloading": "Already downloading this video",
     "settings_title": "Settings",
     "download_dir": "Download folder",

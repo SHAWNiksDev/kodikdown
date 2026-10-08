@@ -14,15 +14,7 @@ from kodikdown.kodik.parser import (
     extract_player_js_path,
     extract_title,
 )
-
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-)
-DEFAULT_HEADERS = {
-    "User-Agent": USER_AGENT,
-    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-}
+from kodikdown.net import DEFAULT_HEADERS
 
 
 def build_variants(data: dict[str, Any]) -> tuple[StreamVariant, ...]:
@@ -44,8 +36,10 @@ def build_variants(data: dict[str, Any]) -> tuple[StreamVariant, ...]:
 
     variants.sort(key=lambda v: v.quality, reverse=True)
     unique: list[StreamVariant] = []
+    seen_qualities: set[int] = set()
     for variant in variants:
-        if variant.url not in {existing.url for existing in unique}:
+        if variant.quality not in seen_qualities:
+            seen_qualities.add(variant.quality)
             unique.append(variant)
     return tuple(unique)
 
@@ -61,6 +55,7 @@ class KodikClient:
         )
         self._owns_http = http is None
         self._endpoint_cache: dict[str, str] = {}
+        self._page_cache: dict[str, str] = {}
 
     async def __aenter__(self) -> KodikClient:
         return self
@@ -74,7 +69,12 @@ class KodikClient:
 
     async def resolve(self, raw_url: str) -> ResolvedVideo:
         embed = extract_embed(raw_url)
-        html = await self._get_text(embed.page_url)
+        html = self._page_cache.get(embed.page_url)
+        if html is None:
+            html = await self._get_text(embed.page_url)
+            if len(self._page_cache) >= 32:
+                self._page_cache.clear()
+            self._page_cache[embed.page_url] = html
         payload = extract_payload(html) or PlayerPayload(
             embed.media_type, embed.video_id, embed.content_hash
         )
@@ -103,14 +103,20 @@ class KodikClient:
                 )
                 response.raise_for_status()
                 body = response.json()
-            except httpx.HTTPError as exc:
+            except (httpx.HTTPError, ValueError) as exc:
+                # A non-JSON reply usually means we hit a stale endpoint,
+                # so drop it and discover a fresh one on the next pass.
                 last_error = exc
                 self._endpoint_cache.pop(domain, None)
                 continue
 
             if isinstance(body, dict):
                 return body
-            raise PageStructureError(f"unexpected video-info reply: {str(body)[:120]!r}")
+            last_error = PageStructureError(f"unexpected video-info reply: {str(body)[:120]!r}")
+            self._endpoint_cache.pop(domain, None)
+
+        if isinstance(last_error, PageStructureError):
+            raise last_error
         raise RequestFailedError(f"video-info request failed: {last_error}") from last_error
 
     async def _endpoint_for(self, domain: str, payload: PlayerPayload, html: str) -> str:
