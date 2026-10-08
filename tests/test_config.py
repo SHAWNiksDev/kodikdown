@@ -46,9 +46,25 @@ def test_load_ignores_unknown_keys(tmp_path: Path) -> None:
 
 def test_updated_returns_new_instance(tmp_path: Path) -> None:
     base = Settings(download_dir=tmp_path / "videos")
-    changed = base.updated(download_dir=tmp_path / "other")
+    changed = base.updated(download_dir=tmp_path / "other", language="ru")
     assert base.download_dir == tmp_path / "videos"
+    assert base.language == "auto"
     assert changed.download_dir == tmp_path / "other"
+    assert changed.language == "ru"
+
+
+def test_language_roundtrip(tmp_path: Path) -> None:
+    store = ConfigStore(tmp_path / "settings.json")
+    store.save(Settings(download_dir=tmp_path / "videos", language="ru"))
+
+    assert store.load().language == "ru"
+
+
+def test_load_falls_back_on_unknown_language(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"download_dir": "/tmp/ok", "language": "klingon"}), "utf-8")
+
+    assert ConfigStore(path).load().language == "auto"
 
 
 def test_load_falls_back_on_bad_type(tmp_path: Path) -> None:

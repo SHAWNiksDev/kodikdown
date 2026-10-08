@@ -16,18 +16,24 @@ def default_download_dir() -> Path:
     return base / "KodikDown"
 
 
+LANGUAGE_CHOICES = ("auto", "en", "ru")
+
+
 @dataclass(frozen=True)
 class Settings:
     download_dir: Path = field(default_factory=default_download_dir)
+    language: str = "auto"
 
     def updated(
         self,
         *,
         download_dir: Path | None = None,
+        language: str | None = None,
     ) -> Settings:
         return replace(
             self,
             download_dir=self.download_dir if download_dir is None else download_dir,
+            language=self.language if language is None else language,
         )
 
 
@@ -42,14 +48,25 @@ class ConfigStore:
             stored = {}
 
         raw_directory = stored.get("download_dir")
-        if isinstance(raw_directory, str) and raw_directory.strip():
-            return Settings(download_dir=Path(raw_directory).expanduser())
-        return Settings(download_dir=default_download_dir())
+        download_dir = (
+            Path(raw_directory).expanduser()
+            if isinstance(raw_directory, str) and raw_directory.strip()
+            else default_download_dir()
+        )
+
+        raw_language = stored.get("language")
+        language = raw_language if raw_language in LANGUAGE_CHOICES else "auto"
+        return Settings(download_dir=download_dir, language=language)
 
     def save(self, settings: Settings) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(
-            {"download_dir": str(settings.download_dir)}, indent=2, ensure_ascii=False
+            {
+                "download_dir": str(settings.download_dir),
+                "language": settings.language,
+            },
+            indent=2,
+            ensure_ascii=False,
         )
         # Write next to the target and replace, so a crash mid-write cannot
         # leave a half-saved settings file behind.
