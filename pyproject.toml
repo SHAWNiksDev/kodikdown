@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kodikdown"
-version = "2.2.1"
+version = "2.2.2"
 description = "Terminal app for resolving and downloading videos from Kodik players"
 readme = "README.md"
 license = { text = "MIT" }
