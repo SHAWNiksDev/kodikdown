@@ -41,7 +41,7 @@ _GENERIC_TITLE_RE = re.compile(r"^(kodik|kodik\s*player)$", re.IGNORECASE)
 
 def extract_embed(raw: str) -> EmbedInfo:
     """Accept a bare embed URL, a protocol-relative one or a whole iframe tag."""
-    text = raw.strip()
+    text = html.unescape(raw.strip())
     iframe = _IFRAME_SRC_RE.search(text)
     if iframe:
         text = iframe.group("src").strip()

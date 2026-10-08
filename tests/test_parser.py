@@ -36,6 +36,17 @@ def test_extract_embed_from_iframe_tag() -> None:
     assert info.content_hash == HASH
 
 
+def test_extract_embed_from_html_escaped_iframe() -> None:
+    escaped = (
+        f"&lt;iframe src=&quot;https://kodikplayer.com/video/91873/{HASH}/720p&quot; "
+        "width=&quot;607&quot; height=&quot;360&quot;&gt;&lt;/iframe&gt;"
+    )
+    info = extract_embed(escaped)
+    assert info.domain == "kodikplayer.com"
+    assert info.video_id == "91873"
+    assert info.quality == 720
+
+
 def test_extract_embed_season_type() -> None:
     info = extract_embed(f"https://urumain.com/season/7711/{HASH}/480p")
     assert info.media_type == "season"
