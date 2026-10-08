@@ -60,7 +60,7 @@ def test_hook_understands_fragment_counters(tmp_path: Path) -> None:
     snapshots: list[ProgressSnapshot] = []
     downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)
     downloader._hook({"status": "downloading", "fragment_index": 3, "fragment_count": 10})
-    assert snapshots == [ProgressSnapshot(downloaded=3, total=10, speed=None)]
+    assert snapshots == [ProgressSnapshot(downloaded=3, total=10, speed=None, fragments=True)]
 
 
 def _free_port() -> int:

@@ -81,7 +81,7 @@ class KodikDownApp(App[None]):
         color: $text-muted; width: 1fr;
     }
     #status.error { color: $error; }
-    #status.success { color: $success; }
+    #hint { color: $text-disabled; padding: 0 1 1 1; width: 1fr; }
     .section-title { color: $text-muted; text-style: bold; }
     #result { display: none; height: auto; margin-bottom: 1; overflow: hidden; }
     #result.populated {
@@ -115,7 +115,7 @@ class KodikDownApp(App[None]):
         overflow: hidden; text_overflow: ellipsis;
     }
     .card-progress { width: 1fr; }
-    .card-speed { color: $text-muted; }
+    .card-details { color: $text-muted; }
     .card-cancel { max-width: 12; }
     .card-cancel:disabled { opacity: 0.6; }
     .card-status { color: $success; width: 1fr; overflow: hidden; text_overflow: ellipsis; }
@@ -161,6 +161,7 @@ class KodikDownApp(App[None]):
                 yield Button(t("resolve"), variant="primary", id="resolve-btn")
                 yield Button(t("settings_title"), id="settings-btn")
             yield Static("", id="status")
+            yield Static(t("hint"), id="hint")
             yield VerticalScroll(id="result")
             yield Label(t("downloads_section"), classes="section-title", id="downloads-title")
             yield Static(t("downloads_empty"), id="downloads-empty")
@@ -185,6 +186,7 @@ class KodikDownApp(App[None]):
         self.query_one("#paste-btn", Button).label = t("paste")
         self.query_one("#resolve-btn", Button).label = t("resolve")
         self.query_one("#settings-btn", Button).label = t("settings_title")
+        self.query_one("#hint", Static).update(t("hint"))
         self.query_one("#downloads-title", Label).update(t("downloads_section"))
         self.query_one("#downloads-empty", Static).update(t("downloads_empty"))
         # Binding descriptions are immutable, so rebuild the map to translate
@@ -197,16 +199,11 @@ class KodikDownApp(App[None]):
         )
         self.refresh_bindings()
 
-    def _set_status(
-        self, key: str, *, error: bool = False, success: bool = False, **kwargs: object
-    ) -> None:
+    def _set_status(self, key: str, *, error: bool = False, **kwargs: object) -> None:
         status = self.query_one("#status", Static)
         status.remove_class("error")
-        status.remove_class("success")
         if error:
             status.add_class("error")
-        elif success:
-            status.add_class("success")
         status.update(t(key, **kwargs))
 
     @on(Button.Pressed, "#settings-btn")
@@ -270,6 +267,8 @@ class KodikDownApp(App[None]):
     def _show_result(self, resolved: ResolvedVideo) -> None:
         self._resolved = resolved
         self._chosen_quality = resolved.variants[0].quality
+        self._set_status("")
+        self.query_one("#hint", Static).display = False
 
         title = resolved.title or t("title_unknown")
         if len(title) > 62:
@@ -291,7 +290,12 @@ class KodikDownApp(App[None]):
         widgets.append(
             RadioSet(
                 *[
-                    RadioButton(f"{variant.quality}p", value=(i == 0))
+                    RadioButton(
+                        f"{variant.quality}p · {t('best_badge')}"
+                        if i == 0
+                        else f"{variant.quality}p",
+                        value=(i == 0),
+                    )
                     for i, variant in enumerate(resolved.variants)
                 ],
                 id="quality-set",
@@ -319,6 +323,7 @@ class KodikDownApp(App[None]):
     def _clear_result(self) -> None:
         self._resolved = None
         self._chosen_quality = None
+        self.query_one("#hint", Static).display = True
         container = self.query_one("#result", VerticalScroll)
         container.remove_class("populated")
         container.remove_children()

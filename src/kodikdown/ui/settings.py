@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from textual.app import ComposeResult
@@ -9,6 +12,15 @@ from textual.widgets import Button, Input, Label, Select
 
 from kodikdown.config import Settings
 from kodikdown.i18n import t
+
+
+def open_in_file_manager(path: Path) -> None:
+    if sys.platform == "win32":
+        os.startfile(path)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
 
 
 class SettingsScreen(ModalScreen["Settings | None"]):
@@ -34,18 +46,43 @@ class SettingsScreen(ModalScreen["Settings | None"]):
             )
             with Horizontal(classes="settings-actions"):
                 yield Button(t("save"), variant="primary", id="save-btn")
+                yield Button(t("open_folder"), id="open-btn")
                 yield Button(t("back"), id="back-btn")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "save-btn":
-            raw_dir = self.query_one("#dir-input", Input).value.strip()
-            target_dir = Path(raw_dir).expanduser() if raw_dir else self._current.download_dir
-            language = self.query_one("#language-select", Select).value
-            self.dismiss(
-                Settings(
-                    download_dir=target_dir,
-                    language=language if isinstance(language, str) else "auto",
-                )
-            )
+            self._save()
+        elif event.button.id == "open-btn":
+            self._open_download_dir()
         else:
             self.dismiss(None)
+
+    def _selected_dir(self) -> Path:
+        raw_dir = self.query_one("#dir-input", Input).value.strip()
+        return Path(raw_dir).expanduser() if raw_dir else self._current.download_dir
+
+    def _save(self) -> None:
+        target_dir = self._selected_dir()
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.notify(t("folder_not_created", detail=str(exc)), severity="error")
+            return
+
+        language = self.query_one("#language-select", Select).value
+        self.dismiss(
+            Settings(
+                download_dir=target_dir,
+                language=language if isinstance(language, str) else "auto",
+            )
+        )
+
+    def _open_download_dir(self) -> None:
+        target_dir = self._selected_dir()
+        if not target_dir.is_dir():
+            self.notify(t("folder_missing"), severity="warning")
+            return
+        try:
+            open_in_file_manager(target_dir)
+        except OSError as exc:
+            self.notify(t("folder_open_failed", detail=str(exc)), severity="error")

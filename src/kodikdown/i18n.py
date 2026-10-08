@@ -20,8 +20,14 @@ _CATALOG: dict[str, Translations] = {
         "page_changed": "Player changed — could not parse the page",
         "no_streams": "No streams found",
         "quality": "Quality",
+        "best_badge": "best",
         "translation": "Voice-over",
         "download": "Download",
+        "eta": "ETA {time}",
+        "hint": (
+            "Paste a player link or a whole <iframe> tag, for example "
+            "https://kodik.info/video/12345/<hash>/720p"
+        ),
         "downloads_section": "Downloads",
         "downloads_empty": "Finished and active downloads will appear here",
         "cancel": "Cancel",
@@ -64,8 +70,14 @@ _CATALOG: dict[str, Translations] = {
         "page_changed": "Плеер изменился — не удалось разобрать страницу",
         "no_streams": "Ссылки на видео не найдены",
         "quality": "Качество",
+        "best_badge": "лучшее",
         "translation": "Озвучка",
         "download": "Скачать",
+        "eta": "осталось {time}",
+        "hint": (
+            "Вставьте ссылку на плеер или тег <iframe>, например "
+            "https://kodik.info/video/12345/<hash>/720p"
+        ),
         "downloads_section": "Загрузки",
         "downloads_empty": "Здесь появятся активные и завершённые загрузки",
         "cancel": "Отмена",

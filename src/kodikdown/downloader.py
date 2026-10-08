@@ -18,6 +18,7 @@ class ProgressSnapshot:
     downloaded: int = 0
     total: int | None = None
     speed: float | None = None
+    fragments: bool = False
 
 
 ProgressListener = Callable[[ProgressSnapshot], None]
@@ -138,17 +139,20 @@ class Downloader:
         downloaded = status.get("downloaded_bytes")
         total = status.get("total_bytes") or status.get("total_bytes_estimate")
         # HLS downloads sometimes report only fragment counters.
+        fragments = False
         if downloaded is None:
             index = status.get("fragment_index")
             count = status.get("fragment_count")
             if isinstance(index, (int, float)) and isinstance(count, (int, float)) and count:
                 downloaded, total = int(index), int(count)
+                fragments = True
         speed = status.get("speed")
         self._listener(
             ProgressSnapshot(
                 downloaded=int(downloaded) if isinstance(downloaded, (int, float)) else 0,
                 total=int(total) if isinstance(total, (int, float)) else None,
                 speed=float(speed) if isinstance(speed, (int, float)) else None,
+                fragments=fragments,
             )
         )
 

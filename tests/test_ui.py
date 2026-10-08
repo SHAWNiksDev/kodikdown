@@ -107,6 +107,7 @@ async def test_app_starts_in_saved_language(tmp_path: Path) -> None:
 
 async def test_settings_screen_applies_language_live(tmp_path: Path) -> None:
     store = ConfigStore(tmp_path / "settings.json")
+    store.save(Settings(download_dir=tmp_path, language="auto"))
     app = KodikDownApp(store=store)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -126,3 +127,42 @@ async def test_settings_screen_applies_language_live(tmp_path: Path) -> None:
         assert str(title.render()) == "Загрузки"
 
     assert store.load().language == "ru"
+
+
+async def test_settings_rejects_file_as_download_dir(tmp_path: Path) -> None:
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("i am a file", encoding="utf-8")
+    store = ConfigStore(tmp_path / "settings.json")
+    app = KodikDownApp(store=store)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.action_open_settings()
+        await pilot.pause()
+
+        screen = app.screen
+        assert isinstance(screen, SettingsScreen)
+        screen.query_one("#dir-input", Input).value = str(blocker)
+        screen.query_one("#save-btn", Button).press()
+        await pilot.pause()
+
+        assert isinstance(app.screen, SettingsScreen)
+    assert not store.path.exists()
+
+
+async def test_settings_opens_download_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[Path] = []
+    monkeypatch.setattr("kodikdown.ui.settings.open_in_file_manager", opened.append)
+
+    store = ConfigStore(tmp_path / "settings.json")
+    store.save(Settings(download_dir=tmp_path, language="auto"))
+    app = KodikDownApp(store=store)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.action_open_settings()
+        await pilot.pause()
+        app.screen.query_one("#open-btn", Button).press()
+        await pilot.pause()
+
+    assert opened == [tmp_path]
