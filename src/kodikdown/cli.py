@@ -50,7 +50,7 @@ def callback(
 @app.command()
 def download(
     url: Annotated[str, typer.Argument(help="Kodik player link or iframe tag")],
-    quality: Annotated[int | None, typer.Option("--quality", "-q", min=0)] = None,
+    quality: Annotated[int | None, typer.Option("--quality", "-q", min=1)] = None,
     output: Annotated[
         Path | None,
         typer.Option("--output", "-o", file_okay=False, dir_okay=True),
