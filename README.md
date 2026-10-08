@@ -92,7 +92,9 @@ For the curious, the whole lookup is four HTTP requests:
 The endpoint path changes once in a while, so it is never hard-coded — it is
 discovered from the live bundle and cached per player session. The same page
 also lists every voice-over with its own id/hash pair, so switching a
-voice-over reuses the cached page and only re-asks the endpoint.
+voice-over reuses the cached page and only re-asks the endpoint. Note that
+the player only offers voice-overs that actually contain the episode you
+opened — other dubs of the series may not have it.
 
 ## Development
 
@@ -191,7 +193,9 @@ kodikdown download "<ссылка>" --print-url -q 480    # напечатать
 эндпоинта периодически меняется, поэтому он извлекается из живого бандла и
 кэшируется на время сессии. На той же странице лежит список всех озвучек со
 своими парами id/hash: при смене озвучки страница берётся из кэша, а к API
-идёт только один новый запрос.
+идёт только один новый запрос. Учтите: плеер показывает только те озвучки,
+в которых есть открытая вами серия, — у других дублей сериала её может не
+быть.
 
 ## Разработка
 
