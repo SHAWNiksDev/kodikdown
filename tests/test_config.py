@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+
+import pytest
 
 from kodikdown.config import ConfigStore, Settings, default_download_dir
 
@@ -52,3 +55,27 @@ def test_load_falls_back_on_bad_type(tmp_path: Path) -> None:
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"download_dir": 12345}), encoding="utf-8")
     assert ConfigStore(path).load().download_dir == default_download_dir()
+
+
+def test_save_leaves_no_temp_files_behind(tmp_path: Path) -> None:
+    store = ConfigStore(tmp_path / "settings.json")
+    store.save(Settings(download_dir=tmp_path / "videos"))
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["settings.json"]
+
+
+def test_failed_replace_keeps_previous_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = ConfigStore(tmp_path / "settings.json")
+    store.save(Settings(download_dir=tmp_path / "first"))
+
+    def broken_replace(source: object, target: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", broken_replace)
+    with pytest.raises(OSError):
+        store.save(Settings(download_dir=tmp_path / "second"))
+
+    assert store.load().download_dir == tmp_path / "first"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["settings.json"]

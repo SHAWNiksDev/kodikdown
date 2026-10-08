@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import json
-from dataclasses import asdict, dataclass, field, replace
+import os
+import tempfile
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from platformdirs import user_config_dir
@@ -45,6 +48,19 @@ class ConfigStore:
 
     def save(self, settings: Settings) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = asdict(settings)
-        payload["download_dir"] = str(settings.download_dir)
-        self.path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        payload = json.dumps(
+            {"download_dir": str(settings.download_dir)}, indent=2, ensure_ascii=False
+        )
+        # Write next to the target and replace, so a crash mid-write cannot
+        # leave a half-saved settings file behind.
+        handle, temp_name = tempfile.mkstemp(
+            dir=self.path.parent, prefix=f".{self.path.name}.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                stream.write(payload)
+            os.replace(temp_name, self.path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(temp_name)
+            raise
