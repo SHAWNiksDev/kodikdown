@@ -5,9 +5,12 @@ import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from glob import escape as glob_escape
 from pathlib import Path
 
 import yt_dlp
+
+from kodikdown.net import USER_AGENT
 
 
 @dataclass(frozen=True)
@@ -20,6 +23,7 @@ class ProgressSnapshot:
 ProgressListener = Callable[[ProgressSnapshot], None]
 
 _ILLEGAL_FS_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_MEDIA_SUFFIX_RE = re.compile(r"\.(mp4|mkv|webm|avi|mov|m4v|flv|wmv|ts)$", re.IGNORECASE)
 
 # Windows does not allow these names even with a fine extension.
 _RESERVED_NAMES = {
@@ -35,6 +39,7 @@ _RESERVED_NAMES = {
 def safe_filename(name: str, fallback: str = "video") -> str:
     cleaned = _ILLEGAL_FS_CHARS.sub("_", name).strip(" .")
     cleaned = re.sub(r"\s+", " ", cleaned)[:120]
+    cleaned = _MEDIA_SUFFIX_RE.sub("", cleaned).strip(" .")
     if not cleaned or set(cleaned) == {"_"}:
         return fallback
     base = cleaned.split(".", 1)[0].strip().lower()
@@ -79,12 +84,34 @@ class Downloader:
             raise DownloadCancelled
         stem = safe_filename(title)
         target_base = self.output_dir / stem
-        before = (
-            set(target_base.parent.glob(f"{target_base.name}.*"))
-            if target_base.parent.exists()
-            else set()
+        pattern = f"{glob_escape(target_base.name)}.*"
+        before = set(target_base.parent.glob(pattern)) if target_base.parent.exists() else set()
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            options = self._options(target_base, referer)
+            with yt_dlp.YoutubeDL(options) as ydl:
+                ydl.download([url])
+        except yt_dlp.utils.DownloadCancelled as exc:
+            raise DownloadCancelled from exc
+        except yt_dlp.utils.DownloadError as exc:
+            raise DownloadFailed(str(exc).replace("ERROR: ", "", 1)) from exc
+
+        after = sorted(
+            (
+                p
+                for p in target_base.parent.glob(pattern)
+                if not p.name.endswith((".part", ".ytdl"))
+            ),
+            key=lambda p: p.stat().st_mtime,
         )
-        options = {
+        fresh = [p for p in after if p not in before]
+        produced = fresh or after
+        if not produced:
+            raise FileNotFoundError(f"yt-dlp finished but no file matched {target_base.name}.*")
+        return produced[-1].resolve()
+
+    def _options(self, target_base: Path, referer: str) -> dict[str, object]:
+        return {
             "format": "best",
             "outtmpl": f"{target_base}.%(ext)s",
             "concurrent_fragment_downloads": 8,
@@ -98,27 +125,10 @@ class Downloader:
             "quiet": True,
             "no_warnings": True,
             "noprogress": True,
-            "http_headers": {"Referer": referer},
+            "http_headers": {"Referer": referer, "User-Agent": USER_AGENT},
             "progress_hooks": [self._hook],
             "postprocessor_hooks": [self._pp_hook],
         }
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            with yt_dlp.YoutubeDL(options) as ydl:
-                ydl.download([url])
-        except yt_dlp.utils.DownloadCancelled as exc:
-            raise DownloadCancelled from exc
-        except yt_dlp.utils.DownloadError as exc:
-            raise DownloadFailed(str(exc).replace("ERROR: ", "", 1)) from exc
-
-        after = sorted(
-            target_base.parent.glob(f"{target_base.name}.*"), key=lambda p: p.stat().st_mtime
-        )
-        fresh = [p for p in after if p not in before]
-        produced = fresh or after
-        if not produced:
-            raise FileNotFoundError(f"yt-dlp finished but no file matched {target_base.name}.*")
-        return produced[-1].resolve()
 
     def _hook(self, status: dict[str, object]) -> None:
         if self.cancelled:

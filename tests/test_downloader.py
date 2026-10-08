@@ -42,6 +42,20 @@ def test_safe_filename_avoids_windows_reserved_names() -> None:
     assert safe_filename("nul.mp4") != "nul.mp4"
 
 
+def test_safe_filename_drops_media_extension() -> None:
+    assert safe_filename("Show.S01E01.mkv") == "Show.S01E01"
+    assert safe_filename("clip.MP4") == "clip"
+
+
+def test_download_options_send_browser_identity(tmp_path: Path) -> None:
+    downloader = Downloader(output_dir=tmp_path)
+    options = downloader._options(tmp_path / "clip", "https://cdn.example/")
+    headers = options["http_headers"]
+    assert isinstance(headers, dict)
+    assert headers["Referer"] == "https://cdn.example/"
+    assert str(headers["User-Agent"]).startswith("Mozilla/5.0")
+
+
 def test_hook_understands_fragment_counters(tmp_path: Path) -> None:
     snapshots: list[ProgressSnapshot] = []
     downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)
@@ -118,6 +132,21 @@ def test_download_blocking_saves_file(
     assert produced.exists()
     assert produced.stat().st_size > 0
     assert produced.name == "My Test _ Video.mp4"
+
+
+def test_download_blocking_handles_bracketed_title(
+    hls_server: object,
+    tmp_path: Path,
+) -> None:
+    downloader = Downloader(output_dir=tmp_path)
+    produced = downloader.download_blocking(
+        hls_server,
+        "[SubsPlease] Clip - 01",
+        "http://127.0.0.1/",  # type: ignore[arg-type]
+    )
+
+    assert produced.name == "[SubsPlease] Clip - 01.mp4"
+    assert produced.exists()
 
 
 def test_progress_listener_receives_updates(
