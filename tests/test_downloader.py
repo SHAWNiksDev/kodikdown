@@ -199,6 +199,25 @@ def test_pp_hook_ignores_normal_status(tmp_path: Path) -> None:
     assert downloader._pp_hook({"status": "finished"}) is None
 
 
+def test_remove_partials_keeps_finished_files(tmp_path: Path) -> None:
+    finished = tmp_path / "movie.mp4"
+    finished.write_bytes(b"done")
+    decoy = tmp_path / "movie.Part.2.mp4"
+    decoy.write_bytes(b"also done")
+    for name in (
+        "movie.mp4.part",
+        "movie.mp4.ytdl",
+        "movie.mp4.part-Frag3",
+        "movie.mp4.part-Frag4.part",
+        "movie.frag",
+    ):
+        (tmp_path / name).write_bytes(b"junk")
+
+    Downloader(output_dir=tmp_path)._remove_partials(tmp_path / "movie")
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["movie.Part.2.mp4", "movie.mp4"]
+
+
 def test_download_blocking_respects_pre_set_cancel(tmp_path: Path) -> None:
     event = threading.Event()
     event.set()
@@ -282,5 +301,12 @@ def test_cancel_interrupts_slow_download(tmp_path: Path) -> None:
         )
         with pytest.raises(DownloadCancelled):
             downloader.download_blocking(url, "cancelled-video", "http://127.0.0.1/")
+
+        leftovers = [
+            path.name
+            for path in (tmp_path / "out").iterdir()
+            if path.name.startswith("cancelled-video")
+        ]
+        assert leftovers == []
     finally:
         server.shutdown()

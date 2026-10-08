@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import threading
 from collections.abc import Callable
@@ -25,6 +26,12 @@ ProgressListener = Callable[[ProgressSnapshot], None]
 
 _ILLEGAL_FS_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _MEDIA_SUFFIX_RE = re.compile(r"\.(mp4|mkv|webm|avi|mov|m4v|flv|wmv|ts)$", re.IGNORECASE)
+
+# yt-dlp writes the unfinished file as *.part, keeps its queue state in
+# *.ytdl and stores HLS fragments as *.part-Frag<n> (sometimes with another
+# .part on top while the fragment itself is still being written).
+_PARTIAL_SUFFIXES = (".part", ".ytdl", ".frag")
+_PARTIAL_MARKER = ".part-Frag"
 
 # Windows does not allow these names even with a fine extension.
 _RESERVED_NAMES = {
@@ -93,6 +100,7 @@ class Downloader:
             with yt_dlp.YoutubeDL(options) as ydl:
                 ydl.download([url])
         except yt_dlp.utils.DownloadCancelled as exc:
+            self._remove_partials(target_base)
             raise DownloadCancelled from exc
         except yt_dlp.utils.DownloadError as exc:
             raise DownloadFailed(str(exc).replace("ERROR: ", "", 1)) from exc
@@ -130,6 +138,16 @@ class Downloader:
             "progress_hooks": [self._hook],
             "postprocessor_hooks": [self._pp_hook],
         }
+
+    def _remove_partials(self, target_base: Path) -> None:
+        parent = target_base.parent
+        if not parent.exists():
+            return
+        pattern = f"{glob_escape(target_base.name)}.*"
+        for path in parent.glob(pattern):
+            if path.suffix in _PARTIAL_SUFFIXES or _PARTIAL_MARKER in path.name:
+                with contextlib.suppress(OSError):
+                    path.unlink()
 
     def _hook(self, status: dict[str, object]) -> None:
         if self.cancelled:
