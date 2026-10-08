@@ -28,8 +28,10 @@ yt-dlp. The whole thing is a few hundred KB of logic instead of a browser.
 
 - Accepts bare player URLs, protocol-relative ones, or a copied `<iframe>` tag
 - Shows every quality the server actually offers (typically 360p–720p)
+- Lists all voice-overs of a movie and lets you download any of them
 - Downloads via yt-dlp: parallel HLS fragments, retries, resume-friendly
-- Live progress, speed and per-download cancel in the TUI
+- Live progress with speed, transferred size and ETA; per-download cancel
+- English and Russian interface, auto-detected and switchable in settings
 - Download folder setting persists per user
 - One-shot CLI mode for scripts: `kodikdown download <url>`
 - Sensible file names taken from the player page title, sanitized for Windows
@@ -46,22 +48,33 @@ pip install .
 kodikdown
 ```
 
+The binaries have no runtime dependencies. yt-dlp uses its built-in HLS
+downloader, and Kodik serves fMP4 fragments that it assembles without help.
+If `ffmpeg` happens to be on `PATH`, yt-dlp will use it to remux streams that
+need it (some mirrors still serve MPEG-TS segments).
+
 ## Usage
 
 Run `kodikdown` with no arguments for the interface:
 
 1. Paste a player link or iframe embed
-2. **Find video** picks out the title and available qualities
-3. Choose a quality and hit **Download** — progress shows up below
-4. `Ctrl+S` opens settings (download folder), `Ctrl+Q` quits
+2. **Find video** picks out the title, voice-overs and available qualities
+3. Choose a voice-over and a quality, hit **Download** — progress shows up below
+4. `Ctrl+S` opens settings (download folder, language), `Ctrl+Q` quits
 
 For scripts and one-off downloads there is a CLI:
 
 ```bash
 kodikdown download "https://kodik.info/video/91873/060c.../720p" -q 720 -o ~/Videos
-kodikdown download "<url>" --list-qualities   # just show what the server has
-kodikdown download "<url>" --print-url -q 480  # print the direct manifest URL
+kodikdown download "<url>" --list-qualities      # just show what the server has
+kodikdown download "<url>" --list-translations   # numbered voice-over list
+kodikdown download "<url>" -t AniLibria -q 720   # pick a voice-over by name/number
+kodikdown download "<url>" --print-url -q 480    # print the direct manifest URL
 ```
+
+Exit codes: `2` unrecognized link, `3` page or stream error, `4` network
+error, `5` download failed, `6` requested voice-over not found, `130`
+cancelled.
 
 Settings live in the standard config location (`~/.config/kodikdown/settings.json`
 on Linux, `%LOCALAPPDATA%\kodikdown` on Windows).
@@ -77,13 +90,15 @@ For the curious, the whole lookup is four HTTP requests:
    into a direct HLS manifest, which goes straight to yt-dlp
 
 The endpoint path changes once in a while, so it is never hard-coded — it is
-discovered from the live bundle on every lookup and cached per domain.
+discovered from the live bundle and cached per player session. The same page
+also lists every voice-over with its own id/hash pair, so switching a
+voice-over reuses the cached page and only re-asks the endpoint.
 
 ## Development
 
 ```bash
 pip install -e '.[dev]'
-pytest          # 57 tests, includes a real HLS download through a local server
+pytest          # 104 tests, includes a real HLS download through a local server
 ruff check src tests
 ruff format --check src tests
 mypy            # strict mode
@@ -119,8 +134,10 @@ is a player client, not a license to pirate.
 
 - Понимает обычные ссылки, ссылки без протокола и вставленные теги `<iframe>`
 - Показывает все качества, которые реально отдаёт сервер (обычно 360p–720p)
+- Показывает все озвучки видео и позволяет скачать любую из них
 - Скачивание через yt-dlp: параллельные фрагменты HLS, ретраи, докачка
-- Живой прогресс, скорость и отмена каждой загрузки в интерфейсе
+- Живой прогресс со скоростью, объёмом и оставшимся временем, отмена загрузки
+- Русский и английский интерфейс: определяется сам, переключается в настройках
 - Папка для сохранения сохраняется между запусками
 - Режим командной строки для скриптов: `kodikdown download <ссылка>`
 - Осмысленные имена файлов из названия плеера, безопасные для Windows
@@ -136,22 +153,34 @@ pip install .
 kodikdown
 ```
 
+Бинарникам ничего не нужно для работы: yt-dlp скачивает HLS своим
+встроенным загрузчиком, а Kodik отдаёт fMP4-фрагменты, которые собираются
+без посторонней помощи. Если `ffmpeg` есть в `PATH`, yt-dlp задействует его
+для пересборки потоков, которым это нужно (некоторые зеркала до сих пор
+отдают MPEG-TS).
+
 ## Как пользоваться
 
 Запустите `kodikdown` без аргументов:
 
 1. Вставьте ссылку на плеер или iframe-код
-2. **Найти видео** — приложение покажет название и доступные качества
-3. Выберите качество и нажмите **Скачать** — прогресс появится внизу
-4. `Ctrl+S` — настройки, `Ctrl+Q` — выход
+2. **Найти видео** — приложение покажет название, озвучки и качества
+3. Выберите озвучку и качество, нажмите **Скачать** — прогресс появится внизу
+4. `Ctrl+S` — настройки (папка и язык), `Ctrl+Q` — выход
 
 Для разовых задач есть CLI:
 
 ```bash
 kodikdown download "https://kodik.info/video/91873/060c.../720p" -q 720 -o ~/Видео
-kodikdown download "<ссылка>" --list-qualities   # только показать качества
-kodikdown download "<ссылка>" --print-url -q 480  # напечатать прямую ссылку
+kodikdown download "<ссылка>" --list-qualities      # только показать качества
+kodikdown download "<ссылка>" --list-translations   # нумерованный список озвучек
+kodikdown download "<ссылка>" -t AniLibria -q 720   # озвучка по имени или номеру
+kodikdown download "<ссылка>" --print-url -q 480    # напечатать прямую ссылку
 ```
+
+Коды выхода: `2` — ссылка не распознана, `3` — ошибка страницы или потоков,
+`4` — сетевая ошибка, `5` — загрузка не удалась, `6` — озвучка не найдена,
+`130` — отменено.
 
 ## Как это устроено
 
@@ -159,8 +188,10 @@ kodikdown download "<ссылка>" --print-url -q 480  # напечатать �
 `id` и `hash`; из JS-бандла плеера через `atob()` достаётся адрес API; POST
 с этими тремя полями возвращает JSON со ссылками по качествам; каждая ссылка
 восстанавливается обратным шифром Цезаря и base64 и отдаётся yt-dlp. Адрес
-эндпоинта периодически меняется, поэтому он каждый раз заново извлекается
-из живого бандла и кэшируется по домену.
+эндпоинта периодически меняется, поэтому он извлекается из живого бандла и
+кэшируется на время сессии. На той же странице лежит список всех озвучек со
+своими парами id/hash: при смене озвучки страница берётся из кэша, а к API
+идёт только один новый запрос.
 
 ## Разработка
 
