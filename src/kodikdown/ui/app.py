@@ -8,14 +8,25 @@ import httpx
 import pyperclip
 from textual import events, on, work
 from textual.app import App, ComposeResult
-from textual.binding import Binding
+from textual.binding import Binding, BindingsMap
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Footer, Header, Input, Label, RadioButton, RadioSet, Static
+from textual.widget import Widget
+from textual.widgets import (
+    Button,
+    Footer,
+    Header,
+    Input,
+    Label,
+    RadioButton,
+    RadioSet,
+    Select,
+    Static,
+)
 
 from kodikdown import __version__
 from kodikdown.config import ConfigStore, Settings
 from kodikdown.downloader import DownloadCancelled, Downloader
-from kodikdown.i18n import t
+from kodikdown.i18n import set_language, t
 from kodikdown.kodik.client import KodikClient
 from kodikdown.kodik.errors import (
     InvalidUrlError,
@@ -24,7 +35,7 @@ from kodikdown.kodik.errors import (
     PageStructureError,
     RequestFailedError,
 )
-from kodikdown.kodik.models import ResolvedVideo, referer_for
+from kodikdown.kodik.models import ResolvedVideo, Translation, referer_for
 from kodikdown.ui.settings import SettingsScreen
 from kodikdown.ui.widgets import DownloadCard
 
@@ -81,6 +92,8 @@ class KodikDownApp(App[None]):
         text-style: bold; margin-bottom: 1;
         width: 1fr; overflow: hidden; text_overflow: ellipsis;
     }
+    .field-caption { color: $text-muted; margin-bottom: 0; }
+    #translation-select { width: 1fr; margin-bottom: 1; }
     #quality-set { height: auto; margin-bottom: 1; }
     #download-btn { min-width: 16; }
     #downloads { height: auto; }
@@ -116,6 +129,7 @@ class KodikDownApp(App[None]):
     }
     .settings-header { text-style: bold; color: $accent; margin-bottom: 1; }
     .field-label { color: $text-muted; margin-top: 1; }
+    #language-select { width: 1fr; margin-bottom: 1; }
     .settings-actions { height: auto; margin-top: 1; }
     .settings-actions Button { margin-right: 1; min-width: 14; }
     """
@@ -129,6 +143,7 @@ class KodikDownApp(App[None]):
         super().__init__()
         self.store = store or ConfigStore()
         self.settings: Settings = self.store.load()
+        set_language(self.settings.language)
         self._client = KodikClient()
         self._resolved: ResolvedVideo | None = None
         self._chosen_quality: int | None = None
@@ -147,7 +162,7 @@ class KodikDownApp(App[None]):
                 yield Button(t("settings_title"), id="settings-btn")
             yield Static("", id="status")
             yield VerticalScroll(id="result")
-            yield Label(t("downloads_section"), classes="section-title")
+            yield Label(t("downloads_section"), classes="section-title", id="downloads-title")
             yield Static(t("downloads_empty"), id="downloads-empty")
             with Vertical(id="downloads"):
                 pass
@@ -161,7 +176,26 @@ class KodikDownApp(App[None]):
             return
         self.settings = updated
         self.store.save(updated)
+        set_language(updated.language)
+        self._apply_language()
         self.notify(t("settings_saved"))
+
+    def _apply_language(self) -> None:
+        self.query_one("#url-input", Input).placeholder = t("url_placeholder")
+        self.query_one("#paste-btn", Button).label = t("paste")
+        self.query_one("#resolve-btn", Button).label = t("resolve")
+        self.query_one("#settings-btn", Button).label = t("settings_title")
+        self.query_one("#downloads-title", Label).update(t("downloads_section"))
+        self.query_one("#downloads-empty", Static).update(t("downloads_empty"))
+        # Binding descriptions are immutable, so rebuild the map to translate
+        # the footer hints as well.
+        self._bindings = BindingsMap(
+            [
+                Binding("ctrl+q", "quit", t("quit")),
+                Binding("ctrl+s", "open_settings", t("settings_title")),
+            ]
+        )
+        self.refresh_bindings()
 
     def _set_status(
         self, key: str, *, error: bool = False, success: bool = False, **kwargs: object
@@ -204,18 +238,18 @@ class KodikDownApp(App[None]):
         event.stop()
         self._begin_resolve()
 
-    def _begin_resolve(self) -> None:
+    def _begin_resolve(self, translation: Translation | None = None) -> None:
         raw = self.query_one("#url-input", Input).value.strip()
         if not raw:
             return
         self._set_status("resolving")
         self._clear_result()
-        self._resolve_worker(raw)
+        self._resolve_worker(raw, translation)
 
     @work(exclusive=True, group="resolve")
-    async def _resolve_worker(self, raw: str) -> None:
+    async def _resolve_worker(self, raw: str, translation: Translation | None = None) -> None:
         try:
-            resolved = await self._client.resolve(raw)
+            resolved = await self._client.resolve(raw, translation)
         except InvalidUrlError:
             self._set_status("invalid_url", error=True)
         except NoStreamsError:
@@ -237,23 +271,50 @@ class KodikDownApp(App[None]):
         self._resolved = resolved
         self._chosen_quality = resolved.variants[0].quality
 
-        container = self.query_one("#result", VerticalScroll)
-        options = [
-            RadioButton(f"{variant.quality}p", value=(i == 0))
-            for i, variant in enumerate(resolved.variants)
-        ]
         title = resolved.title or t("title_unknown")
         if len(title) > 62:
             title = title[:61].rstrip() + "…"
-        container.mount_all(
-            [
-                Label(title, classes="title-line"),
-                RadioSet(*options, id="quality-set"),
-                Button(t("download"), variant="success", id="download-btn"),
-            ]
+
+        widgets: list[Widget] = [Label(title, classes="title-line")]
+        if len(resolved.translations) > 1:
+            active = resolved.translation or resolved.translations[0]
+            widgets.append(Label(t("translation"), classes="field-caption"))
+            widgets.append(
+                Select(
+                    [(item.title, item.key) for item in resolved.translations],
+                    value=active.key,
+                    allow_blank=False,
+                    id="translation-select",
+                )
+            )
+        widgets.append(Label(t("quality"), classes="field-caption"))
+        widgets.append(
+            RadioSet(
+                *[
+                    RadioButton(f"{variant.quality}p", value=(i == 0))
+                    for i, variant in enumerate(resolved.variants)
+                ],
+                id="quality-set",
+            )
         )
+        widgets.append(Button(t("download"), variant="success", id="download-btn"))
+
+        container = self.query_one("#result", VerticalScroll)
+        container.mount_all(widgets)
         container.add_class("populated")
         container.scroll_visible()
+
+    @on(Select.Changed, "#translation-select")
+    def _translation_selected(self, event: Select.Changed) -> None:
+        if self._resolved is None or not isinstance(event.value, str):
+            return
+        chosen = next(
+            (item for item in self._resolved.translations if item.key == event.value),
+            None,
+        )
+        if chosen is None or chosen == self._resolved.translation:
+            return
+        self._begin_resolve(chosen)
 
     def _clear_result(self) -> None:
         self._resolved = None

@@ -106,7 +106,7 @@ async def test_resolve_reuses_page_and_endpoint(
     js_route = respx.get(url__startswith="https://mock.local/assets/js/app.player_single").respond(
         200, text=player_js_snippet
     )
-    respx.post("https://mock.local/ftor").respond(200, json=video_info_json)
+    post_route = respx.post("https://mock.local/ftor").respond(200, json=video_info_json)
 
     async with KodikClient() as client:
         first = await client.resolve(PAGE_URL)
@@ -115,6 +115,42 @@ async def test_resolve_reuses_page_and_endpoint(
     assert first.variants == second.variants
     assert page_route.call_count == 1
     assert js_route.call_count == 1
+    assert post_route.call_count == 1
+
+
+@respx.mock
+async def test_resolve_marks_current_translation(
+    player_page_html: str,
+    player_js_snippet: str,
+    video_info_json: dict[str, object],
+) -> None:
+    _routes(player_page_html, player_js_snippet, video_info_json)
+
+    async with KodikClient() as client:
+        resolved = await client.resolve(PAGE_URL)
+
+    assert resolved.translation is not None
+    assert resolved.translation.title == "Субтитры"
+    assert len(resolved.translations) == 9
+
+
+@respx.mock
+async def test_resolve_switches_translation(
+    player_page_html: str,
+    player_js_snippet: str,
+    video_info_json: dict[str, object],
+) -> None:
+    _routes(player_page_html, player_js_snippet, video_info_json)
+
+    async with KodikClient() as client:
+        first = await client.resolve(PAGE_URL)
+        anilibria = next(item for item in first.translations if item.title == "AniLibria.TV")
+        switched = await client.resolve(PAGE_URL, anilibria)
+
+    assert switched.translation == anilibria
+    post_request = respx.post("https://mock.local/ftor").calls.last.request
+    assert b"id=102509" in post_request.content
+    assert b"hash=e5af7227ae1de504d41f753c59c7b4ba" in post_request.content
 
 
 @respx.mock

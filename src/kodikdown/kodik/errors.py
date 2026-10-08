@@ -16,3 +16,12 @@ class NoStreamsError(KodikError):
 
 class RequestFailedError(KodikError):
     """Network request to the player failed."""
+
+
+class TranslationNotFoundError(KodikError):
+    """The requested voice-over is not offered for this video."""
+
+    def __init__(self, name: str, available: str) -> None:
+        super().__init__(name)
+        self.name = name
+        self.available = available

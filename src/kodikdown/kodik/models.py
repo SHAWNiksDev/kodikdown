@@ -58,11 +58,39 @@ class StreamVariant:
 
 
 @dataclass(frozen=True)
+class Translation:
+    """A voice-over or subtitle track the player can serve."""
+
+    title: str
+    media_type: str
+    media_id: str
+    content_hash: str
+
+    @property
+    def key(self) -> str:
+        return f"{self.media_type}:{self.media_id}:{self.content_hash}"
+
+
+@dataclass(frozen=True)
 class ResolvedVideo:
     """Everything the UI needs after a successful lookup."""
 
     title: str | None
     variants: tuple[StreamVariant, ...]
+    translations: tuple[Translation, ...] = ()
+    translation: Translation | None = None
+
+    def find_translation(self, query: str) -> Translation | None:
+        wanted = query.strip().casefold()
+        if not wanted:
+            return None
+        for translation in self.translations:
+            if translation.title.casefold() == wanted:
+                return translation
+        for translation in self.translations:
+            if wanted in translation.title.casefold():
+                return translation
+        return None
 
     @property
     def best(self) -> StreamVariant:

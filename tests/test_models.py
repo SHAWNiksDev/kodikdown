@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from kodikdown.kodik.models import EmbedInfo, ResolvedVideo, StreamVariant, referer_for
+from kodikdown.kodik.models import (
+    EmbedInfo,
+    ResolvedVideo,
+    StreamVariant,
+    Translation,
+    referer_for,
+)
 
 HASH = "a" * 32
 
@@ -35,6 +41,23 @@ def test_pick_without_preference_returns_best(resolved: ResolvedVideo) -> None:
 
 def test_pick_below_all_returns_smallest(resolved: ResolvedVideo) -> None:
     assert resolved.pick(200).quality == 360
+
+
+def test_find_translation_matches_exact_and_partial() -> None:
+    translations = (
+        Translation("AniLibria.TV", "video", "102509", "a" * 32),
+        Translation("Reanimedia", "video", "54982", "b" * 32),
+    )
+    video = ResolvedVideo(title="Test", variants=(), translations=translations)
+
+    assert video.find_translation("anilibria.tv") == translations[0]
+    assert video.find_translation("rean") == translations[1]
+    assert video.find_translation("missing") is None
+    assert video.find_translation("") is None
+
+
+def test_translation_key_is_stable() -> None:
+    assert Translation("x", "video", "1", "hash").key == "video:1:hash"
 
 
 def test_referer_for_uses_manifest_host() -> None:

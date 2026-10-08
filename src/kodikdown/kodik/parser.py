@@ -6,7 +6,7 @@ import re
 from urllib.parse import urlparse
 
 from kodikdown.kodik.errors import InvalidUrlError, PageStructureError
-from kodikdown.kodik.models import EmbedInfo, PlayerPayload
+from kodikdown.kodik.models import EmbedInfo, PlayerPayload, Translation
 
 _EMBED_RE = re.compile(
     r"/(?P<type>[a-z][a-z-]*)/(?P<id>\d+)/(?P<hash>[0-9a-f]{32})(?:/(?P<quality>\d+)p?)?",
@@ -37,6 +37,10 @@ _OG_TITLE_RE = re.compile(
     re.IGNORECASE,
 )
 _GENERIC_TITLE_RE = re.compile(r"^(kodik|kodik\s*player)$", re.IGNORECASE)
+_OPTION_TAG_RE = re.compile(r"<option\b(?P<attrs>[^>]*)>", re.IGNORECASE | re.DOTALL)
+_OPTION_ATTR_RE = re.compile(
+    r"""(?P<name>[a-z][a-z-]*)\s*=\s*["'](?P<value>[^"']*)["']""", re.IGNORECASE
+)
 
 
 def extract_embed(raw: str) -> EmbedInfo:
@@ -80,6 +84,35 @@ def extract_payload(html_text: str) -> PlayerPayload | None:
         return PlayerPayload(fields["type"], fields["id"], fields["hash"])
     except KeyError:
         return None
+
+
+def extract_translations(html_text: str) -> tuple[Translation, ...]:
+    """Voice-overs offered by the player page, in the order they appear."""
+    translations: list[Translation] = []
+    seen: set[tuple[str, str, str]] = set()
+    for option in _OPTION_TAG_RE.finditer(html_text):
+        attrs = {
+            match.group("name").lower(): html.unescape(match.group("value")).strip()
+            for match in _OPTION_ATTR_RE.finditer(option.group("attrs"))
+        }
+        media_type = attrs.get("data-media-type", "")
+        media_id = attrs.get("data-media-id", "")
+        content_hash = attrs.get("data-media-hash", "").lower()
+        if not media_type or not media_id or not content_hash:
+            continue
+        identity = (media_type, media_id, content_hash)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        translations.append(
+            Translation(
+                title=attrs.get("data-title") or media_id,
+                media_type=media_type,
+                media_id=media_id,
+                content_hash=content_hash,
+            )
+        )
+    return tuple(translations)
 
 
 def extract_player_js_path(html_text: str) -> str:

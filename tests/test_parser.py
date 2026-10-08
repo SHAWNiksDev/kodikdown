@@ -10,6 +10,7 @@ from kodikdown.kodik.parser import (
     extract_payload,
     extract_player_js_path,
     extract_title,
+    extract_translations,
 )
 
 HASH = "060cab655974d46835b3f4405807acc2"
@@ -69,6 +70,20 @@ def test_extract_payload_from_live_page(player_page_html: str) -> None:
 
 def test_extract_payload_returns_none_when_absent() -> None:
     assert extract_payload("<html><body>nothing here</body></html>") is None
+
+
+def test_extract_translations_from_live_page(player_page_html: str) -> None:
+    translations = extract_translations(player_page_html)
+
+    assert len(translations) == 9
+    assert translations[0].title == "AniLibria.TV"
+    assert translations[0].media_id == "102509"
+    assert translations[-1].title == "Субтитры"
+    assert translations[-1].content_hash == HASH
+
+
+def test_extract_translations_skips_plain_options() -> None:
+    assert extract_translations('<option value="1">Season 1</option>') == ()
 
 
 def test_extract_player_js_path(player_page_html: str) -> None:

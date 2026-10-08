@@ -6,13 +6,14 @@ import httpx
 
 from kodikdown.kodik.decoder import align_quality, decode_stream_url
 from kodikdown.kodik.errors import NoStreamsError, PageStructureError, RequestFailedError
-from kodikdown.kodik.models import PlayerPayload, ResolvedVideo, StreamVariant
+from kodikdown.kodik.models import PlayerPayload, ResolvedVideo, StreamVariant, Translation
 from kodikdown.kodik.parser import (
     extract_embed,
     extract_endpoint,
     extract_payload,
     extract_player_js_path,
     extract_title,
+    extract_translations,
 )
 from kodikdown.net import DEFAULT_HEADERS
 
@@ -56,6 +57,7 @@ class KodikClient:
         self._owns_http = http is None
         self._endpoint_cache: dict[str, str] = {}
         self._page_cache: dict[str, str] = {}
+        self._links_cache: dict[tuple[str, PlayerPayload], dict[str, Any]] = {}
 
     async def __aenter__(self) -> KodikClient:
         return self
@@ -67,7 +69,11 @@ class KodikClient:
         if self._owns_http:
             await self._http.aclose()
 
-    async def resolve(self, raw_url: str) -> ResolvedVideo:
+    async def resolve(
+        self,
+        raw_url: str,
+        translation: Translation | None = None,
+    ) -> ResolvedVideo:
         embed = extract_embed(raw_url)
         html = self._page_cache.get(embed.page_url)
         if html is None:
@@ -75,8 +81,25 @@ class KodikClient:
             if len(self._page_cache) >= 32:
                 self._page_cache.clear()
             self._page_cache[embed.page_url] = html
-        payload = extract_payload(html) or PlayerPayload(
+
+        page_payload = extract_payload(html) or PlayerPayload(
             embed.media_type, embed.video_id, embed.content_hash
+        )
+        translations = extract_translations(html)
+        if translation is None and translations:
+            translation = next(
+                (
+                    item
+                    for item in translations
+                    if item.media_id == page_payload.video_id
+                    and item.content_hash == page_payload.content_hash
+                ),
+                None,
+            )
+        payload = (
+            PlayerPayload(translation.media_type, translation.media_id, translation.content_hash)
+            if translation
+            else page_payload
         )
         title = extract_title(html) or f"kodik-{embed.video_id}"
 
@@ -84,7 +107,12 @@ class KodikClient:
         variants = build_variants(data)
         if not variants:
             raise NoStreamsError("server response contained no playable streams")
-        return ResolvedVideo(title=title, variants=variants)
+        return ResolvedVideo(
+            title=title,
+            variants=variants,
+            translations=translations,
+            translation=translation,
+        )
 
     async def _fetch_links(
         self,
@@ -92,6 +120,11 @@ class KodikClient:
         payload: PlayerPayload,
         html: str,
     ) -> dict[str, Any]:
+        cache_key = (domain, payload)
+        cached = self._links_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         last_error: Exception | None = None
         for _ in range(2):
             endpoint = await self._endpoint_for(domain, payload, html)
@@ -111,6 +144,9 @@ class KodikClient:
                 continue
 
             if isinstance(body, dict):
+                if len(self._links_cache) >= 32:
+                    self._links_cache.clear()
+                self._links_cache[cache_key] = body
                 return body
             last_error = PageStructureError(f"unexpected video-info reply: {str(body)[:120]!r}")
             self._endpoint_cache.pop(domain, None)
