@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import gc
 import re
 import threading
 from collections.abc import Callable
@@ -95,15 +96,24 @@ class Downloader:
         pattern = f"{glob_escape(target_base.name)}.*"
         before = set(target_base.parent.glob(pattern)) if target_base.parent.exists() else set()
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        cancelled = False
         try:
             options = self._options(target_base, referer)
             with yt_dlp.YoutubeDL(options) as ydl:
                 ydl.download([url])
-        except yt_dlp.utils.DownloadCancelled as exc:
-            self._remove_partials(target_base)
-            raise DownloadCancelled from exc
+        except yt_dlp.utils.DownloadCancelled:
+            cancelled = True
         except yt_dlp.utils.DownloadError as exc:
             raise DownloadFailed(str(exc).replace("ERROR: ", "", 1)) from exc
+
+        if cancelled:
+            # Leave the exception handler before cleaning up: yt-dlp's
+            # tracebacks and fragment futures keep the unfinished *.part
+            # file open, and Windows refuses to delete open files. The
+            # explicit collect breaks their remaining reference cycles.
+            gc.collect()
+            self._remove_partials(target_base)
+            raise DownloadCancelled
 
         after = sorted(
             (
