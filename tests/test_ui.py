@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,7 +11,7 @@ from kodikdown.config import ConfigStore, Settings
 from kodikdown.i18n import set_language
 from kodikdown.kodik.models import ResolvedVideo, StreamVariant, Translation
 from kodikdown.ui.app import KodikDownApp
-from kodikdown.ui.settings import SettingsScreen
+from kodikdown.ui.settings import SettingsScreen, _child_env, open_in_file_manager
 
 
 @pytest.fixture(autouse=True)
@@ -166,3 +168,75 @@ async def test_settings_opens_download_folder(
         await pilot.pause()
 
     assert opened == [tmp_path]
+
+
+def test_child_env_restores_pre_pyinstaller_library_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/_MEI123456")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/local/lib")
+
+    assert _child_env()["LD_LIBRARY_PATH"] == "/usr/local/lib"
+
+
+def test_child_env_drops_bundled_library_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/_MEI123456")
+    monkeypatch.delenv("LD_LIBRARY_PATH_ORIG", raising=False)
+
+    assert "LD_LIBRARY_PATH" not in _child_env()
+
+
+class _FakeProcess:
+    def __init__(self, returncode: int) -> None:
+        self.returncode = returncode
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.returncode
+
+
+def test_open_in_file_manager_starts_clean_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/_MEI123456")
+    monkeypatch.delenv("LD_LIBRARY_PATH_ORIG", raising=False)
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_popen(command: list[str], **kwargs: object) -> _FakeProcess:
+        calls.append((command, kwargs))
+        return _FakeProcess(0)
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    open_in_file_manager(tmp_path)
+
+    command, kwargs = calls[0]
+    assert command[0] == "gio"
+    assert "LD_LIBRARY_PATH" not in kwargs["env"]  # type: ignore[operator]
+    assert kwargs["stdout"] == subprocess.DEVNULL
+
+
+def test_open_in_file_manager_tries_next_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    launched: list[str] = []
+    codes = iter([3, 0])
+
+    def fake_popen(command: list[str], **kwargs: object) -> _FakeProcess:
+        launched.append(command[0])
+        return _FakeProcess(next(codes))
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    open_in_file_manager(tmp_path)
+
+    assert launched == ["gio", "xdg-open"]
+
+
+def test_open_in_file_manager_reports_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _FakeProcess(127))
+
+    with pytest.raises(OSError):
+        open_in_file_manager(tmp_path)

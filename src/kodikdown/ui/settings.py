@@ -14,13 +14,58 @@ from kodikdown.config import Settings
 from kodikdown.i18n import t
 
 
+def _child_env() -> dict[str, str]:
+    """Environment for launched helpers, with PyInstaller's lib path undone.
+
+    The one-file bootloader puts its bundled libraries on LD_LIBRARY_PATH,
+    which makes system programs like sh and xdg-open fail with symbol
+    lookup errors, so restore whatever was there before it started.
+    """
+    env = os.environ.copy()
+    original = env.pop("LD_LIBRARY_PATH_ORIG", None)
+    if original is not None:
+        env["LD_LIBRARY_PATH"] = original
+    else:
+        env.pop("LD_LIBRARY_PATH", None)
+    return env
+
+
 def open_in_file_manager(path: Path) -> None:
     if sys.platform == "win32":
         os.startfile(path)  # type: ignore[attr-defined]
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", str(path)])
+        return
+
+    if sys.platform == "darwin":
+        commands = [["open", str(path)]]
     else:
-        subprocess.Popen(["xdg-open", str(path)])
+        commands = [
+            ["gio", "open", str(path)],
+            ["xdg-open", str(path)],
+            ["kde-open5", str(path)],
+            ["kde-open", str(path)],
+            ["nautilus", str(path)],
+        ]
+
+    failures: list[str] = []
+    for command in commands:
+        try:
+            process = subprocess.Popen(
+                command,
+                env=_child_env(),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            continue
+        try:
+            returncode = process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            return  # still running, so the opener did start something
+        if returncode == 0:
+            return
+        failures.append(f"{command[0]} exited with {returncode}")
+
+    raise OSError("; ".join(failures) or "no file manager found")
 
 
 class SettingsScreen(ModalScreen["Settings | None"]):
