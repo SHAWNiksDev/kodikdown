@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from kodikdown.kodik.errors import InvalidUrlError, PageStructureError
-from kodikdown.kodik.models import EmbedInfo
+from kodikdown.kodik.models import EmbedInfo, PlayerPayload
 from kodikdown.kodik.parser import (
+    extract_current_translation,
     extract_embed,
     extract_endpoint,
     extract_payload,
     extract_player_js_path,
     extract_title,
     extract_translations,
+    extract_url_params,
+    parse_player_page,
 )
 
 HASH = "060cab655974d46835b3f4405807acc2"
@@ -28,6 +33,13 @@ def test_extract_embed_without_quality_keeps_bare_url() -> None:
     assert info.media_type == "serial"
     assert info.quality is None
     assert info.page_url == f"https://kodik.cc/serial/42/{HASH}"
+
+
+def test_extract_embed_keeps_episode_query() -> None:
+    info = extract_embed(f"https://kodikplayer.com/serial/42/{HASH}/720p?episode=5&season=2")
+    assert info.quality == 720
+    assert info.query == "episode=5&season=2"
+    assert info.page_url.endswith("/720p?episode=5&season=2")
 
 
 def test_extract_embed_from_iframe_tag() -> None:
@@ -48,9 +60,15 @@ def test_extract_embed_from_html_escaped_iframe() -> None:
     assert info.quality == 720
 
 
-def test_extract_embed_season_type() -> None:
-    info = extract_embed(f"https://urumain.com/season/7711/{HASH}/480p")
-    assert info.media_type == "season"
+@pytest.mark.parametrize("media_type", ["video", "seria", "serial", "season"])
+def test_extract_embed_accepts_known_types(media_type: str) -> None:
+    info = extract_embed(f"https://urumain.com/{media_type}/7711/{HASH}/480p")
+    assert info.media_type == media_type
+
+
+def test_extract_embed_uppercase_hash_is_lowercased() -> None:
+    info = extract_embed(f"https://kodikplayer.com/video/91873/{HASH.upper()}/720p")
+    assert info.content_hash == HASH
 
 
 def test_extract_embed_rejects_junk() -> None:
@@ -58,6 +76,8 @@ def test_extract_embed_rejects_junk() -> None:
         extract_embed("https://youtube.com/watch?v=abc")
     with pytest.raises(InvalidUrlError):
         extract_embed("")
+    with pytest.raises(InvalidUrlError):
+        extract_embed("https://kodikplayer.com/assets/js/app.js")
 
 
 def test_extract_payload_from_live_page(player_page_html: str) -> None:
@@ -65,11 +85,38 @@ def test_extract_payload_from_live_page(player_page_html: str) -> None:
     assert payload is not None
     assert payload.media_type == "video"
     assert payload.video_id == "91873"
-    assert payload.as_form()["bad_user"] == "True"
+    assert payload.as_form()["bad_user"] == "true"
 
 
 def test_extract_payload_returns_none_when_absent() -> None:
     assert extract_payload("<html><body>nothing here</body></html>") is None
+
+
+def test_extract_url_params_reads_the_json_blob(serial_page_html: str) -> None:
+    params = extract_url_params(serial_page_html)
+    assert params["d"] == "animego.org"
+    assert params["ref"] == "https%3A%2F%2Fanimego.org%2F"
+    assert params["ref_sign"] == "cc:1"
+
+
+def test_extract_url_params_falls_back_to_globals() -> None:
+    page = (
+        '<script>var domain = "animego.org"; var d_sign = "x:1"; var pd = "kodikplayer.com";'
+        ' var pd_sign = "y:1"; var ref = "https://animego.org/"; var ref_sign = "z:1";</script>'
+    )
+    params = extract_url_params(page)
+    assert params == {
+        "d": "animego.org",
+        "d_sign": "x:1",
+        "pd": "kodikplayer.com",
+        "pd_sign": "y:1",
+        "ref": "https://animego.org/",
+        "ref_sign": "z:1",
+    }
+
+
+def test_extract_url_params_ignores_broken_json() -> None:
+    assert extract_url_params("var urlParams = '{oops';") == {}
 
 
 def test_extract_translations_from_live_page(player_page_html: str) -> None:
@@ -78,12 +125,60 @@ def test_extract_translations_from_live_page(player_page_html: str) -> None:
     assert len(translations) == 9
     assert translations[0].title == "AniLibria.TV"
     assert translations[0].media_id == "102509"
+    assert translations[0].translation_id == "610"
+    assert translations[0].kind == "voice"
     assert translations[-1].title == "Субтитры"
-    assert translations[-1].content_hash == HASH
+    assert translations[-1].is_subtitles
+    assert translations[-1].selected
+
+
+def test_extract_translations_from_synthetic_page(serial_page_html: str) -> None:
+    translations = extract_translations(serial_page_html)
+
+    assert [item.title for item in translations] == ["AniLibria.TV", "2x2"]
+    assert translations[0].content_hash == "e5af7227ae1de504d41f753c59c7b4ba"
+    assert translations[1].selected is True
 
 
 def test_extract_translations_skips_plain_options() -> None:
     assert extract_translations('<option value="1">Season 1</option>') == ()
+
+
+def test_extract_current_translation_uses_selected_flag(serial_page_html: str) -> None:
+    translations = extract_translations(serial_page_html)
+    current = extract_current_translation(serial_page_html, translations)
+
+    assert current is not None
+    assert current.title == "2x2"
+
+
+def test_extract_current_translation_falls_back_to_id() -> None:
+    page = (
+        "<script>var translationId = 42;</script>"
+        '<option data-id="7" data-media-id="1" data-media-hash="ab"'
+        ' data-media-type="video" data-title="A">A</option>'
+        '<option data-id="42" data-media-id="2" data-media-hash="cd"'
+        ' data-media-type="video" data-title="B">B</option>'
+    )
+    translations = extract_translations(page)
+    current = extract_current_translation(page, translations)
+
+    assert current is not None
+    assert current.title == "B"
+
+
+def test_extract_current_translation_matches_payload_as_last_resort() -> None:
+    page = (
+        '<option data-media-id="2" data-media-hash="cd" data-media-type="video"'
+        ' data-title="B">B</option>'
+        '<option data-media-id="1" data-media-hash="ab" data-media-type="video"'
+        ' data-title="A">A</option>'
+    )
+    translations = extract_translations(page)
+    current = extract_current_translation(page, translations, PlayerPayload("video", "1", "ab"))
+
+    assert current is not None
+    assert current.title == "A"
 
 
 def test_extract_player_js_path(player_page_html: str) -> None:
@@ -92,17 +187,24 @@ def test_extract_player_js_path(player_page_html: str) -> None:
     assert path.endswith(".js")
 
 
+def test_extract_player_js_fallback_pattern() -> None:
+    page = '<script src="/assets/js/app.custom_player.123.js"></script>'
+    assert extract_player_js_path(page) == "assets/js/app.custom_player.123.js"
+
+
+def test_extract_endpoint_prefers_the_ajax_call() -> None:
+    decoy = base64.b64encode(b"/static/logo.png").decode()
+    real = base64.b64encode(b"/ftor").decode()
+    bundle = f'var img=atob("{decoy}");$.ajax({{type:"POST",url:atob("{real}")}});'
+    assert extract_endpoint(bundle) == "/ftor"
+
+
 def test_extract_endpoint_from_bundle(player_js_snippet: str) -> None:
     assert extract_endpoint(player_js_snippet) == "/ftor"
 
 
-def test_extract_endpoint_skips_decoy_atob() -> None:
-    import base64
-
-    decoy = base64.b64encode(b"/static/logo.png").decode()
-    real = base64.b64encode(b"/ftor").decode()
-    bundle = f'var img=atob("{decoy}");$.ajax({{url:atob("{real}")}});'
-    assert extract_endpoint(bundle) == "/ftor"
+def test_extract_endpoint_falls_back_to_literal_path() -> None:
+    assert extract_endpoint('$.ajax({type:"POST", url:"/gvi"});') == "/gvi"
 
 
 def test_extract_endpoint_raises_on_unrelated_script() -> None:
@@ -124,18 +226,52 @@ def test_extract_title_falls_back_to_og_title() -> None:
     assert extract_title(page) == "Моё видео"
 
 
-def test_extract_embed_bare_domain_without_scheme() -> None:
-    info = extract_embed(f"kodik.info/video/91873/{HASH}/720p")
-    assert info.domain == "kodik.info"
-    assert info.quality == 720
+def test_parse_player_page_reads_everything(serial_page_html: str) -> None:
+    embed = extract_embed(
+        "https://kodikplayer.com/seria/1304528/932d5da818729ec5ccc9be7968ee3717/720p"
+    )
+    page = parse_player_page(serial_page_html, embed)
+
+    assert page.payload.video_id == "1304528"
+    assert page.player_js_path.startswith("assets/js/app.player_single")
+    assert page.title is None
+    assert len(page.translations) == 2
+    assert page.current_translation is not None
+    assert page.current_translation.title == "2x2"
 
 
-def test_extract_embed_new_mirror_domain() -> None:
-    info = extract_embed(f"https://aniqit.com/video/27068/{HASH}/720p")
-    assert info.domain == "aniqit.com"
-    assert info.page_url == f"https://aniqit.com/video/27068/{HASH}/720p"
+def test_parse_player_page_rejects_foreign_html() -> None:
+    embed = extract_embed(f"https://kodikplayer.com/video/91873/{HASH}/720p")
+    with pytest.raises(PageStructureError):
+        parse_player_page("<html><body>Just a blog post</body></html>", embed)
 
 
-def test_extract_player_js_fallback_pattern() -> None:
-    page = '<script src="/assets/js/app.custom_player.123.js"></script>'
-    assert extract_player_js_path(page) == "assets/js/app.custom_player.123.js"
+def test_signed_form_decodes_ref() -> None:
+    embed = extract_embed(f"https://kodikplayer.com/seria/1304528/{'a' * 32}/720p")
+    page = parse_player_page(
+        """<script>var urlParams = '{"d":"animego.org","d_sign":"s1","pd":"kodikplayer.com",
+        "pd_sign":"s2","ref":"https%3A%2F%2Fanimego.org%2F","ref_sign":"s3"}';</script>
+        <script>vInfo.type = 'seria'; vInfo.hash = 'h'; vInfo.id = '1';</script>""",
+        embed,
+    )
+    form = page.signed_form(PlayerPayload("seria", "1", "h"))
+
+    assert form["ref"] == "https://animego.org/"
+    assert form["ref_sign"] == "s3"
+    assert form["d"] == "animego.org"
+    assert form["pd_sign"] == "s2"
+    assert form["bad_user"] == "true"
+
+
+def test_signed_form_omits_empty_ref() -> None:
+    embed = extract_embed(f"https://kodikplayer.com/video/91873/{HASH}/720p")
+    page = parse_player_page(
+        """<script>var urlParams = '{"d":"kodikplayer.com","d_sign":"s1","pd":"kodikplayer.com",
+        "pd_sign":"s2","ref":"","ref_sign":"s3"}';</script>
+        <script>vInfo.type = 'video'; vInfo.hash = 'h'; vInfo.id = '1';</script>""",
+        embed,
+    )
+    form = page.signed_form(PlayerPayload("video", "1", "h"))
+
+    assert "ref" not in form
+    assert "ref_sign" not in form

@@ -7,6 +7,7 @@ from kodikdown.kodik.models import (
     ResolvedVideo,
     StreamVariant,
     Translation,
+    direct_mp4_url,
     referer_for,
 )
 
@@ -56,8 +57,11 @@ def test_find_translation_matches_exact_and_partial() -> None:
     assert video.find_translation("") is None
 
 
-def test_translation_key_is_stable() -> None:
-    assert Translation("x", "video", "1", "hash").key == "video:1:hash"
+def test_translation_key_is_stable_and_payload_follows() -> None:
+    translation = Translation("x", "video", "1", "hash")
+    assert translation.key == "video:1:hash"
+    payload = translation.as_payload()
+    assert (payload.media_type, payload.video_id, payload.content_hash) == ("video", "1", "hash")
 
 
 def test_referer_for_uses_manifest_host() -> None:
@@ -68,8 +72,23 @@ def test_referer_for_uses_manifest_host() -> None:
     assert referer_for("//cdn.example.com/x.m3u8") == "https://cdn.example.com/"
 
 
+def test_direct_mp4_url_strips_manifest_suffix() -> None:
+    assert direct_mp4_url("https://cdn/a/720.mp4:hls:manifest.m3u8") == "https://cdn/a/720.mp4"
+    assert direct_mp4_url("https://cdn/a/720.m3u8") is None
+
+
 def test_embed_page_url_appends_quality_only_when_known() -> None:
     bare = EmbedInfo("kodik.info", "video", "91873", HASH)
     with_quality = EmbedInfo("kodik.info", "video", "91873", HASH, 720)
     assert f"/{HASH}" in bare.page_url
     assert with_quality.page_url.endswith(f"/{HASH}/720p")
+
+
+def test_embed_page_url_keeps_episode_query() -> None:
+    embed = EmbedInfo("kodikplayer.com", "serial", "42", HASH, 720, "episode=5&season=2")
+    assert embed.page_url.endswith(f"/{HASH}/720p?episode=5&season=2")
+    assert embed.url_on("aniqit.com").startswith("https://aniqit.com/serial/42/")
+
+
+def test_embed_fallback_title() -> None:
+    assert EmbedInfo("kodik.info", "video", "91873", HASH).fallback_title == "kodik-91873"

@@ -11,7 +11,13 @@ from kodikdown.config import ConfigStore, Settings, default_download_dir
 
 def test_roundtrip_save_and_load(tmp_path: Path) -> None:
     store = ConfigStore(tmp_path / "settings.json")
-    original = Settings(download_dir=tmp_path / "videos")
+    original = Settings(
+        download_dir=tmp_path / "videos",
+        language="ru",
+        theme="dark",
+        concurrent_downloads=3,
+        prefer_mp4=True,
+    )
 
     store.save(original)
     loaded = store.load()
@@ -25,11 +31,19 @@ def test_load_returns_defaults_when_file_missing(tmp_path: Path) -> None:
     loaded = store.load()
 
     assert loaded.download_dir == default_download_dir()
+    assert loaded.theme == "auto"
+    assert loaded.concurrent_downloads == 2
 
 
 def test_load_survives_corrupted_file(tmp_path: Path) -> None:
     path = tmp_path / "settings.json"
     path.write_text("{not json", encoding="utf-8")
+    assert ConfigStore(path).load().download_dir == default_download_dir()
+
+
+def test_load_survives_non_object_json(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text("[1, 2, 3]", encoding="utf-8")
     assert ConfigStore(path).load().download_dir == default_download_dir()
 
 
@@ -53,18 +67,44 @@ def test_updated_returns_new_instance(tmp_path: Path) -> None:
     assert changed.language == "ru"
 
 
-def test_language_roundtrip(tmp_path: Path) -> None:
+def test_language_and_theme_roundtrip(tmp_path: Path) -> None:
     store = ConfigStore(tmp_path / "settings.json")
-    store.save(Settings(download_dir=tmp_path / "videos", language="ru"))
+    store.save(Settings(download_dir=tmp_path / "videos", language="ru", theme="light"))
 
-    assert store.load().language == "ru"
+    loaded = store.load()
+    assert loaded.language == "ru"
+    assert loaded.theme == "light"
 
 
-def test_load_falls_back_on_unknown_language(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        ({"language": "klingon"}, "auto"),
+        ({"theme": "neon"}, "auto"),
+        ({"language": 5, "theme": ["dark"]}, "auto"),
+    ],
+)
+def test_load_falls_back_on_bad_choices(
+    tmp_path: Path, stored: dict[str, object], expected: str
+) -> None:
     path = tmp_path / "settings.json"
-    path.write_text(json.dumps({"download_dir": "/tmp/ok", "language": "klingon"}), "utf-8")
+    path.write_text(json.dumps({"download_dir": "/tmp/ok", **stored}), "utf-8")
+    loaded = ConfigStore(path).load()
 
-    assert ConfigStore(path).load().language == "auto"
+    assert loaded.language == expected
+    assert loaded.theme == expected
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [(0, 1), (99, 5), ("many", 2), (True, 2), (None, 2), (4, 4)],
+)
+def test_concurrent_downloads_is_clamped(tmp_path: Path, stored: object, expected: int) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps({"download_dir": "/tmp/ok", "concurrent_downloads": stored}), "utf-8"
+    )
+    assert ConfigStore(path).load().concurrent_downloads == expected
 
 
 def test_load_falls_back_on_bad_type(tmp_path: Path) -> None:

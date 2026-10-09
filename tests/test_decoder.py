@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from kodikdown.kodik.decoder import align_quality, caesar, decode_stream_url
+from kodikdown.kodik.decoder import (
+    KNOWN_SHIFT,
+    caesar,
+    decode_stream_url,
+    normalise_url,
+    stream_kind,
+)
 
-# Real vectors captured from a live player response.
+# Real vector captured from a live player response.
 ENCODED_360 = (
     "iPZ0kPU6Tg9eUBUck29aj2ZrHO4cG29bT3UdjA9pANQeG0pVVsf5WExqZhsfEsU1muQgmPHiZ05zGus1"
     "iuQgUPHsEM5aG25El2RPWEpiAM12EDlRU01FAFlHist0EsZHUNxxULJVD0shBNlRms9MH3ZVms0fBCZr"
@@ -19,35 +25,39 @@ DECODED_360 = (
 )
 
 
+def test_caesar_rotates_forward() -> None:
+    assert caesar("abcXYZ", 18) == "stuPQR"
+    assert caesar(caesar("Helsinki", 18), 8) == "Helsinki"
+
+
+def test_caesar_keeps_punctuation() -> None:
+    assert caesar("a-b_c.1", 18) == "s-t_u.1"
+
+
 def test_caesar_matches_reference_shift() -> None:
-    shifted = caesar(ENCODED_360, 8)
-    assert shifted.startswith("aHR0cHM6Ly9wMTMuc29sb2RjZG4uY29t")
+    assert caesar(ENCODED_360, KNOWN_SHIFT).startswith("aHR0cHM6Ly9wMTMuc29sb2RjZG4uY29t")
 
 
 def test_decode_stream_url_recovers_direct_link() -> None:
-    assert decode_stream_url(ENCODED_360) == DECODED_360
+    assert decode_stream_url(ENCODED_360) == (DECODED_360, KNOWN_SHIFT)
+
+
+def test_decode_stream_url_honours_known_shift() -> None:
+    assert decode_stream_url(ENCODED_360, 3) == (DECODED_360, KNOWN_SHIFT)
+
+
+def test_decode_stream_url_accepts_plain_urls() -> None:
+    plain = "https://cdn.example.com/video/720.mp4:hls:manifest.m3u8"
+    assert decode_stream_url(plain) == (plain, 0)
 
 
 def test_decode_stream_url_rejects_garbage() -> None:
     assert decode_stream_url("") is None
     assert decode_stream_url("@@@@") is None
+    assert decode_stream_url("bm90IGEgdXJs") is None
 
 
-def test_align_quality_forces_requested_tier() -> None:
-    upgraded = align_quality(DECODED_360, 720)
-    assert "/720.mp4:" in upgraded
-    assert align_quality(upgraded, 720) == upgraded
-
-
-def test_align_quality_leaves_unmatched_urls_alone() -> None:
-    plain = "https://cdn.example/path/video.mp4"
-    assert align_quality(plain, 1080) == plain
-
-
-@pytest.mark.parametrize(
-    ("quality_key"),
-    ["360", "480", "720"],
-)
+@pytest.mark.parametrize("quality_key", ["360", "480", "720"])
 def test_fixture_links_decode_to_https(
     video_info_json: dict[str, object], quality_key: str
 ) -> None:
@@ -56,5 +66,23 @@ def test_fixture_links_decode_to_https(
     entry = links[quality_key][0]  # type: ignore[index]
     decoded = decode_stream_url(entry["src"])  # type: ignore[index]
     assert decoded is not None
-    assert decoded.startswith("https://")
-    assert ".mp4" in decoded
+    url, _shift = decoded
+    assert ".mp4" in url
+    assert f"/{quality_key}.mp4:" in url
+
+
+def test_stream_kind_splits_direct_mp4_from_hls() -> None:
+    kind, direct = stream_kind("https://cdn/720.mp4:hls:manifest.m3u8")
+    assert kind == "hls"
+    assert direct == "https://cdn/720.mp4"
+
+
+def test_stream_kind_recognises_plain_media() -> None:
+    assert stream_kind("https://cdn/x.m3u8") == ("hls", None)
+    assert stream_kind("https://cdn/x.mp4") == ("mp4", "https://cdn/x.mp4")
+    assert stream_kind("https://cdn/x.mpd") == ("dash", None)
+
+
+def test_normalise_url_adds_scheme() -> None:
+    assert normalise_url("//cdn.example/x.m3u8") == "https://cdn.example/x.m3u8"
+    assert normalise_url("https://cdn.example/x.m3u8") == "https://cdn.example/x.m3u8"

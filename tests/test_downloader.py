@@ -6,6 +6,7 @@ import shutil
 import socket
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -14,8 +15,12 @@ import yt_dlp
 from kodikdown.downloader import (
     DownloadCancelled,
     Downloader,
+    DownloadFailed,
     ProgressSnapshot,
+    _is_transient,
+    release_target,
     safe_filename,
+    unique_target,
 )
 
 
@@ -47,6 +52,43 @@ def test_safe_filename_drops_media_extension() -> None:
     assert safe_filename("clip.MP4") == "clip"
 
 
+def test_safe_filename_removes_output_template_characters() -> None:
+    # yt-dlp would try to expand "%(ext)s" and fail on an unknown field.
+    cleaned = safe_filename("100% (1)s.mp4")
+    assert "%" not in cleaned
+    assert cleaned.startswith("100_")
+
+
+def test_unique_target_avoids_overwriting(tmp_path: Path) -> None:
+    (tmp_path / "clip.mp4").write_bytes(b"old")
+
+    assert unique_target(tmp_path, "clip").name == "clip (2)"
+    (tmp_path / "clip (2).mp4").write_bytes(b"older")
+    assert unique_target(tmp_path, "clip").name == "clip (3)"
+    assert unique_target(tmp_path, "fresh").name == "fresh"
+
+
+def test_unique_target_reserves_names_for_parallel_jobs(tmp_path: Path) -> None:
+    first = unique_target(tmp_path, "clip")
+    second = unique_target(tmp_path, "clip")
+    third = unique_target(tmp_path, "clip")
+
+    assert [first.name, second.name, third.name] == ["clip", "clip (2)", "clip (3)"]
+
+    release_target(second)
+    assert unique_target(tmp_path, "clip").name == "clip (2)"
+
+    release_target(first)
+    release_target(third)
+
+
+def test_unique_target_ignores_partial_files(tmp_path: Path) -> None:
+    (tmp_path / "clip.mp4.part").write_bytes(b"half")
+    (tmp_path / "clip.mp4.part-Frag3").write_bytes(b"frag")
+
+    assert unique_target(tmp_path, "clip").name == "clip"
+
+
 def test_download_options_send_browser_identity(tmp_path: Path) -> None:
     downloader = Downloader(output_dir=tmp_path)
     options = downloader._options(tmp_path / "clip", "https://cdn.example/")
@@ -54,128 +96,68 @@ def test_download_options_send_browser_identity(tmp_path: Path) -> None:
     assert isinstance(headers, dict)
     assert headers["Referer"] == "https://cdn.example/"
     assert str(headers["User-Agent"]).startswith("Mozilla/5.0")
+    assert options["socket_timeout"] == 30.0
+    assert options["retries"] == 10
+    assert options["noplaylist"] is True
+    assert options["cachedir"] is False
 
 
 def test_hook_understands_fragment_counters(tmp_path: Path) -> None:
     snapshots: list[ProgressSnapshot] = []
     downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)
     downloader._hook({"status": "downloading", "fragment_index": 3, "fragment_count": 10})
-    assert snapshots == [ProgressSnapshot(downloaded=3, total=10, speed=None, fragments=True)]
+    assert snapshots == [ProgressSnapshot(downloaded=3, total=10, fragments=True)]
 
 
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
-@pytest.fixture(scope="module")
-def hls_server(tmp_path_factory: pytest.TempPathFactory) -> object:
-    if not shutil.which("ffmpeg"):
-        pytest.skip("ffmpeg not installed")
-
-    root = tmp_path_factory.mktemp("hls")
-    clip = root / "clip.mp4"
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc=duration=1:size=128x96:rate=10",
-            "-pix_fmt",
-            "yuv420p",
-            str(clip),
-        ],
-        check=True,
-    )
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-loglevel",
-            "error",
-            "-i",
-            str(clip),
-            "-c",
-            "copy",
-            "-hls_time",
-            "1",
-            "-hls_list_size",
-            "0",
-            str(root / "stream.m3u8"),
-        ],
-        check=True,
-        cwd=root,
-    )
-
-    port = _free_port()
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield f"http://127.0.0.1:{port}/stream.m3u8"
-    server.shutdown()
-
-
-def test_download_blocking_saves_file(
-    hls_server: object,
-    tmp_path: Path,
-) -> None:
-    url = hls_server  # type: ignore[assignment]
-    downloader = Downloader(output_dir=tmp_path)
-    produced = downloader.download_blocking(url, "My Test / Video", "http://127.0.0.1/")
-
-    assert produced.exists()
-    assert produced.stat().st_size > 0
-    assert produced.name == "My Test _ Video.mp4"
-
-
-def test_download_blocking_handles_bracketed_title(
-    hls_server: object,
-    tmp_path: Path,
-) -> None:
-    downloader = Downloader(output_dir=tmp_path)
-    produced = downloader.download_blocking(
-        hls_server,
-        "[SubsPlease] Clip - 01",
-        "http://127.0.0.1/",  # type: ignore[arg-type]
-    )
-
-    assert produced.name == "[SubsPlease] Clip - 01.mp4"
-    assert produced.exists()
-
-
-def test_progress_listener_receives_updates(
-    hls_server: object,
-    tmp_path: Path,
-) -> None:
-    snapshots: list[ProgressSnapshot] = []
-    downloader = Downloader(
-        output_dir=tmp_path,
-        listener=snapshots.append,
-    )
-    downloader.download_blocking(hls_server, "tracked", "http://127.0.0.1/")  # type: ignore[arg-type]
-    assert any(snap.downloaded > 0 for snap in snapshots)
-
-
-def test_hook_reports_progress_to_listener(tmp_path: Path) -> None:
+def test_hook_reports_speed_and_eta(tmp_path: Path) -> None:
     snapshots: list[ProgressSnapshot] = []
     downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)
     downloader._hook(
-        {"status": "downloading", "downloaded_bytes": 512, "total_bytes": 1024, "speed": 256.0}
+        {
+            "status": "downloading",
+            "downloaded_bytes": 512,
+            "total_bytes": 1024,
+            "speed": 256.0,
+            "eta": 2.0,
+        }
     )
-    assert snapshots == [ProgressSnapshot(downloaded=512, total=1024, speed=256.0)]
+    assert snapshots == [ProgressSnapshot(downloaded=512, total=1024, speed=256.0, eta=2.0)]
 
 
-def test_hook_skips_finished_events(tmp_path: Path) -> None:
+def test_hook_announces_the_end_of_a_transfer(tmp_path: Path) -> None:
     snapshots: list[ProgressSnapshot] = []
     downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)
     downloader._hook({"status": "finished"})
-    assert snapshots == []
+    assert [snapshot.stage for snapshot in snapshots] == ["finished"]
+
+
+def test_hook_keeps_last_known_sizes_on_finish(tmp_path: Path) -> None:
+    snapshots: list[ProgressSnapshot] = []
+    downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)
+    downloader._hook(
+        {"status": "downloading", "downloaded_bytes": 900, "total_bytes": 1000, "speed": 10.0}
+    )
+    downloader._hook({"status": "finished"})
+
+    assert snapshots[-1].stage == "finished"
+    assert snapshots[-1].downloaded == 900
+    assert snapshots[-1].total == 1000
+
+
+def test_progress_is_throttled(tmp_path: Path) -> None:
+    snapshots: list[ProgressSnapshot] = []
+    downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)
+    for index in range(50):
+        downloader._hook({"status": "downloading", "downloaded_bytes": index, "total_bytes": 100})
+    assert 0 < len(snapshots) < 50
+
+
+def test_pp_hook_reports_processing(tmp_path: Path) -> None:
+    snapshots: list[ProgressSnapshot] = []
+    downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)
+    downloader._pp_hook({"status": "started"})
+
+    assert snapshots == [ProgressSnapshot(stage="processing")]
 
 
 def test_hook_raises_once_cancelled(tmp_path: Path) -> None:
@@ -213,8 +195,9 @@ def test_remove_partials_keeps_finished_files(tmp_path: Path) -> None:
     ):
         (tmp_path / name).write_bytes(b"junk")
 
-    Downloader(output_dir=tmp_path)._remove_partials(tmp_path / "movie")
+    blocked = Downloader(output_dir=tmp_path)._remove_partials(tmp_path / "movie")
 
+    assert blocked is False
     assert sorted(p.name for p in tmp_path.iterdir()) == ["movie.Part.2.mp4", "movie.mp4"]
 
 
@@ -226,40 +209,46 @@ def test_download_blocking_respects_pre_set_cancel(tmp_path: Path) -> None:
         downloader.download_blocking("http://127.0.0.1/video.m3u8", "clip", "http://127.0.0.1/")
 
 
-def test_cancel_interrupts_slow_download(tmp_path: Path) -> None:
-    if not shutil.which("ffmpeg"):
-        pytest.skip("ffmpeg not installed")
+def test_download_blocking_creates_output_dir(tmp_path: Path) -> None:
+    target = tmp_path / "nested" / "videos"
+    downloader = Downloader(output_dir=target)
+    with pytest.raises(DownloadFailed):
+        downloader.download_blocking("http://127.0.0.1:1/none.m3u8", "clip", "http://127.0.0.1/")
+    assert target.is_dir()
 
-    root = tmp_path / "slow"
-    root.mkdir()
+
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _make_hls(root: Path, *, duration: int = 1, gop: int | None = None) -> None:
+    clip = root / "clip.mp4"
+    command = [
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        f"testsrc=duration={duration}:size=128x96:rate=10",
+        "-pix_fmt",
+        "yuv420p",
+    ]
+    if gop is not None:
+        command += ["-c:v", "libx264", "-g", str(gop)]
+    command.append(str(clip))
+    subprocess.run(command, check=True)
     subprocess.run(
         [
             "ffmpeg",
             "-y",
             "-loglevel",
             "error",
-            "-f",
-            "lavfi",
             "-i",
-            "testsrc=duration=8:size=128x96:rate=10",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:v",
-            "libx264",
-            "-g",
-            "10",
-            str(root / "clip.mp4"),
-        ],
-        check=True,
-    )
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-loglevel",
-            "error",
-            "-i",
-            str(root / "clip.mp4"),
+            str(clip),
             "-c",
             "copy",
             "-hls_time",
@@ -272,10 +261,135 @@ def test_cancel_interrupts_slow_download(tmp_path: Path) -> None:
         cwd=root,
     )
 
+
+@pytest.fixture(scope="module")
+def hls_server(tmp_path_factory: pytest.TempPathFactory) -> object:
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+
+    root = tmp_path_factory.mktemp("hls")
+    _make_hls(root)
+
+    port = _free_port()
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{port}/stream.m3u8"
+    server.shutdown()
+
+
+def test_download_blocking_saves_file(hls_server: object, tmp_path: Path) -> None:
+    downloader = Downloader(output_dir=tmp_path)
+    produced = downloader.download_blocking(str(hls_server), "My Test / Video", "http://127.0.0.1/")
+
+    assert produced.exists()
+    assert produced.stat().st_size > 0
+    assert produced.name == "My Test _ Video.mp4"
+
+
+def test_download_blocking_keeps_an_existing_file(hls_server: object, tmp_path: Path) -> None:
+    existing = tmp_path / "tracked.mp4"
+    existing.write_bytes(b"previous")
+
+    downloader = Downloader(output_dir=tmp_path)
+    produced = downloader.download_blocking(str(hls_server), "tracked", "http://127.0.0.1/")
+
+    assert produced.name == "tracked (2).mp4"
+    assert existing.read_bytes() == b"previous"
+
+
+def test_download_blocking_uses_the_requested_filename(hls_server: object, tmp_path: Path) -> None:
+    downloader = Downloader(output_dir=tmp_path, filename="Custom Name")
+    produced = downloader.download_blocking(str(hls_server), "ignored", "http://127.0.0.1/")
+
+    assert produced.name == "Custom Name.mp4"
+
+
+def test_download_blocking_handles_bracketed_title(hls_server: object, tmp_path: Path) -> None:
+    downloader = Downloader(output_dir=tmp_path)
+    produced = downloader.download_blocking(
+        str(hls_server), "[SubsPlease] Clip - 01", "http://127.0.0.1/"
+    )
+
+    assert produced.name == "[SubsPlease] Clip - 01.mp4"
+    assert produced.exists()
+
+
+def test_progress_listener_receives_updates(hls_server: object, tmp_path: Path) -> None:
+    snapshots: list[ProgressSnapshot] = []
+    downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)
+    downloader.download_blocking(str(hls_server), "tracked", "http://127.0.0.1/")
+
+    assert any(snapshot.downloaded > 0 for snapshot in snapshots)
+    assert {"finished"} <= {snapshot.stage for snapshot in snapshots}
+
+
+def test_transient_errors_are_retried(tmp_path: Path, monkeypatch) -> None:
+    attempts: list[int] = []
+
+    def flaky(self: Downloader, target_base: Path, url: str, referer: str) -> None:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise DownloadFailed("Failed to download m3u8 information: timed out")
+        target_base.with_suffix(".mp4").write_bytes(b"done")
+
+    monkeypatch.setattr(Downloader, "_transfer", flaky)
+    monkeypatch.setattr("kodikdown.downloader.time.sleep", lambda _seconds: None)
+    downloader = Downloader(output_dir=tmp_path)
+
+    produced = downloader.download_blocking("https://cdn/x.m3u8", "clip", "https://cdn/")
+
+    assert len(attempts) == 2
+    assert produced.name == "clip.mp4"
+
+
+def test_permanent_errors_are_not_retried(tmp_path: Path, monkeypatch) -> None:
+    attempts: list[int] = []
+
+    def broken(self: Downloader, target_base: Path, url: str, referer: str) -> None:
+        attempts.append(1)
+        raise DownloadFailed("HTTP Error 404: Not Found")
+
+    monkeypatch.setattr(Downloader, "_transfer", broken)
+    downloader = Downloader(output_dir=tmp_path)
+
+    with pytest.raises(DownloadFailed):
+        downloader.download_blocking("https://cdn/x.m3u8", "clip", "https://cdn/")
+
+    assert attempts == [1]
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Failed to download m3u8 information: timed out", True),
+        ("HTTP Error 503: Service Unavailable", True),
+        ("HTTP Error 404: Not Found", False),
+        ("Unsupported URL: https://x", False),
+    ],
+)
+def test_transient_classifier(message: str, expected: bool) -> None:
+    assert _is_transient(message) is expected
+
+
+def test_download_blocking_reports_unreachable_host(tmp_path: Path) -> None:
+    downloader = Downloader(output_dir=tmp_path)
+    with pytest.raises(DownloadFailed):
+        downloader.download_blocking("http://127.0.0.1:1/missing.m3u8", "clip", "http://127.0.0.1/")
+
+
+def test_cancel_interrupts_slow_download(tmp_path: Path) -> None:
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+
+    root = tmp_path / "slow"
+    root.mkdir()
+    _make_hls(root, duration=8, gop=10)
+
     class Slow(http.server.SimpleHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path.endswith(".ts"):
-                threading.Event().wait(0.5)
+                time.sleep(0.5)
             super().do_GET()
 
         def log_message(self, *args: object) -> None:
@@ -284,8 +398,7 @@ def test_cancel_interrupts_slow_download(tmp_path: Path) -> None:
     server = http.server.ThreadingHTTPServer(
         ("127.0.0.1", 0), functools.partial(Slow, directory=str(root))
     )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         url = f"http://127.0.0.1:{server.server_port}/stream.m3u8"
         cancel_event = threading.Event()
