@@ -14,9 +14,11 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact-name: kodikdown-linux-x86_64
+            gui: kodikdown-linux-x86_64
+            cli: kodikdown-linux-x86_64-cli
           - os: windows-latest
-            artifact-name: kodikdown-windows-x86_64.exe
+            gui: kodikdown-windows-x86_64.exe
+            cli: kodikdown-windows-x86_64-cli.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -24,11 +26,16 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e '.[dev]'
-      - run: pyinstaller --onefile --name "${{ matrix.artifact-name }}" --paths src src/kodikdown/__main__.py
+      - name: Build the desktop app
+        run: pyinstaller packaging/kodikdown.spec --noconfirm --name "${{ matrix.gui }}"
+      - name: Build the command-line tool
+        run: pyinstaller packaging/kodikdown-cli.spec --noconfirm --name "${{ matrix.cli }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact-name }}
-          path: dist/${{ matrix.artifact-name }}*
+          name: ${{ matrix.gui }}
+          path: |
+            dist/${{ matrix.gui }}
+            dist/${{ matrix.cli }}
 
   release:
     needs: build
