@@ -5,14 +5,15 @@ build-backend = "hatchling.build"
 [project]
 name = "kodikdown"
 version = "2.2.2"
-description = "Terminal app for resolving and downloading videos from Kodik players"
+description = "Desktop app for resolving and downloading videos from Kodik players"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "SHAWNiks" }]
 requires-python = ">=3.11"
-keywords = ["kodik", "downloader", "tui", "hls"]
+keywords = ["kodik", "downloader", "desktop", "gui", "hls"]
 classifiers = [
-    "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
+    "Environment :: Win32 (MS Windows)",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Topic :: Multimedia :: Video",
@@ -20,8 +21,7 @@ classifiers = [
 dependencies = [
     "httpx>=0.27",
     "platformdirs>=4.3",
-    "pyperclip>=1.8",
-    "textual>=1.0",
+    "PySide6>=6.8",
     "typer>=0.12",
     "yt-dlp>=2024.12.13",
 ]
@@ -32,6 +32,7 @@ dev = [
     "pyinstaller>=6.11",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    "pytest-qt>=4.4",
     "respx>=0.21",
     "ruff>=0.8",
 ]
@@ -56,6 +57,8 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 [tool.ruff.lint.per-file-ignores]
 # Translation strings are intentionally full of Cyrillic look-alikes.
 "src/kodikdown/i18n.py" = ["RUF001", "RUF002", "RUF003"]
+# Qt style sheets read better when one rule stays on one line.
+"src/kodikdown/gui/theme.py" = ["E501"]
 
 [tool.mypy]
 strict = true
@@ -68,10 +71,11 @@ module = ["yt_dlp.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["pyperclip.*"]
+module = ["PySide6.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
 asyncio_mode = "auto"
+qt_api = "pyside6"

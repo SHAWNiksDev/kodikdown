@@ -21,7 +21,6 @@ from kodikdown.kodik.errors import (
     TranslationNotFoundError,
 )
 from kodikdown.kodik.models import ResolvedVideo, Translation, referer_for
-from kodikdown.ui.app import launch_tui
 
 app = typer.Typer(
     add_completion=False,
@@ -45,7 +44,13 @@ def callback(
     ] = None,
 ) -> None:
     if ctx.invoked_subcommand is None:
-        launch_tui()
+        launch_gui()
+
+
+@app.command()
+def gui() -> None:
+    """Open the desktop window (the default when no command is given)."""
+    launch_gui()
 
 
 @app.command()
@@ -68,11 +73,15 @@ def download(
     print_url: Annotated[
         bool, typer.Option("--print-url", help="Print the direct manifest URL and exit.")
     ] = False,
+    as_mp4: Annotated[
+        bool, typer.Option("--mp4", help="Prefer a plain MP4 file over the HLS stream.")
+    ] = False,
 ) -> None:
     """Resolve one link and save the video without opening the interface."""
     settings: Settings = ConfigStore().load()
     set_language(settings.language)
     target_dir = (output or settings.download_dir).expanduser()
+
     try:
         resolved = asyncio.run(_resolve(url, translation))
     except InvalidUrlError:
@@ -93,6 +102,10 @@ def download(
         typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(4) from None
 
+    for warning in resolved.warnings:
+        message = t("warning_proxy") if warning == "proxy" else warning
+        typer.secho(message, fg=typer.colors.YELLOW, err=True)
+
     if list_qualities:
         available = ", ".join(f"{v.quality}p" for v in resolved.variants)
         typer.echo(t("cli_qualities", title=resolved.title or "video", list=available))
@@ -101,6 +114,8 @@ def download(
     if list_translations:
         if not resolved.translations:
             typer.echo(t("cli_translation_missing"))
+        else:
+            typer.echo(t("cli_translations", title=resolved.title or "video"))
         for index, item in enumerate(resolved.translations, start=1):
             typer.echo(f"{index}. {item.title}")
         return
@@ -116,14 +131,19 @@ def download(
             t("cli_quality_fallback", wanted=quality, picked=variant.quality, list=available)
         )
 
+    stream_url = variant.direct_mp4 if (as_mp4 and variant.direct_mp4) else variant.url
     title = resolved.title or "kodik-video"
-    downloader = Downloader(output_dir=target_dir)
+    downloader = Downloader(
+        output_dir=target_dir,
+        concurrent_fragments=settings.concurrent_downloads * 4,
+        filename=title,
+    )
 
     try:
-        path = downloader.download_blocking(variant.url, title, referer_for(variant.url))
+        path = downloader.download_blocking(stream_url, title, referer_for(stream_url))
     except (KeyboardInterrupt, DownloadCancelled):
         downloader.cancel()
-        typer.secho("cancelled", fg=typer.colors.YELLOW, err=True)
+        typer.secho(t("cli_cancelled"), fg=typer.colors.YELLOW, err=True)
         raise typer.Exit(130) from None
     except DownloadFailed as exc:
         typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
@@ -155,10 +175,19 @@ def _find_translation(resolved: ResolvedVideo, query: str) -> Translation | None
     return resolved.find_translation(text)
 
 
+def launch_gui() -> None:
+    from kodikdown.gui.app import run
+
+    raise SystemExit(run())
+
+
 def main() -> None:
     if sys.platform == "win32":
         _enable_windows_console_utf8()
-    app()
+    try:
+        app()
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
 
 
 def _enable_windows_console_utf8() -> None:
