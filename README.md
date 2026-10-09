@@ -3,73 +3,72 @@
 [![CI](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml/badge.svg)](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-A terminal app that turns Kodik player links into downloaded video files.
-Paste a link (a whole `<iframe>` tag works too), pick a quality, hit download.
-No browser, no Chromium, no devtools digging.
+A small desktop app for Windows and Linux that turns Kodik player links into
+downloaded video files. Paste a link (a whole `<iframe>` tag works too), pick a
+voice-over and a quality, hit download. No browser, no Chromium, no devtools.
 
-![KodikDown main window](docs/download.svg)
-
-Works on Linux and Windows.
-
-## Why I rewrote it
-
-The first version of this tool launched a headless Chromium through Playwright,
-loaded the player in an iframe, blindly clicked around the page and hoped an
-`.m3u8` URL would fly by. It worked, but it dragged ~150 MB of browser along
-and broke whenever the player layout changed.
-
-It turns out none of that is needed. The player page itself contains everything:
-video id and hash in the HTML, and the API endpoint hidden in a base64 string
-inside the player's JS bundle. KodikDown talks to that endpoint directly,
-decodes the obfuscated stream links (Caesar cipher + base64) and hands them to
-yt-dlp. The whole thing is a few hundred KB of logic instead of a browser.
+![KodikDown main window](docs/main-light.png)
 
 ## Features
 
-- Accepts bare player URLs, protocol-relative ones, or a copied `<iframe>` tag
-- Shows every quality the server actually offers (typically 360p–720p)
-- Lists all voice-overs of a movie and lets you download any of them
-- Downloads via yt-dlp: parallel HLS fragments, retries, resume-friendly
-- Live progress with speed, transferred size and ETA; per-download cancel
-- English and Russian interface, auto-detected and switchable in settings
-- Download folder setting persists per user
-- One-shot CLI mode for scripts: `kodikdown download <url>`
-- Sensible file names taken from the player page title, sanitized for Windows
+- Accepts bare player URLs, protocol-relative ones, copied `<iframe>` tags and
+  links from dead mirrors — the resolver retries the working Kodik hosts
+- Shows every quality the server actually offers (typically 360p–720p) and all
+  voice-overs of the video, selectable per download
+- Editable file name, taken from the player page when it has one
+- Downloads through yt-dlp: parallel HLS fragments, retries, resume-friendly,
+  plus an optional direct MP4 when the CDN serves one
+- Live progress with size, speed and ETA; cancel any transfer on its own
+- Several downloads at once, finished ones stay listed with *Open* and
+  *Open folder*
+- Light and dark themes, following the system by default
+- English and Russian interface, auto-detected and switchable
+- Scriptable CLI for one-off downloads
+
+![KodikDown in dark mode](docs/main-dark.png)
 
 ## Install
 
-Grab a ready binary from [Releases](https://github.com/SHAWNiksDev/kodikdown/releases)
-(`kodikdown-linux-x86_64` or `kodikdown-windows-x86_64.exe`) and run it — that's it.
+Grab a binary from [Releases](https://github.com/SHAWNiksDev/kodikdown/releases):
+
+| File | What it is |
+| --- | --- |
+| `kodikdown-windows-x86_64.exe` / `kodikdown-linux-x86_64` | the desktop app |
+| `kodikdown-windows-x86_64-cli.exe` / `kodikdown-linux-x86_64-cli` | the CLI, no window |
 
 Or from source (Python 3.11+):
 
 ```bash
 pip install .
-kodikdown
+kodikdown            # the window
+kodikdown <link>     # the window, with the lookup already running
 ```
 
 The binaries have no runtime dependencies. yt-dlp uses its built-in HLS
 downloader, and Kodik serves fMP4 fragments that it assembles without help.
 If `ffmpeg` happens to be on `PATH`, yt-dlp will use it to remux streams that
-need it (some mirrors still serve MPEG-TS segments).
+need it (some mirrors still serve MPEG-TS).
 
 ## Usage
 
-Run `kodikdown` with no arguments for the interface:
+1. Paste a player link or iframe embed, press **Enter**
+2. **Find video** reads the title, the voice-overs and the available qualities
+3. Adjust the file name if you like, choose a voice-over and a quality
+4. **Download** — progress shows up in the list below, each transfer has its
+   own cancel button
 
-1. Paste a player link or iframe embed
-2. **Find video** picks out the title, voice-overs and available qualities
-3. Choose a voice-over and a quality, hit **Download** — progress shows up below
-4. `Ctrl+S` opens settings (download folder, language), `Ctrl+Q` quits
+Keyboard: `Enter` looks up the link in the field (or cancels a lookup in
+progress), `Esc` cancels a lookup, `Ctrl+S` opens settings, `Ctrl+Q` quits.
 
-For scripts and one-off downloads there is a CLI:
+For scripts there is a CLI:
 
 ```bash
-kodikdown download "https://kodik.info/video/91873/060c.../720p" -q 720 -o ~/Videos
-kodikdown download "<url>" --list-qualities      # just show what the server has
-kodikdown download "<url>" --list-translations   # numbered voice-over list
-kodikdown download "<url>" -t AniLibria -q 720   # pick a voice-over by name/number
-kodikdown download "<url>" --print-url -q 480    # print the direct manifest URL
+kodikdown-cli download "https://kodikplayer.com/seria/1304528/<hash>/720p" -q 720 -o ~/Videos
+kodikdown-cli download "<url>" --list-qualities      # just show what the server has
+kodikdown-cli download "<url>" --list-translations   # numbered voice-over list
+kodikdown-cli download "<url>" -t AniLibria -q 720   # pick a voice-over by name or number
+kodikdown-cli download "<url>" --mp4 -q 480          # plain MP4 instead of HLS
+kodikdown-cli download "<url>" --print-url -q 480    # print the direct manifest URL
 ```
 
 Exit codes: `2` unrecognized link, `3` page or stream error, `4` network
@@ -77,44 +76,65 @@ error, `5` download failed, `6` requested voice-over not found, `130`
 cancelled.
 
 Settings live in the standard config location (`~/.config/kodikdown/settings.json`
-on Linux, `%LOCALAPPDATA%\kodikdown` on Windows).
+on Linux, `%LOCALAPPDATA%\kodikdown` on Windows) and store the download folder,
+language, theme, number of parallel downloads and the MP4 preference.
 
 ## How it works
 
-For the curious, the whole lookup is four HTTP requests:
+For the curious, a lookup is three HTTP requests:
 
-1. `GET` the player page → extract `type`, `id`, `hash` and the player bundle path
+1. `GET` the player page → the video `type`, `id`, `hash` and the signed
+   `urlParams` block (referer, domain and their signatures), plus the
+   voice-over list
 2. `GET` the player JS bundle → the API endpoint sits behind `atob("...")`
-3. `POST` `{type, id, hash}` to that endpoint → JSON with per-quality links
-4. Each link is rotated back through a 26-shift Caesar cipher and base64-decoded
-   into a direct HLS manifest, which goes straight to yt-dlp
+3. `POST` the signed fields to that endpoint → JSON with per-quality links
 
-The endpoint path changes once in a while, so it is never hard-coded — it is
-discovered from the live bundle and cached per player session. The same page
-also lists every voice-over with its own id/hash pair, so switching a
-voice-over reuses the cached page and only re-asks the endpoint. Note that
-the player only offers voice-overs that actually contain the episode you
-opened — other dubs of the series may not have it.
+Each link is rotated back through a Caesar cipher and base64-decoded into a
+direct HLS manifest, which goes straight to yt-dlp. The signatures are minted
+per page view and expire quickly, so every lookup fetches a fresh page and
+links are used immediately; the endpoint address is discovered from the live
+bundle and cached per host.
+
+Kodik's `kodik.info` domain was lost to a squatter and the player now lives on
+`kodikplayer.com`, so links are resolved against a list of known mirrors when
+the host in the link no longer answers.
+
+## Troubleshooting
+
+- **"Network or server problem"** — Kodik may be down, or the machine cannot
+  reach any of the mirrors. Check `https://kodikplayer.com` in a browser.
+- **A warning about a proxy link** — the CDN rate-limited your IP and served a
+  proxied stream. It works, but slower; wait a few minutes for full speed.
+- **Nothing downloads** — check that the download folder is writable; the app
+  reports the exact path it tried.
 
 ## Development
 
 ```bash
 pip install -e '.[dev]'
-pytest          # 104 tests, includes a real HLS download through a local server
-ruff check src tests
-ruff format --check src tests
-mypy            # strict mode
+pytest                              # offline tests, including a real HLS download
+ruff check src tests && ruff format --check src tests
+mypy                                # strict mode
+```
+
+The Qt tests run headless through the `offscreen` platform plugin, which
+`tests/conftest.py` selects automatically. To see the window while developing:
+
+```bash
+python -m kodikdown.gui
 ```
 
 ## Building binaries
 
-PyInstaller one-file builds for both platforms run automatically on `v*` tags
-(see `.github/workflows/release.yml`) and land in GitHub Releases. To build
-locally:
+PyInstaller recipes for both platforms live in `packaging/`:
 
 ```bash
-pyinstaller --onefile --name kodikdown --paths src src/kodikdown/__main__.py
+pyinstaller packaging/kodikdown.spec --noconfirm      # desktop app
+pyinstaller packaging/kodikdown-cli.spec --noconfirm  # CLI
 ```
+
+`.github/workflows/release.yml` builds both for Linux and Windows on `v*` tags
+and attaches them to the GitHub release.
 
 ## License
 
@@ -125,89 +145,93 @@ is a player client, not a license to pirate.
 
 # KodikDown (по-русски)
 
-Консольное приложение, которое превращает ссылки на плеер Kodik в скачанные
-видеофайлы. Вставляете ссылку (можно целиком тег `<iframe>`), выбираете
-качество, жмёте «Скачать». Никакого браузера и Chromium — приложение общается
-с API плеера напрямую.
+Небольшое десктопное приложение для Windows и Linux, которое превращает
+ссылки на плеер Kodik в скачанные видеофайлы. Вставьте ссылку (можно целиком
+тег `<iframe>`), выберите озвучку и качество, нажмите «Скачать». Никакого
+браузера и Chromium — приложение общается с API плеера напрямую.
 
-![Главное окно](docs/download.svg)
+![Главное окно](docs/main-light.png)
 
 ## Возможности
 
-- Понимает обычные ссылки, ссылки без протокола и вставленные теги `<iframe>`
-- Показывает все качества, которые реально отдаёт сервер (обычно 360p–720p)
-- Показывает все озвучки видео и позволяет скачать любую из них
-- Скачивание через yt-dlp: параллельные фрагменты HLS, ретраи, докачка
-- Живой прогресс со скоростью, объёмом и оставшимся временем, отмена загрузки
+- Понимает обычные ссылки, ссылки без протокола, вставленные теги `<iframe>`
+  и ссылки с уже умерших зеркал — резолвер сам перебирает живые хосты Kodik
+- Показывает все качества, которые реально отдаёт сервер (обычно 360p–720p),
+  и все озвучки видео с выбором для каждой загрузки
+- Имя файла можно изменить; по умолчанию берётся со страницы плеера
+- Скачивание через yt-dlp: параллельные фрагменты HLS, ретраи, докачка,
+  а при наличии — прямая ссылка на MP4
+- Живой прогресс с объёмом, скоростью и оставшимся временем, отмена каждой
+  загрузки отдельно
+- Несколько загрузок одновременно; завершённые остаются в списке с кнопками
+  «Открыть» и «Открыть папку»
+- Светлая и тёмная темы, по умолчанию как в системе
 - Русский и английский интерфейс: определяется сам, переключается в настройках
-- Папка для сохранения сохраняется между запусками
-- Режим командной строки для скриптов: `kodikdown download <ссылка>`
-- Осмысленные имена файлов из названия плеера, безопасные для Windows
+- Режим командной строки для скриптов
+
+![Тёмная тема](docs/main-dark.png)
 
 ## Установка
 
-Скачайте готовый бинарник со страницы
-[Releases](https://github.com/SHAWNiksDev/kodikdown/releases) и просто
-запустите его. Либо из исходников (нужен Python 3.11+):
+Скачайте готовый файл со страницы
+[Releases](https://github.com/SHAWNiksDev/kodikdown/releases): приложение
+(`kodikdown-linux-x86_64` / `kodikdown-windows-x86_64.exe`) или консольную
+версию (`…-cli`). Либо из исходников (нужен Python 3.11+):
 
 ```bash
 pip install .
 kodikdown
 ```
 
-Бинарникам ничего не нужно для работы: yt-dlp скачивает HLS своим
-встроенным загрузчиком, а Kodik отдаёт fMP4-фрагменты, которые собираются
-без посторонней помощи. Если `ffmpeg` есть в `PATH`, yt-dlp задействует его
-для пересборки потоков, которым это нужно (некоторые зеркала до сих пор
-отдают MPEG-TS).
+Бинарникам ничего не нужно для работы: yt-dlp скачивает HLS своим встроенным
+загрузчиком, а Kodik отдаёт fMP4-фрагменты, которые собираются без
+посторонней помощи. Если `ffmpeg` есть в `PATH`, yt-dlp задействует его для
+пересборки потоков, которым это нужно (некоторые зеркала до сих пор отдают
+MPEG-TS).
 
 ## Как пользоваться
 
-Запустите `kodikdown` без аргументов:
+1. Вставьте ссылку на плеер или iframe-код и нажмите **Enter**
+2. **Найти видео** покажет название, озвучки и доступные качества
+3. При желании поправьте имя файла, выберите озвучку и качество
+4. **Скачать** — прогресс появится в списке ниже, у каждой загрузки своя
+   кнопка отмены
 
-1. Вставьте ссылку на плеер или iframe-код
-2. **Найти видео** — приложение покажет название, озвучки и качества
-3. Выберите озвучку и качество, нажмите **Скачать** — прогресс появится внизу
-4. `Ctrl+S` — настройки (папка и язык), `Ctrl+Q` — выход
+Горячие клавиши: `Enter` — найти видео по ссылке в поле (или отменить поиск),
+`Esc` — отменить поиск, `Ctrl+S` — настройки, `Ctrl+Q` — выход.
 
 Для разовых задач есть CLI:
 
 ```bash
-kodikdown download "https://kodik.info/video/91873/060c.../720p" -q 720 -o ~/Видео
-kodikdown download "<ссылка>" --list-qualities      # только показать качества
-kodikdown download "<ссылка>" --list-translations   # нумерованный список озвучек
-kodikdown download "<ссылка>" -t AniLibria -q 720   # озвучка по имени или номеру
-kodikdown download "<ссылка>" --print-url -q 480    # напечатать прямую ссылку
+kodikdown-cli download "https://kodikplayer.com/seria/1304528/<hash>/720p" -q 720 -o ~/Видео
+kodikdown-cli download "<ссылка>" --list-qualities      # только показать качества
+kodikdown-cli download "<ссылка>" --list-translations   # нумерованный список озвучек
+kodikdown-cli download "<ссылка>" -t AniLibria -q 720   # озвучка по имени или номеру
+kodikdown-cli download "<ссылка>" --print-url -q 480    # напечатать прямую ссылку
 ```
 
 Коды выхода: `2` — ссылка не распознана, `3` — ошибка страницы или потоков,
 `4` — сетевая ошибка, `5` — загрузка не удалась, `6` — озвучка не найдена,
 `130` — отменено.
 
+Настройки лежат в стандартном месте (`~/.config/kodikdown/settings.json` в
+Linux, `%LOCALAPPDATA%\kodikdown` в Windows): папка загрузок, язык, тема,
+число одновременных загрузок и предпочтение MP4.
+
 ## Как это устроено
 
-Весь поиск ссылки — четыре HTTP-запроса: со страницы плеера берутся `type`,
-`id` и `hash`; из JS-бандла плеера через `atob()` достаётся адрес API; POST
-с этими тремя полями возвращает JSON со ссылками по качествам; каждая ссылка
-восстанавливается обратным шифром Цезаря и base64 и отдаётся yt-dlp. Адрес
-эндпоинта периодически меняется, поэтому он извлекается из живого бандла и
-кэшируется на время сессии. На той же странице лежит список всех озвучек со
-своими парами id/hash: при смене озвучки страница берётся из кэша, а к API
-идёт только один новый запрос. Учтите: плеер показывает только те озвучки,
-в которых есть открытая вами серия, — у других дублей сериала её может не
-быть.
+Весь поиск — три HTTP-запроса: со страницы плеера берутся `type`, `id`,
+`hash` и подписанный блок `urlParams` (referer, домен и их подписи), а также
+список озвучек; из JS-бандла плеера через `atob()` достаётся адрес API; POST
+с подписанными полями возвращает JSON со ссылками по качествам. Каждая
+ссылка восстанавливается обратным шифром Цезаря и base64 и отдаётся yt-dlp.
 
-## Разработка
-
-```bash
-pip install -e '.[dev]'
-pytest
-ruff check src tests
-mypy
-```
-
-Сборка бинарников под Linux и Windows запускается автоматически по тегу `v*`
-и публикуется в Releases.
+Подписи одноразовые и быстро устаревают, поэтому страница запрашивается
+заново перед каждым обращением к API, а ссылки сразу уходят в загрузку.
+Адрес эндпоинта периодически меняется, поэтому он извлекается из живого
+бандла и кэшируется на время сессии. Домен `kodik.info` был потерян, плеер
+переехал на `kodikplayer.com`, поэтому при недоступном хосте ссылка
+пробуется на известных зеркалах.
 
 ## Лицензия
 
