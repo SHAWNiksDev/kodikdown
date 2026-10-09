@@ -18,6 +18,10 @@ class RequestFailedError(KodikError):
     """Network request to the player failed."""
 
 
+class HostUnavailableError(RequestFailedError):
+    """The player host could not be reached at all (DNS, connect, timeout)."""
+
+
 class TranslationNotFoundError(KodikError):
     """The requested voice-over is not offered for this video."""
 
