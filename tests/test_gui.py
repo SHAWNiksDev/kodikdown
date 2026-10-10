@@ -7,13 +7,14 @@ import shutil
 import socket
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
 import respx
 
 from kodikdown.config import ConfigStore, Settings
-from kodikdown.downloader import Downloader
+from kodikdown.downloader import Downloader, ProgressSnapshot
 from kodikdown.gui.main_window import MainWindow
 from kodikdown.kodik.client import KodikClient
 from kodikdown.kodik.decoder import caesar
@@ -83,6 +84,67 @@ def media_server(tmp_path_factory: pytest.TempPathFactory) -> object:
     server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{port}/stream.m3u8"
+    server.shutdown()
+
+
+@pytest.fixture(scope="module")
+def slow_media_server(tmp_path_factory: pytest.TempPathFactory) -> object:
+    """A local HLS server whose fragments take long enough to stay quiet."""
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+
+    root = tmp_path_factory.mktemp("slow-hls")
+    clip = root / "clip.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=12:size=320x240:rate=15",
+            "-pix_fmt",
+            "yuv420p",
+            str(clip),
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            str(clip),
+            "-c",
+            "copy",
+            "-hls_time",
+            "1",
+            "-hls_list_size",
+            "0",
+            str(root / "stream.m3u8"),
+        ],
+        check=True,
+        cwd=root,
+    )
+
+    class Throttled(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path.endswith(".ts"):
+                time.sleep(2.0)
+            super().do_GET()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0), functools.partial(Throttled, directory=str(root))
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}/stream.m3u8"
     server.shutdown()
 
 
@@ -289,6 +351,100 @@ def test_download_row_follows_its_signals(window: MainWindow, monkeypatch) -> No
     window._clear_finished()
     assert window._jobs == {}
     assert not window.downloads_empty.isHidden()
+
+
+def test_download_progress_reaches_the_row(qtbot, window: MainWindow, media_server: object) -> None:
+    """The regression that mattered: transfer ran, the row never moved."""
+    window._on_resolved(
+        window._request_id,
+        ResolvedVideo(title="Clip", variants=(StreamVariant(360, str(media_server)),)),
+    )
+    window.url_edit.setText(PAGE_URL)
+    window._url_in_use = PAGE_URL
+    window._resolved_url = PAGE_URL
+
+    window._on_download()
+    _job_id, job = next(iter(window._jobs.items()))
+    snapshots: list[ProgressSnapshot] = []
+    job.task.signals.progress.connect(lambda _jid, snapshot: snapshots.append(snapshot))
+
+    qtbot.waitUntil(lambda: job.finished, timeout=120_000)
+
+    assert snapshots, "no progress ever reached the window"
+    assert any(snapshot.downloaded > 0 for snapshot in snapshots)
+    assert job.row.property("state") == "done"
+    assert window.downloads_empty.isHidden()
+    assert window._active_urls == set()
+
+
+def test_progress_keeps_moving_while_fragments_are_slow(
+    qtbot, window: MainWindow, slow_media_server: object
+) -> None:
+    """yt-dlp is silent between fragments; the row must not freeze meanwhile."""
+    window._on_resolved(
+        window._request_id,
+        ResolvedVideo(title="Slow", variants=(StreamVariant(360, str(slow_media_server)),)),
+    )
+    window.url_edit.setText(PAGE_URL)
+    window._url_in_use = PAGE_URL
+    window._resolved_url = PAGE_URL
+
+    window._on_download()
+    _job_id, job = next(iter(window._jobs.items()))
+    snapshots: list[ProgressSnapshot] = []
+    job.task.signals.progress.connect(lambda _jid, snapshot: snapshots.append(snapshot))
+
+    qtbot.waitUntil(lambda: job.finished, timeout=180_000)
+
+    monitored = [snapshot for snapshot in snapshots if snapshot.source == "monitor"]
+    assert monitored, "the disk monitor never reported anything"
+    assert monitored[0].downloaded > 0
+    assert job.row.property("state") == "done"
+
+
+def test_download_task_always_wires_a_progress_listener(tmp_path: Path) -> None:
+    from kodikdown.gui.workers import DownloadTask
+
+    task = DownloadTask("job", "https://cdn/x.m3u8", "clip", "https://cdn/", tmp_path)
+
+    assert task._downloader._listener is not None
+
+
+def test_cancelling_a_queued_download_is_immediate(qtbot, window: MainWindow) -> None:
+    import threading
+
+    from PySide6.QtCore import QRunnable
+
+    class Blocker(QRunnable):
+        def __init__(self, release: threading.Event) -> None:
+            super().__init__()
+            self._release = release
+
+        def run(self) -> None:
+            self._release.wait(30)
+
+    release = threading.Event()
+    window.pool.setMaxThreadCount(1)
+    window.pool.start(Blocker(release))
+    qtbot.waitUntil(lambda: window.pool.activeThreadCount() == 1, timeout=10_000)
+
+    window._on_resolved(
+        window._request_id,
+        ResolvedVideo(title="Clip", variants=(StreamVariant(360, "https://cdn/360.m3u8"),)),
+    )
+    window.url_edit.setText(PAGE_URL)
+    window._url_in_use = PAGE_URL
+    window._resolved_url = PAGE_URL
+    window._on_download()
+
+    job_id, job = next(iter(window._jobs.items()))
+    assert job.started is False
+
+    window._cancel_job(job_id)
+
+    assert job.finished is True
+    assert job.started is False
+    release.set()
 
 
 def test_settings_dialog_returns_updated_values(window: MainWindow, tmp_path: Path) -> None:

@@ -8,11 +8,12 @@ import logging
 import threading
 from collections.abc import Coroutine
 from concurrent.futures import Future
+from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, QRunnable, Signal
+from PySide6.QtCore import QObject, QRunnable, Signal, SignalInstance
 
-from kodikdown.downloader import DownloadCancelled, Downloader, DownloadFailed
+from kodikdown.downloader import DownloadCancelled, Downloader, DownloadFailed, ProgressSnapshot
 from kodikdown.kodik.client import KodikClient
 from kodikdown.kodik.errors import (
     HostUnavailableError,
@@ -106,6 +107,7 @@ class ResolverWorker(QObject):
 
 
 class DownloadSignals(QObject):
+    started = Signal(str)
     progress = Signal(str, object)
     finished = Signal(str, str)
     failed = Signal(str, str)
@@ -113,37 +115,60 @@ class DownloadSignals(QObject):
 
 
 class DownloadTask(QRunnable):
-    """Runs one blocking yt-dlp transfer inside the Qt thread pool."""
+    """Runs one blocking yt-dlp transfer inside the Qt thread pool.
+
+    The task owns its downloader, so the progress listener cannot be left
+    unwired: every snapshot leaves as a signal.
+    """
 
     def __init__(
         self,
         job_id: str,
-        downloader: Downloader,
         url: str,
         title: str,
         referer: str,
+        output_dir: Path,
+        *,
+        concurrent_fragments: int = 8,
+        socket_timeout: float = 15.0,
+        signals: DownloadSignals | None = None,
     ) -> None:
         super().__init__()
         self.job_id = job_id
-        self.signals = DownloadSignals()
-        self._downloader = downloader
-        self._url = url
+        self.url = url
+        self.signals = signals or DownloadSignals()
+        self._downloader = Downloader(
+            output_dir=output_dir,
+            listener=self._emit_progress,
+            concurrent_fragments=concurrent_fragments,
+            socket_timeout=socket_timeout,
+        )
         self._title = title
         self._referer = referer
         self.setAutoDelete(False)
 
     def run(self) -> None:
+        self._emit(self.signals.started, self.job_id)
         try:
-            path = self._downloader.download_blocking(self._url, self._title, self._referer)
+            path = self._downloader.download_blocking(self.url, self._title, self._referer)
         except DownloadCancelled:
-            self.signals.cancelled.emit(self.job_id)
+            self._emit(self.signals.cancelled, self.job_id)
         except DownloadFailed as exc:
-            self.signals.failed.emit(self.job_id, str(exc))
+            self._emit(self.signals.failed, self.job_id, str(exc))
         except Exception as exc:
             logger.exception("download %s failed", self.job_id)
-            self.signals.failed.emit(self.job_id, str(exc))
+            self._emit(self.signals.failed, self.job_id, str(exc))
         else:
-            self.signals.finished.emit(self.job_id, str(path))
+            self._emit(self.signals.finished, self.job_id, str(path))
+
+    @staticmethod
+    def _emit(signal: SignalInstance, *args: object) -> None:
+        # The window can be gone while the last fragments are still winding down.
+        with contextlib.suppress(RuntimeError):
+            signal.emit(*args)
 
     def cancel(self) -> None:
         self._downloader.cancel()
+
+    def _emit_progress(self, snapshot: ProgressSnapshot) -> None:
+        self._emit(self.signals.progress, self.job_id, snapshot)

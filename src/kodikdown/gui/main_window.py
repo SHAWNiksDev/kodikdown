@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,7 +28,6 @@ from PySide6.QtWidgets import (
 
 from kodikdown import __version__
 from kodikdown.config import ConfigStore, Settings
-from kodikdown.downloader import Downloader
 from kodikdown.gui.desktop import open_directory, open_path, reveal_path
 from kodikdown.gui.icons import app_icon, icon
 from kodikdown.gui.settings_dialog import SettingsDialog
@@ -39,6 +39,7 @@ from kodikdown.kodik.models import ResolvedVideo, StreamVariant, Translation, re
 
 _MAX_TOASTS = 3
 _TOAST_LIFETIME_MS = 4200
+_QUEUE_HINT_MS = 1200
 
 
 @dataclass
@@ -47,6 +48,7 @@ class _Job:
     row: DownloadRow
     url: str
     title: str
+    started: bool = field(default=False)
     finished: bool = field(default=False)
 
 
@@ -393,7 +395,7 @@ class MainWindow(QMainWindow):
 
         raw = self.url_edit.text().strip()
         if not raw:
-            self._toast(t("paste_empty"), "warning")
+            self._toast(t("link_required"), "warning")
             self.url_edit.setFocus()
             return
         # A voice-over only applies to the video it was listed for.
@@ -553,14 +555,18 @@ class MainWindow(QMainWindow):
         row.cancel_requested.connect(self._cancel_job)
         row.open_requested.connect(self._open_file)
         row.folder_requested.connect(self._reveal_file)
-        row.mark_queued()
+        row.mark_starting()
 
-        downloader = Downloader(
-            output_dir=self.settings.download_dir,
+        task = DownloadTask(
+            job_id,
+            url,
+            title,
+            referer_for(url),
+            self.settings.download_dir,
             concurrent_fragments=4 * self.settings.concurrent_downloads,
         )
-        task = DownloadTask(job_id, downloader, url, title, referer_for(url))
-        task.signals.progress.connect(lambda jid, snap: self._on_progress(jid, snap))
+        task.signals.started.connect(self._on_job_started)
+        task.signals.progress.connect(self._on_progress)
         task.signals.finished.connect(self._on_job_finished)
         task.signals.failed.connect(self._on_job_failed)
         task.signals.cancelled.connect(self._on_job_cancelled)
@@ -569,28 +575,48 @@ class MainWindow(QMainWindow):
         self._active_urls.add(url)
         self._insert_row(row)
         self.pool.start(task)
+        # Only claim the job is waiting when no worker picked it up.
+        self._later(_QUEUE_HINT_MS, lambda: self._hint_queued(job_id))
 
     def _insert_row(self, row: DownloadRow) -> None:
         self.downloads_empty.hide()
         self.downloads_layout.insertWidget(self.downloads_layout.count() - 1, row)
         FadeMixin.fade_in(row, duration=200, start=0.0)
 
+    def _hint_queued(self, job_id: str) -> None:
+        job = self._jobs.get(job_id)
+        if job is not None and not job.started and not job.finished:
+            job.row.mark_queued()
+
     def _cancel_job(self, job_id: str) -> None:
+        """Stop a transfer.
+
+        A running yt-dlp only notices between fragments, and one fragment can
+        take a minute on a slow mirror, so the row is closed right away and the
+        worker is left to unwind (it cleans up its partials on the way out).
+        """
         job = self._jobs.get(job_id)
         if job is None or job.finished:
             return
-        job.row.detail.setText(t("cancelling"))
         job.task.cancel()
+        self.pool.tryTake(job.task)  # drop it from the queue if it never started
+        self._on_job_cancelled(job_id)
+
+    def _on_job_started(self, job_id: str) -> None:
+        job = self._jobs.get(job_id)
+        if job is not None:
+            job.started = True
 
     def _on_progress(self, job_id: str, snapshot: object) -> None:
         job = self._jobs.get(job_id)
-        # Late progress callbacks must not overwrite a finished row.
+        # Late callbacks must not overwrite a row that already has an outcome.
         if job is not None and not job.finished:
+            job.started = True
             job.row.update_progress(snapshot)  # type: ignore[arg-type]
 
     def _on_job_finished(self, job_id: str, path: str) -> None:
         job = self._jobs.get(job_id)
-        if job is None:
+        if job is None or job.finished:
             return
         job.finished = True
         job.row.mark_done(path)
@@ -599,7 +625,7 @@ class MainWindow(QMainWindow):
 
     def _on_job_failed(self, job_id: str, detail: str) -> None:
         job = self._jobs.get(job_id)
-        if job is None:
+        if job is None or job.finished:
             return
         job.finished = True
         job.row.mark_failed(detail)
@@ -607,7 +633,7 @@ class MainWindow(QMainWindow):
 
     def _on_job_cancelled(self, job_id: str) -> None:
         job = self._jobs.get(job_id)
-        if job is None:
+        if job is None or job.finished:
             return
         job.finished = True
         job.row.mark_cancelled()
@@ -683,7 +709,19 @@ class MainWindow(QMainWindow):
         while len(self._toasts) > _MAX_TOASTS:
             self._dismiss_toast(self._toasts[0])
         self._layout_toasts()
-        QTimer.singleShot(_TOAST_LIFETIME_MS, lambda: self._dismiss_toast(toast))
+        self._later(_TOAST_LIFETIME_MS, lambda: self._dismiss_toast(toast))
+
+    def _later(self, milliseconds: int, callback: Callable[[], None]) -> None:
+        """Run a callback later, but never after the window is gone.
+
+        A bare QTimer.singleShot keeps firing while the application shuts
+        down, which is a fine way to touch deleted widgets.
+        """
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(callback)
+        timer.timeout.connect(timer.deleteLater)
+        timer.start(milliseconds)
 
     def _dismiss_toast(self, toast: Toast) -> None:
         """Drop a toast before its widget is gone, so layout never touches it."""

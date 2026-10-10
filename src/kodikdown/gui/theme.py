@@ -291,6 +291,8 @@ def stylesheet(palette: Palette) -> str:
         border-radius: 10px;
         padding: 10px 14px;
     }}
-    #toast[severity="error"] {{ background: {palette.danger}; color: #ffffff; }}
-    #toast[severity="success"] {{ background: {palette.success}; color: #ffffff; }}
+    #toast[severity="error"] {{ background: {palette.danger}; }}
+    #toast[severity="success"] {{ background: {palette.success}; }}
+    #toast QLabel {{ color: {palette.surface}; background: transparent; }}
+    #toast[severity="error"] QLabel, #toast[severity="success"] QLabel {{ color: #ffffff; }}
     """

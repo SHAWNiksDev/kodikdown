@@ -168,6 +168,7 @@ class Toast(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(14, 10, 14, 10)
         label = QLabel(text)
+        label.setObjectName("toast-text")
         label.setWordWrap(True)
         label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(label)
@@ -284,6 +285,12 @@ class DownloadRow(QFrame):
         self.apply_palette(self._palette)
 
     def update_progress(self, snapshot: ProgressSnapshot) -> None:
+        if snapshot.source == "monitor":
+            # Only the byte counter is known; keep whatever the bar shows.
+            self.detail.setText(_progress_details(snapshot))
+            self.detail.setProperty("state", "")
+            self._restyle()
+            return
         if snapshot.total:
             self.bar.set_value(100.0 * snapshot.downloaded / snapshot.total)
         elif (
@@ -327,9 +334,16 @@ class DownloadRow(QFrame):
         self.bar.reset()
         self._finish()
 
+    def mark_starting(self) -> None:
+        self.detail.setText(t("starting"))
+        self.bar.set_busy()
+
     def mark_queued(self) -> None:
         self.detail.setText(t("queued"))
         self.bar.set_busy()
+
+    def mark_cancelling(self) -> None:
+        self.detail.setText(t("cancelling"))
 
     def _finish(self) -> None:
         self.cancel_button.hide()

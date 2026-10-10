@@ -96,7 +96,7 @@ def test_download_options_send_browser_identity(tmp_path: Path) -> None:
     assert isinstance(headers, dict)
     assert headers["Referer"] == "https://cdn.example/"
     assert str(headers["User-Agent"]).startswith("Mozilla/5.0")
-    assert options["socket_timeout"] == 30.0
+    assert options["socket_timeout"] == 15.0
     assert options["retries"] == 10
     assert options["noplaylist"] is True
     assert options["cachedir"] is False
@@ -199,6 +199,41 @@ def test_remove_partials_keeps_finished_files(tmp_path: Path) -> None:
 
     assert blocked is False
     assert sorted(p.name for p in tmp_path.iterdir()) == ["movie.Part.2.mp4", "movie.mp4"]
+
+
+def test_monitor_reports_bytes_while_ytdlp_is_quiet(tmp_path: Path) -> None:
+    snapshots: list[ProgressSnapshot] = []
+    downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)
+    target = tmp_path / "clip"
+
+    downloader._start_monitor(target)
+    try:
+        (tmp_path / "clip.mp4.part").write_bytes(b"x" * 4096)
+        (tmp_path / "clip.mp4.part-Frag3").write_bytes(b"y" * 2048)
+        deadline = time.monotonic() + 5
+        while not snapshots and time.monotonic() < deadline:
+            time.sleep(0.1)
+    finally:
+        downloader._stop_monitor()
+
+    assert snapshots, "the monitor never reported the partial files"
+    assert snapshots[0].downloaded == 6144
+    assert snapshots[0].stage == "downloading"
+
+
+def test_monitor_stays_quiet_right_after_a_real_snapshot(tmp_path: Path) -> None:
+    snapshots: list[ProgressSnapshot] = []
+    downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)
+    (tmp_path / "clip.mp4.part").write_bytes(b"x" * 1024)
+
+    downloader._start_monitor(tmp_path / "clip")
+    try:
+        downloader._hook({"status": "downloading", "downloaded_bytes": 10, "total_bytes": 100})
+        time.sleep(0.8)
+    finally:
+        downloader._stop_monitor()
+
+    assert [snapshot.downloaded for snapshot in snapshots] == [10]
 
 
 def test_download_blocking_respects_pre_set_cancel(tmp_path: Path) -> None:

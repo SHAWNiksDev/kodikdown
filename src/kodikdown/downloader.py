@@ -16,6 +16,10 @@ import yt_dlp
 from kodikdown.net import USER_AGENT
 
 _PROGRESS_INTERVAL = 0.12
+# yt-dlp only reports between fragments, and a single fragment can be several
+# megabytes on a slow mirror, so the UI is also fed from the files on disk.
+_MONITOR_INTERVAL = 0.6
+_MONITOR_QUIET_PERIOD = 1.4
 # Cold Kodik CDN nodes regularly need more than one attempt for the manifest,
 # and a plain socket read can stall for a while before it starts answering.
 _TRANSFER_ATTEMPTS = 3
@@ -44,6 +48,9 @@ class ProgressSnapshot:
     eta: float | None = None
     fragments: bool = False
     stage: str = "downloading"
+    # "monitor" snapshots only know the bytes on disk: they must not fight the
+    # accurate totals yt-dlp reports later.
+    source: str = "ytdlp"
 
 
 ProgressListener = Callable[[ProgressSnapshot], None]
@@ -165,7 +172,7 @@ class Downloader:
         cancel_event: threading.Event | None = None,
         *,
         concurrent_fragments: int = 8,
-        socket_timeout: float = 30.0,
+        socket_timeout: float = 15.0,
         retries: int = 10,
         filename: str | None = None,
     ) -> None:
@@ -179,6 +186,8 @@ class Downloader:
         self._last_emit = 0.0
         self._last_snapshot: ProgressSnapshot | None = None
         self._logger = _CollectingLogger()
+        self._monitor_stop = threading.Event()
+        self._monitor: threading.Thread | None = None
 
     # -- control -----------------------------------------------------------
     def cancel(self) -> None:
@@ -201,12 +210,14 @@ class Downloader:
 
         stem = safe_filename(self._filename or title)
         target_base = unique_target(self.output_dir, stem)
+        self._start_monitor(target_base)
         try:
             self._transfer_with_retries(target_base, url, referer)
         except DownloadCancelled:
             self._cleanup_cancelled(target_base)
             raise
         finally:
+            self._stop_monitor()
             release_target(target_base)
 
         if self.cancelled:
@@ -219,6 +230,41 @@ class Downloader:
             detail = self._logger.last_error or "no file was written"
             raise DownloadFailed(f"download finished without a file: {detail}")
         return produced
+
+    # -- progress monitor --------------------------------------------------
+    def _start_monitor(self, target_base: Path) -> None:
+        if self._listener is None:
+            return
+        self._monitor_stop = threading.Event()
+        self._monitor = threading.Thread(
+            target=self._monitor_loop,
+            args=(target_base,),
+            name="kodikdown-progress",
+            daemon=True,
+        )
+        self._monitor.start()
+
+    def _stop_monitor(self) -> None:
+        self._monitor_stop.set()
+        if self._monitor is not None:
+            self._monitor.join(timeout=2)
+            self._monitor = None
+
+    def _monitor_loop(self, target_base: Path) -> None:
+        """Report the growing partial files while yt-dlp itself stays silent."""
+        last_bytes = 0
+        last_time = time.monotonic()
+        while not self._monitor_stop.wait(_MONITOR_INTERVAL):
+            if time.monotonic() - self._last_emit < _MONITOR_QUIET_PERIOD:
+                continue
+            size = _bytes_on_disk(target_base)
+            now = time.monotonic()
+            elapsed = now - last_time
+            speed = (size - last_bytes) / elapsed if elapsed > 0 and size > last_bytes else None
+            last_bytes, last_time = size, now
+            if size <= 0:
+                continue
+            self._emit(ProgressSnapshot(downloaded=size, speed=speed, source="monitor"))
 
     def _transfer_with_retries(self, target_base: Path, url: str, referer: str) -> None:
         """Retry a transfer that died on a network hiccup.
@@ -391,6 +437,22 @@ class Downloader:
         if self._listener is not None:
             with contextlib.suppress(Exception):
                 self._listener(snapshot)
+
+
+def _bytes_on_disk(target_base: Path) -> int:
+    """Everything yt-dlp has written for this target so far, fragmented or not."""
+    parent = target_base.parent
+    if not parent.exists():
+        return 0
+    total = 0
+    for path in parent.glob(f"{glob_escape(target_base.name)}.*"):
+        if path.is_dir():
+            continue
+        try:
+            total += path.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 def _is_transient(message: str) -> bool:
