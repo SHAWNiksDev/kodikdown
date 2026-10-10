@@ -6,9 +6,11 @@ Build from the repository root:
     pyinstaller packaging/kodikdown-cli.spec --noconfirm
 """
 
+import os
 from pathlib import Path
 
 ROOT = Path(SPECPATH).resolve().parent  # noqa: F821 - injected by PyInstaller
+NAME = os.environ.get("KODIKDOWN_BUILD_NAME", "kodikdown-cli").strip() or "kodikdown-cli"
 
 a = Analysis(  # noqa: F821 - injected by PyInstaller
     [str(ROOT / "src" / "kodikdown" / "cli.py")],
@@ -29,7 +31,7 @@ exe = EXE(  # noqa: F821 - injected by PyInstaller
     a.binaries,
     a.datas,
     [],
-    name="kodikdown-cli",
+    name=NAME,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

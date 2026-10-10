@@ -27,9 +27,13 @@ jobs:
           python-version: "3.12"
       - run: pip install -e '.[dev]'
       - name: Build the desktop app
-        run: pyinstaller packaging/kodikdown.spec --noconfirm --name "${{ matrix.gui }}"
+        env:
+          KODIKDOWN_BUILD_NAME: ${{ matrix.gui }}
+        run: pyinstaller packaging/kodikdown.spec --noconfirm
       - name: Build the command-line tool
-        run: pyinstaller packaging/kodikdown-cli.spec --noconfirm --name "${{ matrix.cli }}"
+        env:
+          KODIKDOWN_BUILD_NAME: ${{ matrix.cli }}
+        run: pyinstaller packaging/kodikdown-cli.spec --noconfirm
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.gui }}

@@ -39,6 +39,7 @@ dev = [
 
 [project.scripts]
 kodikdown = "kodikdown.cli:main"
+kodikdown-cli = "kodikdown.cli:main"
 
 [project.urls]
 Repository = "https://github.com/SHAWNiksDev/kodikdown"

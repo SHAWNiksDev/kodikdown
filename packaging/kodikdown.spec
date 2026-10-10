@@ -6,9 +6,13 @@ Build from the repository root:
     pyinstaller packaging/kodikdown.spec --noconfirm
 """
 
+import os
 from pathlib import Path
 
 ROOT = Path(SPECPATH).resolve().parent  # noqa: F821 - injected by PyInstaller
+# Release builds rename the artefact per platform; PyInstaller ignores --name
+# when a spec file is used, so the name has to come from the environment.
+NAME = os.environ.get("KODIKDOWN_BUILD_NAME", "kodikdown").strip() or "kodikdown"
 
 # Qt ships a lot more than a widgets app needs; leaving the multimedia,
 # web-engine and QML stacks out keeps the one-file build reasonable.
@@ -82,7 +86,7 @@ exe = EXE(  # noqa: F821 - injected by PyInstaller
     a.binaries,
     a.datas,
     [],
-    name="kodikdown",
+    name=NAME,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

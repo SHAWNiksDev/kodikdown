@@ -40,8 +40,9 @@ Or from source (Python 3.11+):
 
 ```bash
 pip install .
-kodikdown            # the window
-kodikdown <link>     # the window, with the lookup already running
+kodikdown              # the window
+kodikdown <link>       # the window, with the lookup already running
+kodikdown-cli download "<url>"   # the CLI
 ```
 
 The binaries have no runtime dependencies. yt-dlp uses its built-in HLS
@@ -181,6 +182,7 @@ is a player client, not a license to pirate.
 ```bash
 pip install .
 kodikdown
+kodikdown-cli download "<ссылка>"
 ```
 
 Бинарникам ничего не нужно для работы: yt-dlp скачивает HLS своим встроенным
