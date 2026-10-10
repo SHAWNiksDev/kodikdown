@@ -94,5 +94,6 @@ exe = EXE(  # noqa: F821 - injected by PyInstaller
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
-    icon=str(ROOT / "docs" / "app.png") if (ROOT / "docs" / "app.png").exists() else None,
+    # A plain .ico: turning a PNG into one would need Pillow on build machines.
+    icon=str(ROOT / "docs" / "app.ico") if (ROOT / "docs" / "app.ico").exists() else None,
 )
