@@ -5,6 +5,7 @@ import http.server
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -234,6 +235,29 @@ def test_monitor_stays_quiet_right_after_a_real_snapshot(tmp_path: Path) -> None
         downloader._stop_monitor()
 
     assert [snapshot.downloaded for snapshot in snapshots] == [10]
+
+
+def test_cancel_cleans_up_outside_the_exception_handler(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows keeps *.part files open while a traceback still holds them."""
+    contexts: list[object] = []
+
+    def failing_transfer(self: Downloader, target_base: Path, url: str, referer: str) -> None:
+        raise DownloadCancelled
+
+    def spy_cleanup(self: Downloader, target_base: Path) -> None:
+        contexts.append(sys.exc_info())
+
+    monkeypatch.setattr(Downloader, "_transfer_with_retries", failing_transfer)
+    monkeypatch.setattr(Downloader, "_cleanup_cancelled", spy_cleanup)
+    downloader = Downloader(output_dir=tmp_path)
+
+    with pytest.raises(DownloadCancelled):
+        downloader.download_blocking("https://cdn/x.m3u8", "clip", "https://cdn/")
+
+    assert contexts, "the partial files were never cleaned up"
+    assert contexts[0] == (None, None, None), "cleanup ran with the traceback still alive"
 
 
 def test_download_blocking_respects_pre_set_cancel(tmp_path: Path) -> None:

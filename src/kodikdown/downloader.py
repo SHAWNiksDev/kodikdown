@@ -211,16 +211,19 @@ class Downloader:
         stem = safe_filename(self._filename or title)
         target_base = unique_target(self.output_dir, stem)
         self._start_monitor(target_base)
+        cancelled = False
         try:
             self._transfer_with_retries(target_base, url, referer)
         except DownloadCancelled:
-            self._cleanup_cancelled(target_base)
-            raise
+            cancelled = True
         finally:
             self._stop_monitor()
             release_target(target_base)
 
-        if self.cancelled:
+        # Clean up only after leaving the exception handler: yt-dlp's traceback
+        # keeps the unfinished files referenced (and on Windows open), so they
+        # would survive the deletion.
+        if cancelled or self.cancelled:
             self._cleanup_cancelled(target_base)
             raise DownloadCancelled
 
@@ -313,13 +316,12 @@ class Downloader:
     def _cleanup_cancelled(self, target_base: Path) -> None:
         """Drop the partial files left behind by a cancelled transfer.
 
-        A cancelled yt-dlp run keeps some fragment workers alive for a moment,
-        and on Windows an open handle blocks deletion, so give the filesystem a
-        few tries before giving up. The explicit collect breaks the reference
-        cycles those workers are parked in.
+        A cancelled yt-dlp run keeps some fragment workers and their file
+        handles alive for a moment, and Windows refuses to delete an open file,
+        so collect the leftover cycles and retry the deletion a few times.
         """
-        gc.collect()
         for attempt in range(_REMOVAL_ATTEMPTS):
+            gc.collect()
             if not self._remove_partials(target_base):
                 return
             time.sleep(0.15 * (attempt + 1))
