@@ -45,11 +45,28 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
           path: dist
+      - name: Take the notes for this tag from the changelog
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          version = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          section = re.search(
+              rf"^## \[{re.escape(version)}\].*?(?=^## \[|\Z)", changelog, re.M | re.S
+          )
+          body = section.group(0).strip() if section else f"KodikDown {version}."
+          pathlib.Path("release-notes.md").write_text(body + "\n", encoding="utf-8")
+          print(body.splitlines()[0])
+          PY
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: release-notes.md

@@ -5,7 +5,8 @@
 
 A small desktop app for Windows and Linux that turns Kodik player links into
 downloaded video files. Paste a link (a whole `<iframe>` tag works too), pick a
-voice-over and a quality, hit download. No browser, no Chromium, no devtools.
+voice-over and a quality, hit download. No browser, no Chromium, no devtools. See the
+[changelog](CHANGELOG.md) for what changed in each release.
 
 ![KodikDown main window](docs/main-light.png)
 
@@ -150,6 +151,7 @@ is a player client, not a license to pirate.
 ссылки на плеер Kodik в скачанные видеофайлы. Вставьте ссылку (можно целиком
 тег `<iframe>`), выберите озвучку и качество, нажмите «Скачать». Никакого
 браузера и Chromium — приложение общается с API плеера напрямую.
+Что менялось в каждой версии — в [changelog](CHANGELOG.md).
 
 ![Главное окно](docs/main-light.png)
 
