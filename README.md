@@ -41,9 +41,10 @@ Or from source (Python 3.11+):
 
 ```bash
 pip install .
-kodikdown              # the window
-kodikdown <link>       # the window, with the lookup already running
-kodikdown-cli download "<url>"   # the CLI
+kodikdown                          # the window
+kodikdown <link>                   # the window, with the lookup already running
+kodikdown download "<url>"         # the CLI
+kodikdown-cli download "<url>"     # alternative CLI command
 ```
 
 The binaries have no runtime dependencies. yt-dlp uses its built-in HLS

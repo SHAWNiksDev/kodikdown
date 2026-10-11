@@ -44,6 +44,7 @@ class ResolverWorker(QObject):
         self._ready = threading.Event()
         self._current: asyncio.Task[Any] | None = None
         self._lock = threading.Lock()
+        self._is_shut_down = False
         self._thread = threading.Thread(target=self._run_loop, name="kodikdown-async", daemon=True)
         self._thread.start()
         self._ready.wait(timeout=5)
@@ -80,7 +81,14 @@ class ResolverWorker(QObject):
             self._loop.call_soon_threadsafe(task.cancel)
 
     def shutdown(self) -> None:
+        if self._is_shut_down:
+            return
+        self._is_shut_down = True
         self.cancel()
+        if self._loop.is_running():
+            with contextlib.suppress(Exception):
+                future = asyncio.run_coroutine_threadsafe(self._client.close(), self._loop)
+                future.result(timeout=2)
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout=3)
 

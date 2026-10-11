@@ -126,3 +126,43 @@ def test_all_mirrors_down_exits_with_network_code() -> None:
     result = CliRunner().invoke(app, ["download", PAGE_URL, "--print-url"])
 
     assert result.exit_code == 4
+
+
+def test_cli_format_helpers() -> None:
+    from kodikdown.cli import _format_duration, _format_size, _format_speed
+
+    assert _format_size(0) == "0 B"
+    assert _format_size(500) == "500 B"
+    assert _format_size(1024 * 1024 * 5) == "5.0 MB"
+    assert _format_speed(1024 * 1024 * 2) == "2.0 MB/s"
+    assert _format_duration(65) == "1:05"
+    assert _format_duration(3665) == "1:01:05"
+
+
+def test_gui_command_invokes_launch_gui(monkeypatch) -> None:
+    launched = False
+
+    def fake_launch() -> None:
+        nonlocal launched
+        launched = True
+
+    monkeypatch.setattr("kodikdown.cli.launch_gui", fake_launch)
+    CliRunner().invoke(app, ["gui", PAGE_URL])
+    assert launched is True
+
+
+def test_main_url_argument_routes_to_gui(monkeypatch) -> None:
+    import sys
+
+    from kodikdown.cli import main
+
+    launched = False
+
+    def fake_launch() -> None:
+        nonlocal launched
+        launched = True
+
+    monkeypatch.setattr("kodikdown.cli.launch_gui", fake_launch)
+    monkeypatch.setattr(sys, "argv", ["kodikdown", PAGE_URL])
+    main()
+    assert launched is True

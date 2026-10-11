@@ -135,8 +135,12 @@ class KodikClient:
             try:
                 async with asyncio.timeout(_TOTAL_TIMEOUT):
                     resolved = await self._resolve_on(host, embed, translation)
-            except (HostUnavailableError, NoStreamsError) as exc:
-                last_error = exc
+            except (RequestFailedError, NoStreamsError, TimeoutError) as exc:
+                last_error = (
+                    exc
+                    if not isinstance(exc, TimeoutError)
+                    else HostUnavailableError(f"host {host} timed out")
+                )
                 continue
             self._preferred_host = host
             return resolved

@@ -106,18 +106,18 @@ def unique_target(directory: Path, stem: str) -> Path:
     with _RESERVED_LOCK:
         candidate = directory / stem
         index = 2
-        while str(candidate) in _RESERVED_TARGETS or _existing_media(candidate):
+        while str(candidate.resolve()) in _RESERVED_TARGETS or _existing_media(candidate):
             candidate = directory / f"{stem} ({index})"
             index += 1
-            if index > 100:
+            if index > 1000:
                 raise FileExistsError(f"no free file name left for {stem!r}")
-        _RESERVED_TARGETS.add(str(candidate))
+        _RESERVED_TARGETS.add(str(candidate.resolve()))
         return candidate
 
 
 def release_target(target: Path) -> None:
     with _RESERVED_LOCK:
-        _RESERVED_TARGETS.discard(str(target))
+        _RESERVED_TARGETS.discard(str(target.resolve()))
 
 
 def _existing_media(target_base: Path) -> bool:
@@ -127,7 +127,9 @@ def _existing_media(target_base: Path) -> bool:
     return any(
         path
         for path in target_base.parent.glob(pattern)
-        if path.suffix.lower() not in _PARTIAL_SUFFIXES and _PARTIAL_MARKER not in path.name
+        if path.is_file()
+        and path.suffix.lower() not in _PARTIAL_SUFFIXES
+        and _PARTIAL_MARKER not in path.name
     )
 
 
@@ -204,7 +206,10 @@ class Downloader:
     def download_blocking(self, url: str, title: str, referer: str) -> Path:
         if self.cancelled:
             raise DownloadCancelled
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise DownloadFailed(f"could not create folder {self.output_dir}: {exc}") from exc
         if not self.output_dir.is_dir():
             raise DownloadFailed(f"{self.output_dir} is not a folder")
 
@@ -283,7 +288,8 @@ class Downloader:
                 last = attempt + 1 == _TRANSFER_ATTEMPTS
                 if last or self.cancelled or not _is_transient(str(exc)):
                     raise
-                time.sleep(_RETRY_DELAY * (attempt + 1))
+                if self._cancel_event.wait(_RETRY_DELAY * (attempt + 1)):
+                    raise DownloadCancelled from exc
 
     def _transfer(self, target_base: Path, url: str, referer: str) -> None:
         try:
@@ -306,7 +312,9 @@ class Downloader:
         produced = [
             path
             for path in parent.glob(pattern)
-            if path.suffix.lower() not in _PARTIAL_SUFFIXES and _PARTIAL_MARKER not in path.name
+            if path.is_file()
+            and path.suffix.lower() not in _PARTIAL_SUFFIXES
+            and _PARTIAL_MARKER not in path.name
         ]
         if not produced:
             return None
@@ -336,7 +344,8 @@ class Downloader:
     def _options(self, target_base: Path, referer: str) -> dict[str, object]:
         return {
             "format": "best",
-            "outtmpl": f"{target_base}.%(ext)s",
+            "paths": {"home": str(target_base.parent)},
+            "outtmpl": f"{target_base.name}.%(ext)s",
             "noplaylist": True,
             "concurrent_fragment_downloads": self._concurrent_fragments,
             "retries": self._retries,
@@ -368,7 +377,7 @@ class Downloader:
         pattern = f"{glob_escape(target_base.name)}.*"
         blocked = False
         for path in parent.glob(pattern):
-            if path.suffix not in _PARTIAL_SUFFIXES and _PARTIAL_MARKER not in path.name:
+            if path.suffix.lower() not in _PARTIAL_SUFFIXES and _PARTIAL_MARKER not in path.name:
                 continue
             try:
                 path.unlink()
@@ -392,7 +401,7 @@ class Downloader:
         total = status.get("total_bytes") or status.get("total_bytes_estimate")
         # HLS downloads sometimes report only fragment counters.
         fragments = False
-        if downloaded is None:
+        if (total is None and status.get("fragment_count")) or downloaded is None:
             index = status.get("fragment_index")
             count = status.get("fragment_count")
             if isinstance(index, (int, float)) and isinstance(count, (int, float)) and count:

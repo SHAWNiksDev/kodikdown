@@ -32,7 +32,13 @@ from kodikdown.gui.desktop import open_directory, open_path, reveal_path
 from kodikdown.gui.icons import app_icon, icon
 from kodikdown.gui.settings_dialog import SettingsDialog
 from kodikdown.gui.theme import MODE_AUTO, MODE_DARK, MODE_LIGHT, palette_for, stylesheet
-from kodikdown.gui.widgets import DownloadRow, FadeMixin, ProgressBar, Toast
+from kodikdown.gui.widgets import (
+    AnimatedIconButton,
+    DownloadRow,
+    FadeMixin,
+    ProgressBar,
+    Toast,
+)
 from kodikdown.gui.workers import DownloadTask, ResolverWorker
 from kodikdown.i18n import set_language, t
 from kodikdown.kodik.models import ResolvedVideo, StreamVariant, Translation, referer_for
@@ -111,28 +117,38 @@ class MainWindow(QMainWindow):
         header = QWidget()
         header.setObjectName("header")
         layout = QHBoxLayout(header)
-        layout.setContentsMargins(18, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(18, 12, 14, 12)
+        layout.setSpacing(12)
+
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(10)
+        self._logo_label = QLabel()
+        self._logo_label.setFixedSize(28, 28)
+        self._logo_label.setPixmap(app_icon(self._palette.accent, 28).pixmap(28, 28))
 
         brand_box = QVBoxLayout()
-        brand_box.setSpacing(0)
+        brand_box.setSpacing(1)
         brand = QLabel(t("app_title"))
         brand.setObjectName("brand")
         self._brand_sub = QLabel(f"v{__version__}")
         self._brand_sub.setObjectName("brand-sub")
+        self._brand_sub.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         brand_box.addWidget(brand)
         brand_box.addWidget(self._brand_sub)
-        layout.addLayout(brand_box)
+
+        brand_row.addWidget(self._logo_label)
+        brand_row.addLayout(brand_box)
+        layout.addLayout(brand_row)
         layout.addStretch(1)
 
-        self.theme_button = QPushButton()
+        self.theme_button = AnimatedIconButton()
         self.theme_button.setObjectName("icon")
         self.theme_button.setFixedSize(QSize(34, 34))
         self.theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.theme_button.setToolTip(t("toggle_theme"))
         self.theme_button.clicked.connect(self._toggle_theme)
 
-        self.settings_button = QPushButton()
+        self.settings_button = AnimatedIconButton()
         self.settings_button.setObjectName("icon")
         self.settings_button.setFixedSize(QSize(34, 34))
         self.settings_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -156,12 +172,14 @@ class MainWindow(QMainWindow):
 
         self.paste_button = QPushButton(t("paste"))
         self.paste_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.paste_button.setIcon(icon("clipboard", self._palette.text_muted, 15))
         self.paste_button.clicked.connect(self._paste)
 
         self.find_button = QPushButton(t("resolve"))
         self.find_button.setObjectName("primary")
         self.find_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.find_button.setMinimumWidth(120)
+        self.find_button.setIcon(icon("play", "#ffffff", 15))
+        self.find_button.setMinimumWidth(125)
         self.find_button.clicked.connect(self._on_find)
 
         layout.addWidget(self.url_edit, 1)
@@ -256,10 +274,12 @@ class MainWindow(QMainWindow):
         self.mp4_check.setChecked(self.settings.prefer_mp4)
         self.download_button = QPushButton(t("download"))
         self.download_button.setObjectName("primary")
+        self.download_button.setIcon(icon("download", "#ffffff", 16))
         self.download_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.download_button.setMinimumWidth(130)
         self.download_button.clicked.connect(self._on_download)
         self.open_folder_button = QPushButton(t("open_folder"))
+        self.open_folder_button.setIcon(icon("folder", self._palette.text_muted, 15))
         self.open_folder_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.open_folder_button.clicked.connect(
             lambda: self._open_folder(self.settings.download_dir)
@@ -282,6 +302,7 @@ class MainWindow(QMainWindow):
         self.downloads_caption.setObjectName("section")
         self.clear_button = QPushButton(t("clear_finished"))
         self.clear_button.setObjectName("link")
+        self.clear_button.setIcon(icon("trash", self._palette.accent, 14))
         self.clear_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_button.clicked.connect(self._clear_finished)
 
@@ -321,6 +342,7 @@ class MainWindow(QMainWindow):
         self.folder_label.setObjectName("muted")
         self.folder_button = QPushButton(t("open_folder"))
         self.folder_button.setObjectName("link")
+        self.folder_button.setIcon(icon("folder", self._palette.accent, 14))
         self.folder_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.folder_button.clicked.connect(lambda: self._open_folder(self.settings.download_dir))
         layout.addWidget(self.folder_label, 1)
@@ -331,12 +353,14 @@ class MainWindow(QMainWindow):
     def apply_theme(self, mode: str, *, animate: bool = False) -> None:
         previous = self._palette
         self._palette = palette_for(mode)
-        self.setStyleSheet(stylesheet(self._palette))
+        if animate and previous.mode != self._palette.mode and self.isVisible():
+            FadeMixin.crossfade_widget(self, stylesheet(self._palette))
+        else:
+            self.setStyleSheet(stylesheet(self._palette))
         self._refresh_icons()
-        if animate and previous.mode != self._palette.mode:
-            FadeMixin.fade_in(self.centralWidget() or self, duration=200, start=0.65)
 
     def _toggle_theme(self) -> None:
+        self.theme_button.trigger_spin()
         target = MODE_LIGHT if self._palette.is_dark else MODE_DARK
         self.settings = self.settings.updated(theme=target)
         self.store.save(self.settings)
@@ -346,6 +370,15 @@ class MainWindow(QMainWindow):
         colour = self._palette.text_muted
         self.theme_button.setIcon(icon("sun" if self._palette.is_dark else "moon", colour, 20))
         self.settings_button.setIcon(icon("settings", colour, 20))
+        self._logo_label.setPixmap(app_icon(self._palette.accent, 28).pixmap(28, 28))
+        self.paste_button.setIcon(icon("clipboard", colour, 15))
+        self.find_button.setIcon(
+            icon("close", "#ffffff", 15) if self._resolving else icon("play", "#ffffff", 15)
+        )
+        self.download_button.setIcon(icon("download", "#ffffff", 16))
+        self.open_folder_button.setIcon(icon("folder", colour, 15))
+        self.clear_button.setIcon(icon("trash", colour, 14))
+        self.folder_button.setIcon(icon("folder", self._palette.accent, 14))
         for job in self._jobs.values():
             job.row.apply_palette(self._palette)
 
@@ -430,17 +463,24 @@ class MainWindow(QMainWindow):
     def _set_resolving(self, resolving: bool) -> None:
         self._resolving = resolving
         self.find_button.setText(t("cancel") if resolving else t("resolve"))
+        self.find_button.setIcon(
+            icon("close", "#ffffff", 15) if resolving else icon("play", "#ffffff", 15)
+        )
         self.download_button.setEnabled(not resolving and self._resolved is not None)
         if resolving:
             self.resolve_bar.set_busy()
             self.resolve_bar.show()
+            FadeMixin.fade_in(self.resolve_bar, duration=180)
         else:
+            self.resolve_bar.reset()
             self.resolve_bar.hide()
 
     def _on_resolved(self, request_id: int, resolved: ResolvedVideo) -> None:
         if request_id != self._request_id:
             return
         same_video = self._url_in_use == self._resolved_url and bool(self._resolved_url)
+        if not same_video:
+            self._name_edited = False
         self._resolved_url = self._url_in_use
         self._resolved = resolved
         self._variants = resolved.variants
@@ -654,6 +694,7 @@ class MainWindow(QMainWindow):
 
     # -- dialogs and helpers ----------------------------------------------
     def open_settings(self) -> None:
+        self.settings_button.trigger_spin()
         dialog = SettingsDialog(self.settings, self.store, self)
         if dialog.exec() != SettingsDialog.DialogCode.Accepted:
             return
@@ -703,7 +744,7 @@ class MainWindow(QMainWindow):
         self.status_label.style().polish(self.status_label)
 
     def _toast(self, message: str, severity: str = "info") -> None:
-        toast = Toast(message, severity, self)
+        toast = Toast(message, severity, self, self._palette)
         toast.setMaximumWidth(min(460, max(260, self.width() - 80)))
         self._toasts.append(toast)
         while len(self._toasts) > _MAX_TOASTS:

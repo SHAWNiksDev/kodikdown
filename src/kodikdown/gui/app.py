@@ -51,7 +51,7 @@ def run(argv: list[str] | None = None) -> int:
     url = _url_argument(argv if argv is not None else sys.argv)
     if url:
         window.prefill(url)
-    return application.exec()
+    return int(application.exec())
 
 
 def _url_argument(argv: list[str]) -> str:

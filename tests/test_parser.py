@@ -275,3 +275,36 @@ def test_signed_form_omits_empty_ref() -> None:
 
     assert "ref" not in form
     assert "ref_sign" not in form
+
+
+def test_extract_embed_keeps_query_with_slash() -> None:
+    info = extract_embed(f"https://kodikplayer.com/serial/42/{HASH}/720p/?episode=5&season=2")
+    assert info.query == "episode=5&season=2"
+    bare = extract_embed(f"https://kodikplayer.com/serial/42/{HASH}/?episode=5&season=2")
+    assert bare.query == "episode=5&season=2"
+
+
+def test_extract_title_meta_content_before_property() -> None:
+    page = '<html><head><meta content="Solo Leveling" property="og:title"></head></html>'
+    assert extract_title(page) == "Solo Leveling"
+
+
+def test_extract_url_params_supports_let_const_window() -> None:
+    page = (
+        '<script>const domain = "animego.org"; let d_sign = "x:1"; window.pd = "kodikplayer.com";'
+        ' var pd_sign = "y:1"; const ref = "https://animego.org/"; let ref_sign = "z:1";</script>'
+    )
+    params = extract_url_params(page)
+    assert params["d"] == "animego.org"
+    assert params["d_sign"] == "x:1"
+    assert params["pd"] == "kodikplayer.com"
+    assert params["ref"] == "https://animego.org/"
+
+
+def test_extract_payload_supports_object_literal() -> None:
+    page = "<script>const vInfo = { type: 'video', hash: 'abc123def4567890', id: '42' };</script>"
+    payload = extract_payload(page)
+    assert payload is not None
+    assert payload.media_type == "video"
+    assert payload.video_id == "42"
+    assert payload.content_hash == "abc123def4567890"

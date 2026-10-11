@@ -39,38 +39,38 @@ class Palette:
 
 LIGHT = Palette(
     mode=MODE_LIGHT,
-    background="#f4f5f7",
+    background="#f8fafc",
     surface="#ffffff",
-    surface_alt="#eceef2",
-    border="#dfe3e9",
-    border_strong="#c8ced8",
-    text="#171a1f",
-    text_muted="#6a7280",
-    accent="#2f6fed",
-    accent_hover="#2a63d4",
-    accent_soft="#e6edfd",
-    success="#1a8f52",
-    danger="#cf3f45",
-    warning="#9a6b12",
-    shadow="rgba(15, 23, 42, 0.10)",
+    surface_alt="#f1f5f9",
+    border="#e2e8f0",
+    border_strong="#cbd5e1",
+    text="#0f172a",
+    text_muted="#64748b",
+    accent="#2563eb",
+    accent_hover="#1d4ed8",
+    accent_soft="#eff6ff",
+    success="#16a34a",
+    danger="#dc2626",
+    warning="#d97706",
+    shadow="rgba(15, 23, 42, 0.08)",
 )
 
 DARK = Palette(
     mode=MODE_DARK,
-    background="#15171c",
-    surface="#1d2027",
-    surface_alt="#24272f",
-    border="#2d323c",
-    border_strong="#3b414d",
-    text="#e7e9ee",
-    text_muted="#98a1af",
-    accent="#5b8dfa",
-    accent_hover="#6f9cff",
-    accent_soft="#22304d",
-    success="#37c07d",
-    danger="#ef6b70",
-    warning="#dcb256",
-    shadow="rgba(0, 0, 0, 0.45)",
+    background="#0f1117",
+    surface="#181b22",
+    surface_alt="#212631",
+    border="#2b3240",
+    border_strong="#3d4659",
+    text="#f1f5f9",
+    text_muted="#94a3b8",
+    accent="#3b82f6",
+    accent_hover="#60a5fa",
+    accent_soft="#1e293b",
+    success="#22c55e",
+    danger="#ef4444",
+    warning="#f59e0b",
+    shadow="rgba(0, 0, 0, 0.50)",
 )
 
 
@@ -88,10 +88,10 @@ def _qt_color_scheme() -> str | None:
     application = QGuiApplication.instance()
     if application is None:
         return None
-    try:
-        scheme = application.styleHints().colorScheme()  # type: ignore[attr-defined]
-    except AttributeError:  # very old Qt
+    style_hints = getattr(application, "styleHints", None)
+    if style_hints is None:
         return None
+    scheme = getattr(style_hints(), "colorScheme", lambda: None)()
     if scheme == Qt.ColorScheme.Dark:
         return MODE_DARK
     if scheme == Qt.ColorScheme.Light:
@@ -141,7 +141,7 @@ def palette_for(mode: str) -> Palette:
 def stylesheet(palette: Palette) -> str:
     return f"""
     * {{
-        font-family: "Segoe UI", "Inter", "Noto Sans", "DejaVu Sans", sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", "Roboto", "Noto Sans", sans-serif;
         font-size: 13px;
         outline: none;
     }}
@@ -156,29 +156,65 @@ def stylesheet(palette: Palette) -> str:
         background: {palette.surface};
         border-bottom: 1px solid {palette.border};
     }}
-    #brand {{ font-size: 15px; font-weight: 600; }}
-    #brand-sub {{ color: {palette.text_muted}; font-size: 11px; }}
+    #brand {{
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: -0.2px;
+    }}
+    #brand-sub {{
+        color: {palette.text_muted};
+        font-size: 10px;
+        font-weight: 600;
+        background: {palette.surface_alt};
+        border-radius: 4px;
+        padding: 1px 5px;
+    }}
     #card, #panel {{
         background: {palette.surface};
         border: 1px solid {palette.border};
         border-radius: 12px;
     }}
-    #panel-title {{ font-size: 14px; font-weight: 600; }}
-    #muted, #hint, #status {{ color: {palette.text_muted}; }}
-    #status[state="error"] {{ color: {palette.danger}; }}
-    #status[state="success"] {{ color: {palette.success}; }}
+    #panel-title {{
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.3;
+    }}
+    #muted, #hint, #status {{
+        color: {palette.text_muted};
+    }}
+    #status {{
+        padding: 2px 0px;
+    }}
+    #status[state="error"] {{
+        color: {palette.danger};
+        font-weight: 500;
+    }}
+    #status[state="success"] {{
+        color: {palette.success};
+        font-weight: 500;
+    }}
     QLineEdit, QComboBox, QSpinBox {{
         background: {palette.surface};
         border: 1px solid {palette.border};
         border-radius: 8px;
-        padding: 7px 10px;
+        padding: 8px 12px;
         selection-background-color: {palette.accent};
         selection-color: #ffffff;
     }}
-    QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{ border-color: {palette.border_strong}; }}
-    QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {palette.accent}; }}
-    QLineEdit:disabled, QComboBox:disabled {{ color: {palette.text_muted}; }}
-    QComboBox::drop-down {{ border: none; width: 22px; }}
+    QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{
+        border-color: {palette.border_strong};
+    }}
+    QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
+        border-color: {palette.accent};
+    }}
+    QLineEdit:disabled, QComboBox:disabled {{
+        color: {palette.text_muted};
+        background: {palette.surface_alt};
+    }}
+    QComboBox::drop-down {{
+        border: none;
+        width: 24px;
+    }}
     QComboBox QAbstractItemView {{
         background: {palette.surface};
         border: 1px solid {palette.border};
@@ -193,68 +229,140 @@ def stylesheet(palette: Palette) -> str:
         border: 1px solid {palette.border};
         border-radius: 8px;
         padding: 7px 14px;
+        font-weight: 500;
     }}
-    QPushButton:hover {{ background: {palette.surface_alt}; border-color: {palette.border_strong}; }}
-    QPushButton:pressed {{ background: {palette.surface_alt}; }}
-    QPushButton:disabled {{ color: {palette.text_muted}; border-color: {palette.border}; }}
+    QPushButton:hover {{
+        background: {palette.surface_alt};
+        border-color: {palette.border_strong};
+    }}
+    QPushButton:pressed {{
+        background: {palette.border};
+    }}
+    QPushButton:disabled {{
+        color: {palette.text_muted};
+        border-color: {palette.border};
+        background: {palette.surface_alt};
+    }}
     QPushButton#primary {{
         background: {palette.accent};
         border: 1px solid {palette.accent};
         color: #ffffff;
         font-weight: 600;
     }}
-    QPushButton#primary:hover {{ background: {palette.accent_hover}; border-color: {palette.accent_hover}; }}
+    QPushButton#primary:hover {{
+        background: {palette.accent_hover};
+        border-color: {palette.accent_hover};
+    }}
+    QPushButton#primary:pressed {{
+        background: {palette.accent};
+    }}
     QPushButton#primary:disabled {{
         background: {palette.accent_soft};
         border-color: {palette.accent_soft};
         color: {palette.text_muted};
     }}
-    QPushButton#ghost {{ border-color: transparent; background: transparent; }}
-    QPushButton#ghost:hover {{ background: {palette.surface_alt}; }}
-    QPushButton#icon {{ border-color: transparent; background: transparent; padding: 6px; }}
-    QPushButton#icon:hover {{ background: {palette.surface_alt}; }}
-    QPushButton#link {{
-        border: none; background: transparent;
-        color: {palette.accent}; padding: 2px 4px;
+    QPushButton#ghost {{
+        border-color: transparent;
+        background: transparent;
     }}
-    QPushButton#link:hover {{ color: {palette.accent_hover}; }}
-    QPushButton#quality {{
-        border-radius: 14px; padding: 5px 14px;
+    QPushButton#ghost:hover {{
         background: {palette.surface_alt};
-        border: 1px solid transparent;
     }}
-    QPushButton#quality:hover {{ border-color: {palette.border_strong}; }}
-    QPushButton#quality:checked {{
-        background: {palette.accent_soft};
-        border: 1px solid {palette.accent};
+    QPushButton#icon {{
+        border-color: transparent;
+        background: transparent;
+        border-radius: 8px;
+        padding: 6px;
+    }}
+    QPushButton#icon:hover {{
+        background: {palette.surface_alt};
+        border-color: {palette.border};
+    }}
+    QPushButton#link {{
+        border: none;
+        background: transparent;
         color: {palette.accent};
+        padding: 2px 6px;
+        font-weight: 500;
+    }}
+    QPushButton#link:hover {{
+        color: {palette.accent_hover};
+        text-decoration: underline;
+    }}
+    QPushButton#quality {{
+        border-radius: 13px;
+        padding: 5px 14px;
+        background: {palette.surface_alt};
+        border: 1px solid {palette.border};
+        font-size: 12px;
+        font-weight: 500;
+    }}
+    QPushButton#quality:hover {{
+        border-color: {palette.accent};
+        background: {palette.surface};
+    }}
+    QPushButton#quality:checked {{
+        background: {palette.accent};
+        border: 1px solid {palette.accent};
+        color: #ffffff;
         font-weight: 600;
     }}
-    QScrollArea {{ border: none; background: transparent; }}
+    QScrollArea {{
+        border: none;
+        background: transparent;
+    }}
     QScrollBar:vertical {{
-        background: transparent; width: 10px; margin: 2px;
+        background: transparent;
+        width: 8px;
+        margin: 2px;
     }}
     QScrollBar::handle:vertical {{
-        background: {palette.border_strong}; border-radius: 5px; min-height: 32px;
+        background: {palette.border_strong};
+        border-radius: 4px;
+        min-height: 32px;
     }}
-    QScrollBar::handle:vertical:hover {{ background: {palette.text_muted}; }}
-    QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
-    QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+    QScrollBar::handle:vertical:hover {{
+        background: {palette.text_muted};
+    }}
+    QScrollBar::add-line, QScrollBar::sub-line {{
+        height: 0;
+        width: 0;
+    }}
+    QScrollBar::add-page, QScrollBar::sub-page {{
+        background: transparent;
+    }}
     #download-row {{
         background: {palette.surface};
         border: 1px solid {palette.border};
         border-radius: 10px;
     }}
-    #download-row[state="done"] {{ border-color: {palette.success}; }}
-    #download-row[state="failed"] {{ border-color: {palette.danger}; }}
-    #row-title {{ font-weight: 600; }}
-    #row-detail {{ color: {palette.text_muted}; }}
-    #row-detail[state="error"] {{ color: {palette.danger}; }}
-    #row-detail[state="success"] {{ color: {palette.success}; }}
+    #download-row:hover {{
+        border-color: {palette.border_strong};
+    }}
+    #download-row[state="done"] {{
+        border-color: {palette.success};
+    }}
+    #download-row[state="failed"] {{
+        border-color: {palette.danger};
+    }}
+    #row-title {{
+        font-weight: 600;
+        font-size: 13px;
+    }}
+    #row-detail {{
+        color: {palette.text_muted};
+        font-size: 12px;
+    }}
+    #row-detail[state="error"] {{
+        color: {palette.danger};
+    }}
+    #row-detail[state="success"] {{
+        color: {palette.success};
+    }}
     #badge {{
         background: {palette.surface_alt};
         border-radius: 6px;
-        padding: 2px 7px;
+        padding: 2px 8px;
         color: {palette.text_muted};
         font-size: 11px;
         font-weight: 600;
@@ -264,13 +372,20 @@ def stylesheet(palette: Palette) -> str:
         border: 1px solid {palette.border};
         border-radius: 8px;
         color: {palette.warning};
-        padding: 7px 10px;
+        padding: 8px 12px;
+    }}
+    QCheckBox {{
+        spacing: 6px;
     }}
     QCheckBox::indicator {{
-        width: 16px; height: 16px;
+        width: 17px;
+        height: 17px;
         border: 1px solid {palette.border_strong};
         border-radius: 4px;
         background: {palette.surface};
+    }}
+    QCheckBox::indicator:hover {{
+        border-color: {palette.accent};
     }}
     QCheckBox::indicator:checked {{
         background: {palette.accent};
@@ -280,19 +395,49 @@ def stylesheet(palette: Palette) -> str:
         background: {palette.surface};
         color: {palette.text};
         border: 1px solid {palette.border};
-        padding: 4px 6px;
+        padding: 5px 8px;
         border-radius: 6px;
+        font-size: 12px;
     }}
-    QLabel#section {{ color: {palette.text_muted}; font-weight: 600; font-size: 11px; }}
-    QFrame#separator {{ background: {palette.border}; max-height: 1px; border: none; }}
+    QLabel#section {{
+        color: {palette.text_muted};
+        font-weight: 600;
+        font-size: 11px;
+        letter-spacing: 0.5px;
+    }}
+    QFrame#separator {{
+        background: {palette.border};
+        max-height: 1px;
+        border: none;
+    }}
     #toast {{
         background: {palette.text};
         color: {palette.surface};
-        border-radius: 10px;
-        padding: 10px 14px;
+        border: 1px solid {palette.border};
+        border-radius: 12px;
+        padding: 10px 16px;
     }}
-    #toast[severity="error"] {{ background: {palette.danger}; }}
-    #toast[severity="success"] {{ background: {palette.success}; }}
-    #toast QLabel {{ color: {palette.surface}; background: transparent; }}
-    #toast[severity="error"] QLabel, #toast[severity="success"] QLabel {{ color: #ffffff; }}
+    #toast[severity="error"] {{
+        background: {palette.danger};
+        border-color: {palette.danger};
+    }}
+    #toast[severity="success"] {{
+        background: {palette.success};
+        border-color: {palette.success};
+    }}
+    #toast[severity="warning"] {{
+        background: {palette.warning};
+        border-color: {palette.warning};
+    }}
+    #toast QLabel {{
+        color: {palette.surface};
+        background: transparent;
+        font-size: 13px;
+        font-weight: 500;
+    }}
+    #toast[severity="error"] QLabel,
+    #toast[severity="success"] QLabel,
+    #toast[severity="warning"] QLabel {{
+        color: #ffffff;
+    }}
     """

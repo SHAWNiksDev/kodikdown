@@ -5,6 +5,54 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-10-11
+
+### English
+
+#### Added
+- Smooth crossfade animation when toggling themes
+- Spinning micro-interaction on theme and settings buttons
+- Modernized progress bar with gradient fill and glowing wave effect in busy mode
+- Visual status indicators (check, warning, close) with fade-in animation on download rows
+- Icons on action buttons (paste, resolve, download, open folder, clear, settings dialog)
+- Branded app icon in the window header
+- Live download progress indicator in CLI
+
+#### Fixed
+- Mirror fallback now catches HTTP 403, 404, 500 and timeout errors instead of failing when primary mirrors reject connections
+- Parser preserves query parameters when links contain a trailing slash before `?` (`/?episode=...`)
+- Modern JavaScript variables (`const`, `let`, `window.`) and object literal payloads in Kodik player scripts
+- CLI no longer crashes when launched directly with a URL (`kodikdown <url>`)
+- Isolated yt-dlp output directory from file templates, avoiding output path corruption
+- Cancel button now breaks retry backoff immediately
+- Eliminated 60 FPS idle CPU drain from hidden progress bar timers
+- Reset custom file name when resolving a new video
+- Cleaned up unawaited coroutine warnings on exit
+
+---
+
+### Русский
+
+#### Добавлено
+- Плавная кроссфейд-анимация при переключении темы оформления
+- Анимация вращения кнопок темы и настроек при нажатии
+- Обновленный прогресс-бар: градиентная полоса и эффект световой волны в режиме ожидания
+- Иконки статуса (успех, ошибка, отмена) с плавной анимацией в списке загрузок
+- Иконки для кнопок («Вставить», «Найти», «Скачать», «Открыть папку», диалог настроек)
+- Фирменный значок приложения в шапке окна
+- Интерактивный прогресс-бар загрузки в консольном режиме
+
+#### Исправлено
+- Полноценный фоллбэк на резервные зеркала при HTTP 403, 404, 500 и таймаутах
+- Парсер больше не теряет параметры серии в ссылках со слэшем (`/?episode=...`)
+- Поддержка современных объявлений JS (`const`, `let`, `window.`) и объектов в скриптах плеера Kodik
+- CLI больше не падает при прямом запуске со ссылкой (`kodikdown <url>`)
+- Папка загрузки изолирована от шаблона имени файла yt-dlp во избежание сбоев путей
+- Мгновенная отмена скачивания даже во время паузы между повторными попытками
+- Устранена фоновая нагрузка на процессор (60 FPS) от скрытых таймеров прогресс-бара
+- Сброс кастомного названия при открытии нового видео
+- Исправлены предупреждения о незакрытых корутинах при выходе
+
 ## [3.0.0] - 2026-10-10
 
 The terminal interface is gone: KodikDown is a desktop application now, and the

@@ -14,6 +14,9 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QColor,
     QFontMetrics,
+    QHideEvent,
+    QIcon,
+    QLinearGradient,
     QPainter,
     QPainterPath,
     QPaintEvent,
@@ -26,6 +29,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSizePolicy,
+    QStyle,
+    QStyleOptionButton,
     QVBoxLayout,
     QWidget,
 )
@@ -34,6 +39,61 @@ from kodikdown.downloader import ProgressSnapshot
 from kodikdown.gui.icons import icon
 from kodikdown.gui.theme import Palette
 from kodikdown.i18n import t
+
+
+class AnimatedIconButton(QPushButton):
+    """Icon button with a smooth rotation animation on trigger."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._angle = 0.0
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(360)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.valueChanged.connect(self._on_angle_changed)
+        self._anim.finished.connect(self._on_anim_finished)
+
+    def trigger_spin(self) -> None:
+        self._anim.stop()
+        self._anim.setStartValue(0.0)
+        self._anim.setEndValue(360.0)
+        self._anim.start()
+
+    def _on_angle_changed(self, val: object) -> None:
+        self._angle = float(val)  # type: ignore[arg-type]
+        self.update()
+
+    def _on_anim_finished(self) -> None:
+        self._angle = 0.0
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        if self._angle in (0.0, 360.0):
+            super().paintEvent(event)
+            return
+
+        opt = QStyleOptionButton()
+        self.initStyleOption(opt)
+        opt.icon = QIcon()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self.style().drawControl(QStyle.ControlElement.CE_PushButton, opt, painter, self)
+
+        icon_obj = self.icon()
+        if not icon_obj.isNull():
+            sz = self.iconSize()
+            if sz.isEmpty() or sz.width() <= 0:
+                sz = QSize(20, 20)
+            pix = icon_obj.pixmap(sz)
+            cx = self.width() / 2.0
+            cy = self.height() / 2.0
+            painter.save()
+            painter.translate(cx, cy)
+            painter.rotate(self._angle)
+            painter.drawPixmap(int(-sz.width() / 2.0), int(-sz.height() / 2.0), pix)
+            painter.restore()
+        painter.end()
 
 
 class ElidedLabel(QLabel):
@@ -74,10 +134,10 @@ class ProgressBar(QWidget):
         self._target = 0.0
         self._busy = False
         self._phase = 0.0
-        self._track = QColor("#d8dce4")
-        self._fill = QColor("#2f6fed")
-        self.setMinimumHeight(6)
-        self.setMaximumHeight(6)
+        self._track = QColor("#e2e8f0")
+        self._fill = QColor("#2563eb")
+        self.setMinimumHeight(8)
+        self.setMaximumHeight(8)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self._animation = QVariantAnimation(self)
@@ -121,6 +181,10 @@ class ProgressBar(QWidget):
             self._busy = False
             self._busy_timer.stop()
 
+    def hideEvent(self, event: QHideEvent) -> None:
+        self._stop_busy()
+        super().hideEvent(event)
+
     def _on_animated(self, value: object) -> None:
         self._value = float(value)  # type: ignore[arg-type]
         self.update()
@@ -132,20 +196,25 @@ class ProgressBar(QWidget):
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        radius = self.height() / 2
+        radius = self.height() / 2.0
 
         track = QPainterPath()
         track.addRoundedRect(0, 0, self.width(), self.height(), radius, radius)
         painter.fillPath(track, self._track)
 
         if self._busy:
-            width = max(self.width() * 0.28, 40)
+            width = max(self.width() * 0.35, 60.0)
             travel = self.width() + width
             offset = self._phase * travel - width
             path = QPainterPath()
             path.addRoundedRect(offset, 0, width, self.height(), radius, radius)
+            gradient = QLinearGradient(offset, 0, offset + width, 0)
+            c = self._fill
+            gradient.setColorAt(0.0, QColor(c.red(), c.green(), c.blue(), 0))
+            gradient.setColorAt(0.5, c)
+            gradient.setColorAt(1.0, QColor(c.red(), c.green(), c.blue(), 0))
             painter.setClipPath(track)
-            painter.fillPath(path, self._fill)
+            painter.fillPath(path, gradient)
             return
 
         filled = self.width() * self._value / 100.0
@@ -153,25 +222,54 @@ class ProgressBar(QWidget):
             return
         path = QPainterPath()
         path.addRoundedRect(0, 0, filled, self.height(), radius, radius)
-        painter.fillPath(path, self._fill)
+        gradient = QLinearGradient(0, 0, filled, 0)
+        gradient.setColorAt(0.0, self._fill.lighter(115))
+        gradient.setColorAt(1.0, self._fill)
+        painter.fillPath(path, gradient)
 
 
 class Toast(QFrame):
     """Transient message that slides up from the bottom of the window."""
 
-    def __init__(self, text: str, severity: str, parent: QWidget) -> None:
+    def __init__(
+        self,
+        text: str,
+        severity: str,
+        parent: QWidget,
+        palette: Palette | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("toast")
         self.setProperty("severity", severity)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setContentsMargins(14, 9, 16, 9)
+        layout.setSpacing(10)
+
+        icon_name = (
+            "check"
+            if severity == "success"
+            else "warning"
+            if severity in ("error", "warning")
+            else "info"
+        )
+        icon_color = (
+            "#ffffff"
+            if (palette is None or palette.is_dark or severity in ("error", "success", "warning"))
+            else palette.surface
+        )
+        self._icon_label = QLabel()
+        self._icon_label.setFixedSize(18, 18)
+        self._icon_label.setPixmap(icon(icon_name, icon_color, 18).pixmap(18, 18))
+        self._icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self._icon_label)
+
         label = QLabel(text)
         label.setObjectName("toast-text")
         label.setWordWrap(True)
         label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        layout.addWidget(label)
+        layout.addWidget(label, 1)
 
         self.adjustSize()
         self._effect = QGraphicsOpacityEffect(self)
@@ -183,16 +281,19 @@ class Toast(QFrame):
         self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
 
     def show_at(self, x: int, y: int) -> None:
-        self.move(x, y + 12)
-        self.show()
-        self.raise_()
-        self._fade.stop()
-        self._fade.setStartValue(0.0)
-        self._fade.setEndValue(1.0)
-        self._fade.start()
+        if not self.isVisible():
+            self.move(x, y + 14)
+            self.show()
+            self.raise_()
+            self._fade.stop()
+            self._fade.setStartValue(0.0)
+            self._fade.setEndValue(1.0)
+            self._fade.start()
+        else:
+            self.raise_()
 
         self._slide = QPropertyAnimation(self, b"pos", self)
-        self._slide.setDuration(220)
+        self._slide.setDuration(240)
         self._slide.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._slide.setStartValue(self.pos())
         self._slide.setEndValue(self.pos().__class__(x, y))
@@ -237,6 +338,8 @@ class DownloadRow(QFrame):
         top.setSpacing(8)
         self.title_label = ElidedLabel(title)
         self.title_label.setObjectName("row-title")
+        self.status_icon = QLabel()
+        self.status_icon.hide()
         self.badge = QLabel(f"{quality}p")
         self.badge.setObjectName("badge")
         self.cancel_button = QPushButton()
@@ -245,6 +348,7 @@ class DownloadRow(QFrame):
         self.cancel_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cancel_button.clicked.connect(lambda: self.cancel_requested.emit(self.job_id))
         top.addWidget(self.title_label, 1)
+        top.addWidget(self.status_icon)
         top.addWidget(self.badge)
         top.addWidget(self.cancel_button)
 
@@ -277,7 +381,14 @@ class DownloadRow(QFrame):
         self._palette = palette
         self.cancel_button.setIcon(icon("close", palette.text_muted, 16))
         self.open_button.setText(t("open_file"))
+        self.open_button.setIcon(icon("play", palette.accent, 14))
         self.folder_button.setText(t("open_folder"))
+        self.folder_button.setIcon(icon("folder", palette.accent, 14))
+        state = self.property("state")
+        if state == "done":
+            self.status_icon.setPixmap(icon("check", palette.success, 16).pixmap(16, 16))
+        elif state == "failed":
+            self.status_icon.setPixmap(icon("warning", palette.danger, 16).pixmap(16, 16))
         self.bar.apply_palette(palette)
         self._restyle()
 
@@ -316,6 +427,11 @@ class DownloadRow(QFrame):
         self.detail.setText(t("saved_to", path=path))
         self.detail.setProperty("state", "success")
         self._finish()
+        self.status_icon.setPixmap(icon("check", self._palette.success, 16).pixmap(16, 16))
+        self.status_icon.show()
+        FadeMixin.fade_in(self.status_icon, duration=220)
+        self.open_button.setIcon(icon("play", self._palette.accent, 14))
+        self.folder_button.setIcon(icon("folder", self._palette.accent, 14))
         self.open_button.show()
         self.folder_button.show()
         self._restyle()
@@ -326,6 +442,9 @@ class DownloadRow(QFrame):
         self.detail.setProperty("state", "")
         self.bar.reset()
         self._finish()
+        self.status_icon.setPixmap(icon("close", self._palette.text_muted, 16).pixmap(16, 16))
+        self.status_icon.show()
+        self._restyle()
 
     def mark_failed(self, detail: str) -> None:
         self.setProperty("state", "failed")
@@ -333,6 +452,10 @@ class DownloadRow(QFrame):
         self.detail.setProperty("state", "error")
         self.bar.reset()
         self._finish()
+        self.status_icon.setPixmap(icon("warning", self._palette.danger, 16).pixmap(16, 16))
+        self.status_icon.show()
+        FadeMixin.fade_in(self.status_icon, duration=220)
+        self._restyle()
 
     def mark_starting(self) -> None:
         self.detail.setText(t("starting"))
@@ -405,7 +528,7 @@ def _duration(seconds: float) -> str:
 
 
 class FadeMixin:
-    """Helper for the short opacity animation used when panels appear."""
+    """Helper for opacity and crossfade animations."""
 
     @staticmethod
     def fade_in(widget: QWidget, duration: int = 220, start: float = 0.0) -> None:
@@ -420,6 +543,45 @@ class FadeMixin:
         # Drop the effect once it is done: a live opacity effect forces the
         # whole subtree through an offscreen buffer on every repaint.
         animation.finished.connect(
-            lambda: widget.setGraphicsEffect(None)  # type: ignore[arg-type]
+            lambda: widget.setGraphicsEffect(None)
         )
         animation.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
+
+    @staticmethod
+    def crossfade_widget(
+        target: QWidget,
+        new_stylesheet: str,
+        duration: int = 280,
+    ) -> None:
+        """Smoothly crossfade widget appearance when switching themes."""
+        central = target.findChild(QWidget, "window") or target
+        if not central.isVisible() or central.width() <= 0 or central.height() <= 0:
+            target.setStyleSheet(new_stylesheet)
+            return
+
+        pixmap = central.grab()
+        if pixmap.isNull():
+            target.setStyleSheet(new_stylesheet)
+            return
+
+        overlay = QLabel(central)
+        overlay.setPixmap(pixmap)
+        overlay.setGeometry(0, 0, central.width(), central.height())
+        overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        overlay.show()
+        overlay.raise_()
+
+        target.setStyleSheet(new_stylesheet)
+
+        effect = QGraphicsOpacityEffect(overlay)
+        overlay.setGraphicsEffect(effect)
+        effect.setOpacity(1.0)
+
+        anim = QPropertyAnimation(effect, b"opacity", overlay)
+        anim.setDuration(duration)
+        anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.finished.connect(overlay.deleteLater)
+        anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
+

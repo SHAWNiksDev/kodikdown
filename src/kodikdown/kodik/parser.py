@@ -23,7 +23,7 @@ _URL_PARAMS_RE = re.compile(
     re.DOTALL,
 )
 _SIGNED_VAR_RE = re.compile(
-    r"""\bvar\s+(?P<name>domain|d_sign|pd|pd_sign|ref|ref_sign)\s*=\s*["'](?P<value>[^"']*)["']"""
+    r"""\b(?:var|let|const|window\.)\s*(?P<name>domain|d_sign|pd|pd_sign|ref|ref_sign)\s*=\s*["'](?P<value>[^"']*)["']"""
 )
 _VAR_TO_PARAM = {
     "domain": "d",
@@ -34,8 +34,10 @@ _VAR_TO_PARAM = {
     "ref_sign": "ref_sign",
 }
 
-_VINFO_RE = re.compile(r"\.\s*(?P<field>type|hash|id)\s*=\s*'(?P<value>[^']*)'\s*;")
-_VINFO_DOUBLE_RE = re.compile(r'\.\s*(?P<field>type|hash|id)\s*=\s*"(?P<value>[^"]*)"\s*;')
+_VINFO_RE = re.compile(r"(?:\.|\b)(?P<field>type|hash|id)\s*[:=]\s*'(?P<value>[^']*)'\s*[,;]?")
+_VINFO_DOUBLE_RE = re.compile(
+    r'(?:\.|\b)(?P<field>type|hash|id)\s*[:=]\s*"(?P<value>[^"]*)"\s*[,;]?'
+)
 _TRANSLATION_ID_RE = re.compile(r"\btranslationId\s*=\s*(?P<id>\d+)")
 _TRANSLATION_TITLE_RE = re.compile(r"""\btranslationTitle\s*=\s*["'](?P<title>[^"']*)["']""")
 
@@ -59,11 +61,11 @@ _PLAYER_JS_PATTERNS = (
 # The endpoint address sits in `$.ajax({type:"POST", url:atob("L2Z0b3I="), ...})`.
 _AJAX_ATOB_RE = re.compile(r"""url\s*:\s*atob\(\s*["'](?P<encoded>[A-Za-z0-9+/=]{4,})["']""")
 _ATOB_RE = re.compile(r"""atob\(\s*["'](?P<encoded>[A-Za-z0-9+/=]{4,})["']""")
-_KNOWN_ENDPOINT_RE = re.compile(r"""["'](?P<path>/(?:ftor|gvi|kor|vtt|[a-z]{2,8}))["']""")
+_KNOWN_ENDPOINT_RE = re.compile(r"""["'](?P<path>/(?:ftor|gvi|kor|vtt))["']""")
 
 _TITLE_RE = re.compile(r"<title>(?P<title>.*?)</title>", re.IGNORECASE | re.DOTALL)
 _OG_TITLE_RE = re.compile(
-    r"""<meta\s[^>]*property=["']og:title["'][^>]*content=["'](?P<title>[^"']+)["']""",
+    r"""<meta\s[^>]*?(?:property=["']og:title["'][^>]*?content=["'](?P<title1>[^"']+)["']|content=["'](?P<title2>[^"']+)["'][^>]*?property=["']og:title["'])""",
     re.IGNORECASE,
 )
 _GENERIC_TITLE_RE = re.compile(r"^(kodik|kodik\s*player|player)$", re.IGNORECASE)
@@ -110,7 +112,7 @@ def _host_of(url: str) -> str:
 
 def _query_after(url: str, position: int) -> str:
     """Keep `?episode=…&season=…` — it decides which episode the page shows."""
-    tail = url[position:]
+    tail = url[position:].lstrip("/")
     match = _QUERY_TAIL_RE.match(tail)
     return match.group("query") if match else ""
 
@@ -269,7 +271,7 @@ def extract_title(page_html: str) -> str | None:
     title = match.group("title") if match else ""
     if not title:
         og = _OG_TITLE_RE.search(page_html)
-        title = og.group("title") if og else ""
+        title = (og.group("title1") or og.group("title2")) if og else ""
     title = html.unescape(re.sub(r"\s+", " ", title)).strip()
     if not title or _GENERIC_TITLE_RE.match(title):
         return None

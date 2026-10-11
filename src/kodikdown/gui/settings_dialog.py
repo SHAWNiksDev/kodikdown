@@ -31,6 +31,8 @@ from kodikdown.config import (
     Settings,
 )
 from kodikdown.gui.desktop import open_directory
+from kodikdown.gui.icons import icon
+from kodikdown.gui.theme import palette_for
 from kodikdown.i18n import LANGUAGE_NAMES, t
 
 
@@ -39,6 +41,7 @@ class SettingsDialog(QDialog):
         self, settings: Settings, store: ConfigStore, parent: QWidget | None = None
     ) -> None:
         super().__init__(parent)
+        palette = palette_for(settings.theme)
         self.setWindowTitle(t("settings_title"))
         self.setModal(True)
         self.setMinimumWidth(460)
@@ -57,6 +60,8 @@ class SettingsDialog(QDialog):
 
         self.folder_edit = QLineEdit(str(settings.download_dir))
         browse = QPushButton(t("browse"))
+        browse.setIcon(icon("folder", palette.text_muted, 15))
+        browse.setCursor(Qt.CursorShape.PointingHandCursor)
         browse.clicked.connect(self._browse)
         folder_row = QHBoxLayout()
         folder_row.setSpacing(8)
@@ -102,10 +107,15 @@ class SettingsDialog(QDialog):
 
         buttons = QDialogButtonBox()
         open_button = buttons.addButton(t("open_folder"), QDialogButtonBox.ButtonRole.ActionRole)
+        open_button.setIcon(icon("folder", palette.text_muted, 15))
+        open_button.setCursor(Qt.CursorShape.PointingHandCursor)
         open_button.clicked.connect(self._open_folder)
-        buttons.addButton(t("close"), QDialogButtonBox.ButtonRole.RejectRole)
+        close_button = buttons.addButton(t("close"), QDialogButtonBox.ButtonRole.RejectRole)
+        close_button.setCursor(Qt.CursorShape.PointingHandCursor)
         save_button = buttons.addButton(t("save"), QDialogButtonBox.ButtonRole.AcceptRole)
         save_button.setObjectName("primary")
+        save_button.setIcon(icon("check", "#ffffff", 15))
+        save_button.setCursor(Qt.CursorShape.PointingHandCursor)
         buttons.accepted.connect(self._save)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

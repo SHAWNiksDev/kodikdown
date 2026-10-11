@@ -110,6 +110,32 @@ def test_hook_understands_fragment_counters(tmp_path: Path) -> None:
     assert snapshots == [ProgressSnapshot(downloaded=3, total=10, fragments=True)]
 
 
+def test_hook_understands_fragment_counters_when_downloaded_bytes_present(tmp_path: Path) -> None:
+    snapshots: list[ProgressSnapshot] = []
+    downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)
+    downloader._hook(
+        {
+            "status": "downloading",
+            "downloaded_bytes": 1024,
+            "total_bytes": None,
+            "fragment_index": 5,
+            "fragment_count": 20,
+        }
+    )
+    assert snapshots == [ProgressSnapshot(downloaded=5, total=20, fragments=True)]
+
+
+def test_pick_result_ignores_subdirectories(tmp_path: Path) -> None:
+    subfolder = tmp_path / "clip.backup"
+    subfolder.mkdir()
+    (tmp_path / "clip.mp4").write_bytes(b"video data")
+    downloader = Downloader(output_dir=tmp_path)
+    result = downloader._pick_result(tmp_path / "clip")
+    assert result is not None
+    assert result.name == "clip.mp4"
+    assert result.is_file()
+
+
 def test_hook_reports_speed_and_eta(tmp_path: Path) -> None:
     snapshots: list[ProgressSnapshot] = []
     downloader = Downloader(output_dir=tmp_path, listener=snapshots.append)

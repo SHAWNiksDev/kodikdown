@@ -209,6 +209,24 @@ async def test_dead_host_falls_back_to_a_mirror(
 
 
 @respx.mock
+async def test_http_error_falls_back_to_a_mirror(
+    serial_page_html: str,
+    player_js_snippet: str,
+    video_info_json: dict[str, object],
+) -> None:
+    embed_url = f"https://kodik.biz/seria/1304528/{SERIAL_HASH}/720p"
+    respx.get(embed_url).respond(500, text="Internal Server Error")
+    _mock_page(serial_page_html, f"https://kodikplayer.com/seria/1304528/{SERIAL_HASH}/720p")
+    _mock_js(player_js_snippet, "https://kodikplayer.com/assets/js/app.player_single")
+    respx.post("https://kodikplayer.com/ftor").respond(200, json=video_info_json)
+
+    async with KodikClient() as client:
+        resolved = await client.resolve(embed_url)
+
+    assert resolved.variants
+
+
+@respx.mock
 async def test_all_hosts_dead_raises_host_unavailable(
     player_page_html: str,
 ) -> None:

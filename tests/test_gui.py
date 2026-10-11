@@ -474,3 +474,42 @@ def test_retranslate_switches_the_interface_language(window: MainWindow) -> None
     set_language("en")
     window.retranslate()
     assert window.find_button.text() == "Find video"
+
+
+def test_name_edit_resets_on_new_video(window: MainWindow) -> None:
+    # First video resolved
+    window._url_in_use = "https://kodikplayer.com/video/1/a/720p"
+    window._on_resolved(window._request_id, _sample_video())
+    assert window.name_edit.text() == "Test video"
+
+    # User manually customizes the title
+    window.name_edit.setText("My Custom Title")
+    window._on_name_edited("My Custom Title")
+    assert window._name_edited is True
+
+    # Same video resolved again (e.g. quality / translation switch): keeps custom title
+    window._on_resolved(window._request_id, _sample_video())
+    assert window.name_edit.text() == "My Custom Title"
+
+    # Different video resolved: resets custom title to the new video title!
+    window._url_in_use = "https://kodikplayer.com/video/2/b/720p"
+    second_video = ResolvedVideo(
+        title="Second Anime",
+        variants=_sample_video().variants,
+    )
+    window._on_resolved(window._request_id, second_video)
+    assert window._name_edited is False
+    assert window.name_edit.text() == "Second Anime"
+
+
+def test_progress_bar_stops_busy_on_hide(window: MainWindow) -> None:
+    from kodikdown.gui.widgets import ProgressBar
+
+    bar = ProgressBar(window)
+    bar.set_busy()
+    assert bar._busy is True
+    assert bar._busy_timer.isActive() is True
+
+    bar.hide()
+    assert bar._busy is False
+    assert bar._busy_timer.isActive() is False

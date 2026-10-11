@@ -10,7 +10,7 @@ import typer
 
 from kodikdown import __version__
 from kodikdown.config import ConfigStore, Settings
-from kodikdown.downloader import DownloadCancelled, Downloader, DownloadFailed
+from kodikdown.downloader import DownloadCancelled, Downloader, DownloadFailed, ProgressSnapshot
 from kodikdown.i18n import set_language, t
 from kodikdown.kodik.client import KodikClient
 from kodikdown.kodik.errors import (
@@ -48,7 +48,9 @@ def callback(
 
 
 @app.command()
-def gui() -> None:
+def gui(
+    url: Annotated[str | None, typer.Argument(help="Optional player link to open")] = None,
+) -> None:
     """Open the desktop window (the default when no command is given)."""
     launch_gui()
 
@@ -133,8 +135,30 @@ def download(
 
     stream_url = variant.direct_mp4 if (as_mp4 and variant.direct_mp4) else variant.url
     title = resolved.title or "kodik-video"
+
+    def _cli_progress(snapshot: ProgressSnapshot) -> None:
+        parts: list[str] = []
+        if snapshot.fragments and snapshot.total:
+            pct = f"{100.0 * snapshot.downloaded / snapshot.total:.0f}%"
+            parts.append(f"{pct} ({snapshot.downloaded}/{snapshot.total} frags)")
+        elif snapshot.total and snapshot.downloaded:
+            pct = f"{100.0 * snapshot.downloaded / snapshot.total:.0f}%"
+            size_str = f"{_format_size(snapshot.downloaded)} / {_format_size(snapshot.total)}"
+            parts.append(f"{pct} ({size_str})")
+        elif snapshot.downloaded:
+            parts.append(_format_size(snapshot.downloaded))
+        if snapshot.speed:
+            parts.append(_format_speed(snapshot.speed))
+        if snapshot.eta:
+            parts.append(t("eta", time=_format_duration(snapshot.eta)))
+        line = " · ".join(parts) if parts else snapshot.stage
+        msg = f"\r[download] {line}"
+        sys.stderr.write(msg.ljust(75)[:75])
+        sys.stderr.flush()
+
     downloader = Downloader(
         output_dir=target_dir,
+        listener=_cli_progress,
         concurrent_fragments=settings.concurrent_downloads * 4,
         filename=title,
     )
@@ -143,12 +167,18 @@ def download(
         path = downloader.download_blocking(stream_url, title, referer_for(stream_url))
     except (KeyboardInterrupt, DownloadCancelled):
         downloader.cancel()
+        sys.stderr.write("\r" + " " * 75 + "\r")
+        sys.stderr.flush()
         typer.secho(t("cli_cancelled"), fg=typer.colors.YELLOW, err=True)
         raise typer.Exit(130) from None
     except DownloadFailed as exc:
+        sys.stderr.write("\r" + " " * 75 + "\r")
+        sys.stderr.flush()
         typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(5) from None
 
+    sys.stderr.write("\r" + " " * 75 + "\r")
+    sys.stderr.flush()
     typer.secho(t("cli_download_done", path=path), fg=typer.colors.GREEN)
 
 
@@ -175,6 +205,33 @@ def _find_translation(resolved: ResolvedVideo, query: str) -> Translation | None
     return resolved.find_translation(text)
 
 
+def _format_size(value: float | int | None) -> str:
+    if not value:
+        return "0 B"
+    num = float(value)
+    for unit in ("B", "KB", "MB", "GB"):
+        if num < 1024 or unit == "GB":
+            return f"{num:.0f} {unit}" if unit == "B" else f"{num:.1f} {unit}"
+        num /= 1024
+    return ""
+
+
+def _format_speed(value: float) -> str:
+    num = float(value)
+    for unit in ("B/s", "KB/s", "MB/s", "GB/s"):
+        if num < 1024 or unit == "GB/s":
+            return f"{num:.1f} {unit}"
+        num /= 1024
+    return ""
+
+
+def _format_duration(seconds: float) -> str:
+    total = int(seconds)
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
 def launch_gui() -> None:
     from kodikdown.gui.app import run
 
@@ -184,6 +241,13 @@ def launch_gui() -> None:
 def main() -> None:
     if sys.platform == "win32":
         _enable_windows_console_utf8()
+    if (
+        len(sys.argv) > 1
+        and not sys.argv[1].startswith("-")
+        and sys.argv[1] not in ("download", "gui")
+    ):
+        launch_gui()
+        return
     try:
         app()
     except KeyboardInterrupt:
