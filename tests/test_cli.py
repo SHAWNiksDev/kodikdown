@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import respx
 from typer.testing import CliRunner
 
@@ -166,3 +167,32 @@ def test_main_url_argument_routes_to_gui(monkeypatch) -> None:
     monkeypatch.setattr(sys, "argv", ["kodikdown", PAGE_URL])
     main()
     assert launched is True
+
+
+def test_main_cli_binary_no_args_shows_help(monkeypatch) -> None:
+    import sys
+
+    from kodikdown.cli import main
+
+    monkeypatch.setattr(sys, "argv", ["kodikdown-cli"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0
+
+
+@respx.mock
+def test_main_cli_binary_url_routes_to_download(
+    player_page_html: str,
+    player_js_snippet: str,
+    video_info_json: dict[str, object],
+    monkeypatch,
+) -> None:
+    import sys
+
+    from kodikdown.cli import main
+
+    _mock_resolve(player_page_html, player_js_snippet, video_info_json)
+    monkeypatch.setattr(sys, "argv", ["kodikdown-cli", PAGE_URL, "--list-qualities"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0

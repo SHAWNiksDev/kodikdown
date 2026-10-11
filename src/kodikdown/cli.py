@@ -35,6 +35,11 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit
 
 
+def _is_cli_binary() -> bool:
+    prog = Path(sys.argv[0]).stem.lower()
+    return prog.endswith("-cli") or prog == "kodikdown-cli"
+
+
 @app.callback()
 def callback(
     ctx: typer.Context,
@@ -44,6 +49,9 @@ def callback(
     ] = None,
 ) -> None:
     if ctx.invoked_subcommand is None:
+        if _is_cli_binary():
+            typer.echo(ctx.get_help())
+            raise typer.Exit
         launch_gui()
 
 
@@ -233,7 +241,15 @@ def _format_duration(seconds: float) -> str:
 
 
 def launch_gui() -> None:
-    from kodikdown.gui.app import run
+    try:
+        from kodikdown.gui.app import run
+    except ImportError:
+        typer.secho(
+            "GUI is not available in the CLI build. Use 'download <url>' or '--help'.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1) from None
 
     raise SystemExit(run())
 
@@ -246,8 +262,11 @@ def main() -> None:
         and not sys.argv[1].startswith("-")
         and sys.argv[1] not in ("download", "gui")
     ):
-        launch_gui()
-        return
+        if _is_cli_binary():
+            sys.argv.insert(1, "download")
+        else:
+            launch_gui()
+            return
     try:
         app()
     except KeyboardInterrupt:

@@ -20,7 +20,7 @@ a = Analysis(  # noqa: F821 - injected by PyInstaller
     hiddenimports=["kodikdown.cli"],
     hookspath=[],
     runtime_hooks=[],
-    excludes=["tkinter", "pytest"],
+    excludes=["PySide6", "shiboken6", "kodikdown.gui", "tkinter", "pytest"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)  # noqa: F821 - injected by PyInstaller
