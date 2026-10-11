@@ -543,7 +543,7 @@ class FadeMixin:
         # Drop the effect once it is done: a live opacity effect forces the
         # whole subtree through an offscreen buffer on every repaint.
         animation.finished.connect(
-            lambda: widget.setGraphicsEffect(None)
+            lambda: widget.setGraphicsEffect(None)  # type: ignore[arg-type]
         )
         animation.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
 
@@ -584,4 +584,3 @@ class FadeMixin:
         anim.setEndValue(0.0)
         anim.finished.connect(overlay.deleteLater)
         anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
-
