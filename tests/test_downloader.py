@@ -535,9 +535,7 @@ def test_transfer_with_retries_falls_back_on_404_promoted_resolution(
     assert produced.read_bytes() == b"fallback content"
 
 
-def test_transfer_with_retries_fails_if_all_fallbacks_404(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_transfer_with_retries_fails_if_all_fallbacks_404(tmp_path: Path, monkeypatch) -> None:
     attempts: list[str] = []
 
     def mock_transfer(self: Downloader, target_base: Path, url: str, referer: str) -> None:

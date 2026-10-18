@@ -61,7 +61,7 @@ def gui(
 ) -> None:
     """Open the desktop window (the default when no command is given)."""
     try:
-        launch_gui(url=url)  # type: ignore[call-arg]
+        launch_gui(url=url)
     except TypeError:
         launch_gui()
 

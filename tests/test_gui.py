@@ -518,9 +518,7 @@ def test_progress_bar_stops_busy_on_hide(window: MainWindow) -> None:
 def test_shortcuts_configured_on_main_window(window: MainWindow) -> None:
     from PySide6.QtGui import QShortcut
 
-    shortcuts = [
-        sc.key().toString() for sc in window.findChildren(QShortcut)
-    ]
+    shortcuts = [sc.key().toString() for sc in window.findChildren(QShortcut)]
     assert "Ctrl+S" in shortcuts
     assert "Ctrl+Q" in shortcuts
 
