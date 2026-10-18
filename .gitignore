@@ -5,6 +5,8 @@ __pycache__/
 *.jpg
 !docs/*.png
 !docs/*.jpg
+!docs/**/*.png
+!docs/**/*.jpg
 .venv/
 venv/
 dist/
@@ -15,3 +17,13 @@ build/
 .pytest_cache/
 .ruff_cache/
 config.json
+release-notes.md
+
+# Android
+.gradle/
+android/.gradle/
+android/.tooling/
+android/app/build/
+android/local.properties
+*.apk
+!packaging/kodikdown-android.apk

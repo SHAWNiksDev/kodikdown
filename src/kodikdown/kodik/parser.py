@@ -83,6 +83,17 @@ def extract_embed(raw: str) -> EmbedInfo:
     if iframe:
         text = iframe.group("src").strip()
 
+    # Extract embed URL if surrounded by text or inside markdown link
+    url_match = re.search(r"""(?:https?:)?//[^\s"'<>)\]]+""", text)
+    if url_match and _EMBED_RE.search(url_match.group(0)):
+        text = url_match.group(0)
+    elif " " in text:
+        for part in text.split():
+            clean_part = part.strip("""<>"'()[]""")
+            if _EMBED_RE.search(clean_part):
+                text = clean_part
+                break
+
     if text.startswith("//"):
         text = f"https:{text}"
     if not text.startswith("http"):

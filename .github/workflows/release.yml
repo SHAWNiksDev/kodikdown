@@ -68,5 +68,7 @@ jobs:
           PY
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: |
+            dist/*
+            packaging/kodikdown-android.apk
           body_path: release-notes.md

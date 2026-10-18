@@ -5,6 +5,58 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] - 2026-10-18
+
+### English
+
+#### Added
+- Native Android app (Kotlin / Material 3) with background downloading via Foreground Service and Partial WakeLock
+- Android Video Library tab for browsing, playing, and sharing downloaded episodes directly via system MediaStore
+- Download History tab tracking all initiated downloads, statuses, and file sizes with duplicate prevention dialogs
+- Automatic quality fallback: dynamically switches to 480p/360p if requested 720p manifests return HTTP 404/403 from the CDN
+- 1 MB socket buffer and parallel fragment downloads for maximum streaming throughput
+- CLI `--filename` (`-n`) flag and direct URL argument handling for instant GUI lookup
+- Hotkeys in desktop GUI (`Ctrl+S` for settings, `Ctrl+Q` to quit)
+
+#### Changed
+- Optimized Android RecyclerView animations to eliminate live download card flicker
+- Android library cards now inspect actual video track dimensions via MediaStore for accurate resolution badges
+- Parser now strips markdown syntax and surrounding text from messy copied URLs and iframes
+- Updated build and CI workflows to package and publish the Android APK
+
+#### Fixed
+- Fixed clipboard paste issues on Android when handling plain-text intents
+- Fixed download card status persisting on "Finishing…" instead of displaying "Downloaded"
+- Prevented accidental duplicate downloads with an interactive confirmation prompt
+- Fixed Scoped Storage permission issues when launching external video players
+- Auto-creation of missing download directories in desktop settings
+
+---
+
+### Русский
+
+#### Добавлено
+- Нативное Android-приложение (Kotlin, Material 3) с фоновой загрузкой через Foreground Service и Partial WakeLock
+- Вкладка «Библиотека» на Android для просмотра, воспроизведения и шеринга скачанных серий через системный MediaStore
+- Вкладка «История» со всеми прошлыми загрузками, фильтрацией статусов и предупреждением при повторном скачивании
+- Автоматический фоллбэк качества: при ошибках 404/403 на 720p загрузчик на лету переключается на рабочие 480p/360p
+- Увеличенный буфер сокетов (1 МБ) и многопоточная загрузка чанков для максимальной скорости
+- Аргумент `--filename` (`-n`) в CLI и запуск GUI с прямой ссылкой в параметрах
+- Горячие клавиши в десктопной версии: `Ctrl+S` (настройки) и `Ctrl+Q` (выход)
+
+#### Изменено
+- Отключена лишняя анимация RecyclerView в Android, устранив наложение текста при обновлении прогресса
+- Определение реального разрешения видео в «Библиотеке» через MediaStore Video Heights вместо статических данных
+- Парсер ссылок теперь надежно очищает скопированный текст от Markdown-разметки и лишних символов
+- GitHub Actions и релизный скрипт обновлены для автоматической публикации Android APK
+
+#### Исправлено
+- Исправлена работа кнопки «Вставить» из системного буфера обмена на Android
+- Исправлено зависание бейджа со статусом «Завершаю…» после успешной сборки файла (теперь корректно «Скачано»)
+- Устранена ошибка повторного скачивания одного и того же видео без предупреждения
+- Исправлено открытие видео во внешних плеерах через FileProvider / Scoped Storage
+- Автоматическое создание целевой папки загрузок в десктопной версии при сохранении настроек
+
 ## [3.0.1] - 2026-10-11
 
 ### English
@@ -162,6 +214,8 @@ player lookup was reworked for the signed API Kodik uses today.
 - Rewritten to talk to the Kodik API directly, with a terminal interface
   instead of a headless Chromium
 
+[3.5.0]: https://github.com/SHAWNiksDev/kodikdown/compare/v3.0.1...v3.5.0
+[3.0.1]: https://github.com/SHAWNiksDev/kodikdown/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/SHAWNiksDev/kodikdown/compare/v2.2.2...v3.0.0
 [2.2.2]: https://github.com/SHAWNiksDev/kodikdown/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/SHAWNiksDev/kodikdown/compare/v2.2.0...v2.2.1

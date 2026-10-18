@@ -148,7 +148,7 @@ class DownloadTask(QRunnable):
         self._downloader = Downloader(
             output_dir=output_dir,
             listener=self._emit_progress,
-            concurrent_fragments=concurrent_fragments,
+            concurrent_fragments=max(8, concurrent_fragments),
             socket_timeout=socket_timeout,
         )
         self._title = title
@@ -159,7 +159,7 @@ class DownloadTask(QRunnable):
         self._emit(self.signals.started, self.job_id)
         try:
             path = self._downloader.download_blocking(self.url, self._title, self._referer)
-        except DownloadCancelled:
+        except (DownloadCancelled, KeyboardInterrupt):
             self._emit(self.signals.cancelled, self.job_id)
         except DownloadFailed as exc:
             self._emit(self.signals.failed, self.job_id, str(exc))

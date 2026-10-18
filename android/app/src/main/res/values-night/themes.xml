@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.KodikDown" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">?attr/app_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">?attr/app_background</item>
+        <item name="android:windowBackground">?attr/app_background</item>
+
+        <!-- Material3 mappings -->
+        <item name="colorPrimary">@color/dark_accent</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSurface">@color/dark_surface</item>
+        <item name="colorOnSurface">@color/dark_text</item>
+        <item name="colorOutline">@color/dark_border</item>
+
+        <!-- Custom Palette mappings (Dark default) -->
+        <item name="app_background">@color/dark_background</item>
+        <item name="app_surface">@color/dark_surface</item>
+        <item name="app_surface_alt">@color/dark_surface_alt</item>
+        <item name="app_border">@color/dark_border</item>
+        <item name="app_border_strong">@color/dark_border_strong</item>
+        <item name="app_text">@color/dark_text</item>
+        <item name="app_text_muted">@color/dark_text_muted</item>
+        <item name="app_accent">@color/dark_accent</item>
+        <item name="app_accent_hover">@color/dark_accent_hover</item>
+        <item name="app_accent_soft">@color/dark_accent_soft</item>
+        <item name="app_success">@color/dark_success</item>
+        <item name="app_danger">@color/dark_danger</item>
+        <item name="app_warning">@color/dark_warning</item>
+    </style>
+</resources>

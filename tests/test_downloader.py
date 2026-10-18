@@ -508,3 +508,50 @@ def test_cancel_interrupts_slow_download(tmp_path: Path) -> None:
         assert leftovers == []
     finally:
         server.shutdown()
+
+
+def test_transfer_with_retries_falls_back_on_404_promoted_resolution(
+    tmp_path: Path, monkeypatch
+) -> None:
+    attempts: list[str] = []
+
+    def mock_transfer(self: Downloader, target_base: Path, url: str, referer: str) -> None:
+        attempts.append(url)
+        if "720.mp4" in url:
+            raise DownloadFailed("HTTP Error 404: Not Found")
+        # 480 succeeds
+        target_base.with_suffix(".mp4").write_bytes(b"fallback content")
+
+    monkeypatch.setattr(Downloader, "_transfer", mock_transfer)
+    downloader = Downloader(output_dir=tmp_path)
+    produced = downloader.download_blocking(
+        "https://cdn/video/720.mp4:hls:manifest.m3u8", "clip", "https://cdn/"
+    )
+
+    assert len(attempts) == 2
+    assert "720.mp4" in attempts[0]
+    assert "480.mp4" in attempts[1]
+    assert produced.name == "clip.mp4"
+    assert produced.read_bytes() == b"fallback content"
+
+
+def test_transfer_with_retries_fails_if_all_fallbacks_404(
+    tmp_path: Path, monkeypatch
+) -> None:
+    attempts: list[str] = []
+
+    def mock_transfer(self: Downloader, target_base: Path, url: str, referer: str) -> None:
+        attempts.append(url)
+        raise DownloadFailed("HTTP Error 404: Not Found")
+
+    monkeypatch.setattr(Downloader, "_transfer", mock_transfer)
+    downloader = Downloader(output_dir=tmp_path)
+
+    with pytest.raises(DownloadFailed, match="HTTP Error 404"):
+        downloader.download_blocking(
+            "https://cdn/video/720.mp4:hls:manifest.m3u8", "clip", "https://cdn/"
+        )
+
+    assert len(attempts) == 2
+    assert "720.mp4" in attempts[0]
+    assert "480.mp4" in attempts[1]

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light Palette -->
+    <color name="light_background">#F8FAFC</color>
+    <color name="light_surface">#FFFFFF</color>
+    <color name="light_surface_alt">#F1F5F9</color>
+    <color name="light_border">#E2E8F0</color>
+    <color name="light_border_strong">#CBD5E1</color>
+    <color name="light_text">#0F172A</color>
+    <color name="light_text_muted">#64748B</color>
+    <color name="light_accent">#2563EB</color>
+    <color name="light_accent_hover">#1D4ED8</color>
+    <color name="light_accent_soft">#EFF6FF</color>
+    <color name="light_success">#16A34A</color>
+    <color name="light_danger">#DC2626</color>
+    <color name="light_warning">#D97706</color>
+
+    <!-- Dark Palette -->
+    <color name="dark_background">#0F1117</color>
+    <color name="dark_surface">#181B22</color>
+    <color name="dark_surface_alt">#212631</color>
+    <color name="dark_border">#2B3240</color>
+    <color name="dark_border_strong">#3D4659</color>
+    <color name="dark_text">#F1F5F9</color>
+    <color name="dark_text_muted">#94A3B8</color>
+    <color name="dark_accent">#3B82F6</color>
+    <color name="dark_accent_hover">#60A5FA</color>
+    <color name="dark_accent_soft">#1E293B</color>
+    <color name="dark_success">#22C55E</color>
+    <color name="dark_danger">#EF4444</color>
+    <color name="dark_warning">#F59E0B</color>
+
+    <!-- Static common colors -->
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+    <color name="transparent">#00000000</color>
+    <color name="badge_bg">#252C3A</color>
+</resources>

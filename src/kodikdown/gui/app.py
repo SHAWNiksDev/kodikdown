@@ -19,7 +19,7 @@ from kodikdown.i18n import set_language, t
 logger = logging.getLogger(__name__)
 
 
-def run(argv: list[str] | None = None) -> int:
+def run(argv: list[str] | None = None, url: str | None = None) -> int:
     # A windowed Windows build has no streams at all.
     if sys.stderr is not None:
         logging.basicConfig(
@@ -48,15 +48,17 @@ def run(argv: list[str] | None = None) -> int:
 
     window = MainWindow(store, settings)
     window.show()
-    url = _url_argument(argv if argv is not None else sys.argv)
-    if url:
-        window.prefill(url)
+    prefill_url = url if url is not None else _url_argument(argv if argv is not None else sys.argv)
+    if prefill_url:
+        window.prefill(prefill_url)
     return int(application.exec())
 
 
 def _url_argument(argv: list[str]) -> str:
     """`kodikdown <link>` opens the window with the lookup already running."""
     for argument in argv[1:]:
+        if argument == "gui":
+            continue
         if not argument.startswith("-"):
             return argument
     return ""

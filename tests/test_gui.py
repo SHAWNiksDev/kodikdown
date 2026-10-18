@@ -513,3 +513,39 @@ def test_progress_bar_stops_busy_on_hide(window: MainWindow) -> None:
     bar.hide()
     assert bar._busy is False
     assert bar._busy_timer.isActive() is False
+
+
+def test_shortcuts_configured_on_main_window(window: MainWindow) -> None:
+    from PySide6.QtGui import QShortcut
+
+    shortcuts = [
+        sc.key().toString() for sc in window.findChildren(QShortcut)
+    ]
+    assert "Ctrl+S" in shortcuts
+    assert "Ctrl+Q" in shortcuts
+
+
+def test_settings_syncs_prefer_mp4_to_main_window(window: MainWindow, tmp_path: Path, monkeypatch) -> None:
+    from kodikdown.gui.settings_dialog import SettingsDialog
+
+    assert window.mp4_check.isChecked() is False
+
+    # Simulate SettingsDialog accepting prefer_mp4 = True
+    def mock_exec(self):
+        self.mp4_check.setChecked(True)
+        self._save()
+        return SettingsDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(SettingsDialog, "exec", mock_exec)
+    window.open_settings()
+
+    assert window.mp4_check.isChecked() is True
+    assert window.settings.prefer_mp4 is True
+
+
+def test_url_argument_skips_gui_subcommand() -> None:
+    from kodikdown.gui.app import _url_argument
+
+    assert _url_argument(["kodikdown", "gui", PAGE_URL]) == PAGE_URL
+    assert _url_argument(["kodikdown", PAGE_URL]) == PAGE_URL
+    assert _url_argument(["kodikdown", "--help"]) == ""

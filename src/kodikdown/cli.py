@@ -60,7 +60,10 @@ def gui(
     url: Annotated[str | None, typer.Argument(help="Optional player link to open")] = None,
 ) -> None:
     """Open the desktop window (the default when no command is given)."""
-    launch_gui()
+    try:
+        launch_gui(url=url)  # type: ignore[call-arg]
+    except TypeError:
+        launch_gui()
 
 
 @app.command()
@@ -86,6 +89,15 @@ def download(
     as_mp4: Annotated[
         bool, typer.Option("--mp4", help="Prefer a plain MP4 file over the HLS stream.")
     ] = False,
+    filename: Annotated[
+        str | None,
+        typer.Option(
+            "--filename",
+            "-n",
+            "--name",
+            help="Custom output file name without extension.",
+        ),
+    ] = None,
 ) -> None:
     """Resolve one link and save the video without opening the interface."""
     settings: Settings = ConfigStore().load()
@@ -131,8 +143,9 @@ def download(
         return
 
     variant = resolved.pick(quality)
+    stream_url = variant.direct_mp4 if (as_mp4 and variant.direct_mp4) else variant.url
     if print_url:
-        typer.echo(variant.url)
+        typer.echo(stream_url)
         return
 
     if quality is not None and variant.quality != quality:
@@ -141,8 +154,7 @@ def download(
             t("cli_quality_fallback", wanted=quality, picked=variant.quality, list=available)
         )
 
-    stream_url = variant.direct_mp4 if (as_mp4 and variant.direct_mp4) else variant.url
-    title = resolved.title or "kodik-video"
+    title = filename or resolved.title or "kodik-video"
 
     def _cli_progress(snapshot: ProgressSnapshot) -> None:
         parts: list[str] = []
@@ -167,7 +179,7 @@ def download(
     downloader = Downloader(
         output_dir=target_dir,
         listener=_cli_progress,
-        concurrent_fragments=settings.concurrent_downloads * 4,
+        concurrent_fragments=max(8, settings.concurrent_downloads * 4),
         filename=title,
     )
 
@@ -240,7 +252,7 @@ def _format_duration(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
 
 
-def launch_gui() -> None:
+def launch_gui(url: str | None = None) -> None:
     try:
         from kodikdown.gui.app import run
     except ImportError:
@@ -251,7 +263,7 @@ def launch_gui() -> None:
         )
         raise typer.Exit(1) from None
 
-    raise SystemExit(run())
+    raise SystemExit(run(url=url))
 
 
 def main() -> None:

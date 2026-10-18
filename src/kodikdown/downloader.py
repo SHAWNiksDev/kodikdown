@@ -280,16 +280,46 @@ class Downloader:
         Partial files are deliberately kept between attempts: yt-dlp resumes
         the fragments it already has, so the retry is cheap.
         """
-        for attempt in range(_TRANSFER_ATTEMPTS):
-            try:
-                self._transfer(target_base, url, referer)
-                return
-            except DownloadFailed as exc:
-                last = attempt + 1 == _TRANSFER_ATTEMPTS
-                if last or self.cancelled or not _is_transient(str(exc)):
-                    raise
-                if self._cancel_event.wait(_RETRY_DELAY * (attempt + 1)):
-                    raise DownloadCancelled from exc
+        urls_to_try = [url]
+        file_match = re.search(r"/(\d{3,4})\.mp4", url)
+        if file_match:
+            res = int(file_match.group(1))
+            if res > 720:
+                urls_to_try.append(
+                    re.sub(r"/(\d{3,4})\.mp4(?=(:hls|\?|$))", "/720.mp4", url, count=1)
+                )
+            if res > 480:
+                urls_to_try.append(
+                    re.sub(r"/(\d{3,4})\.mp4(?=(:hls|\?|$))", "/480.mp4", url, count=1)
+                )
+
+        last_exc: Exception | None = None
+        for current_url in urls_to_try:
+            for attempt in range(_TRANSFER_ATTEMPTS):
+                try:
+                    self._transfer(target_base, current_url, referer)
+                    return
+                except DownloadFailed as exc:
+                    last_exc = exc
+                    err = str(exc).lower()
+                    if current_url != urls_to_try[-1] and any(
+                        m in err for m in ("404", "not found", "403")
+                    ):
+                        self._remove_partials(target_base)
+                        break
+                    last = attempt + 1 == _TRANSFER_ATTEMPTS
+                    if last or self.cancelled or not _is_transient(str(exc)):
+                        if current_url != urls_to_try[-1] and any(
+                            m in err for m in ("404", "not found", "403")
+                        ):
+                            self._remove_partials(target_base)
+                            break
+                        raise
+                    if self._cancel_event.wait(_RETRY_DELAY * (attempt + 1)):
+                        raise DownloadCancelled from exc
+
+        if last_exc is not None:
+            raise last_exc
 
     def _transfer(self, target_base: Path, url: str, referer: str) -> None:
         try:
@@ -356,6 +386,7 @@ class Downloader:
             # fails fast instead of hanging.
             "socket_timeout": self._socket_timeout,
             "http_chunk_size": 10 * 1024 * 1024,
+            "buffersize": 1024 * 1024,
             "hls_prefer_native": True,
             "continuedl": True,
             "overwrites": False,

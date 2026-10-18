@@ -309,3 +309,24 @@ def test_build_variants_dedupes_same_quality(video_info_json: dict[str, object])
     variants = build_variants({"links": {"720": [entry, entry], "360": [entry]}})
 
     assert [variant.quality for variant in variants] == [720, 360]
+
+
+def test_build_variants_promotes_mismatched_resolution() -> None:
+    # Simulates Kodik returning /480.mp4 under quality key '720'
+    entry = {"src": "https://cdn.example/video/480.mp4:hls:manifest.m3u8", "type": "application/x-mpegURL"}
+    variants = build_variants({"links": {"720": [entry]}})
+
+    assert len(variants) == 1
+    assert variants[0].quality == 720
+    assert variants[0].url == "https://cdn.example/video/720.mp4:hls:manifest.m3u8"
+    assert variants[0].direct_mp4 == "https://cdn.example/video/720.mp4"
+
+
+def test_build_variants_does_not_demote_resolution() -> None:
+    # If 360 has 480.mp4, it should not demote
+    entry = {"src": "https://cdn.example/video/480.mp4:hls:manifest.m3u8", "type": "application/x-mpegURL"}
+    variants = build_variants({"links": {"360": [entry]}})
+
+    assert len(variants) == 1
+    assert variants[0].quality == 360
+    assert variants[0].url == "https://cdn.example/video/480.mp4:hls:manifest.m3u8"

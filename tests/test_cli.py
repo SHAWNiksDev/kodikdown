@@ -196,3 +196,55 @@ def test_main_cli_binary_url_routes_to_download(
     with pytest.raises(SystemExit) as exc:
         main()
     assert exc.value.code == 0
+
+
+@respx.mock
+def test_download_print_url_with_mp4(
+    player_page_html: str, player_js_snippet: str, video_info_json: dict[str, object]
+) -> None:
+    _mock_resolve(player_page_html, player_js_snippet, video_info_json)
+    result = CliRunner().invoke(app, ["download", PAGE_URL, "--print-url", "--mp4"])
+    assert result.exit_code == 0
+    url = result.output.strip().splitlines()[-1]
+    assert url.startswith("https://")
+    assert not url.endswith(":hls:manifest.m3u8")
+    assert url.endswith(".mp4")
+
+
+def test_gui_command_passes_url(monkeypatch) -> None:
+    passed_url = None
+
+    def fake_launch(url: str | None = None) -> None:
+        nonlocal passed_url
+        passed_url = url
+
+    monkeypatch.setattr("kodikdown.cli.launch_gui", fake_launch)
+    CliRunner().invoke(app, ["gui", PAGE_URL])
+    assert passed_url == PAGE_URL
+
+
+@respx.mock
+def test_download_with_custom_filename(
+    player_page_html: str,
+    player_js_snippet: str,
+    video_info_json: dict[str, object],
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _mock_resolve(player_page_html, player_js_snippet, video_info_json)
+    download_called = False
+
+    def fake_download(self, url, title, referer):
+        nonlocal download_called
+        download_called = True
+        assert self._filename == "My_Custom_Episode"
+        res = tmp_path / "My_Custom_Episode.mp4"
+        res.write_bytes(b"data")
+        return res
+
+    monkeypatch.setattr("kodikdown.downloader.Downloader.download_blocking", fake_download)
+    result = CliRunner().invoke(
+        app, ["download", PAGE_URL, "--filename", "My_Custom_Episode", "-o", str(tmp_path)]
+    )
+    assert result.exit_code == 0
+    assert download_called is True

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThreadPool, QTimer
-from PySide6.QtGui import QCloseEvent, QGuiApplication, QKeyEvent, QResizeEvent
+from PySide6.QtGui import QCloseEvent, QGuiApplication, QKeyEvent, QKeySequence, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -91,6 +91,8 @@ class MainWindow(QMainWindow):
 
         self._build()
         self.apply_theme(settings.theme)
+        QShortcut(QKeySequence("Ctrl+S"), self, self.open_settings)
+        QShortcut(QKeySequence("Ctrl+Q"), self, self.close)
 
     # -- construction ------------------------------------------------------
     def _build(self) -> None:
@@ -704,6 +706,7 @@ class MainWindow(QMainWindow):
         self.store.save(updated)
         self.pool.setMaxThreadCount(updated.concurrent_downloads)
         self.folder_label.setText(str(updated.download_dir))
+        self.mp4_check.setChecked(updated.prefer_mp4)
         if language_changed:
             set_language(updated.language)
             self.retranslate()
@@ -711,6 +714,10 @@ class MainWindow(QMainWindow):
         self._toast(t("settings_saved"), "success")
 
     def _open_folder(self, folder: Path) -> None:
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
         if not folder.is_dir():
             self._toast(t("folder_missing"), "warning")
             return

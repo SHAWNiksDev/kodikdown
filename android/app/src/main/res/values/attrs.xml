@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <attr name="app_background" format="color" />
+    <attr name="app_surface" format="color" />
+    <attr name="app_surface_alt" format="color" />
+    <attr name="app_border" format="color" />
+    <attr name="app_border_strong" format="color" />
+    <attr name="app_text" format="color" />
+    <attr name="app_text_muted" format="color" />
+    <attr name="app_accent" format="color" />
+    <attr name="app_accent_hover" format="color" />
+    <attr name="app_accent_soft" format="color" />
+    <attr name="app_success" format="color" />
+    <attr name="app_danger" format="color" />
+    <attr name="app_warning" format="color" />
+</resources>

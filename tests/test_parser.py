@@ -308,3 +308,19 @@ def test_extract_payload_supports_object_literal() -> None:
     assert payload.media_type == "video"
     assert payload.video_id == "42"
     assert payload.content_hash == "abc123def4567890"
+
+
+def test_extract_embed_surrounded_by_text() -> None:
+    text = f"Check this out: https://kodikplayer.com/video/91873/{HASH}/720p and enjoy!"
+    info = extract_embed(text)
+    assert info.domain == "kodikplayer.com"
+    assert info.video_id == "91873"
+    assert info.quality == 720
+
+
+def test_extract_embed_markdown_link() -> None:
+    text = f"[Episode 1](https://kodikplayer.com/video/91873/{HASH}/720p)"
+    info = extract_embed(text)
+    assert info.domain == "kodikplayer.com"
+    assert info.video_id == "91873"
+    assert info.quality == 720
