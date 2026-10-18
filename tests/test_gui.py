@@ -525,7 +525,9 @@ def test_shortcuts_configured_on_main_window(window: MainWindow) -> None:
     assert "Ctrl+Q" in shortcuts
 
 
-def test_settings_syncs_prefer_mp4_to_main_window(window: MainWindow, tmp_path: Path, monkeypatch) -> None:
+def test_settings_syncs_prefer_mp4_to_main_window(
+    window: MainWindow, tmp_path: Path, monkeypatch
+) -> None:
     from kodikdown.gui.settings_dialog import SettingsDialog
 
     assert window.mp4_check.isChecked() is False

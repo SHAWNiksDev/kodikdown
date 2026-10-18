@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThreadPool, QTimer
-from PySide6.QtGui import QCloseEvent, QGuiApplication, QKeyEvent, QKeySequence, QResizeEvent, QShortcut
+from PySide6.QtGui import (
+    QCloseEvent,
+    QGuiApplication,
+    QKeyEvent,
+    QKeySequence,
+    QResizeEvent,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -714,10 +722,8 @@ class MainWindow(QMainWindow):
         self._toast(t("settings_saved"), "success")
 
     def _open_folder(self, folder: Path) -> None:
-        try:
+        with contextlib.suppress(OSError):
             folder.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
         if not folder.is_dir():
             self._toast(t("folder_missing"), "warning")
             return

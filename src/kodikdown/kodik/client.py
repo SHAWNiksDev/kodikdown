@@ -78,8 +78,8 @@ def build_variants(data: dict[str, Any]) -> tuple[StreamVariant, ...]:
             url, _shift = decoded
             url = normalise_url(url)
 
-            # If the decoded stream URL carries a lower resolution filename (e.g. /480.mp4 under quality 720)
-            # promote the path to match the requested quality
+            # If the decoded stream URL carries a lower resolution filename
+            # (e.g. /480.mp4 under quality 720), promote the path to match the quality
             file_match = re.search(r"/(\d{3,4})\.mp4", url)
             if file_match and quality > int(file_match.group(1)):
                 url = re.sub(r"/(\d{3,4})\.mp4(?=(:hls|\?|$))", f"/{quality}.mp4", url, count=1)
