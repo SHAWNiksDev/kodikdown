@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Android:** из-за новой подписи удалите старую тестовую версию и установите этот APK. Настройки и история сбросятся; скачанные в общую папку видео останутся. Следующие релизы обновляются поверх.
 
-Готовые сборки этого выпуска — Android и Linux. Windows-бинарник 4.0.0 пока не выпускается.
+Готовые сборки этого выпуска — Android, Windows x64 и Linux x64. Для Windows и Linux доступны приложение с интерфейсом и консольная версия.
 
 ### English
 
@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Android:** uninstall the previous test build once before installing this APK because the signing certificate changed. Settings and history reset; shared downloaded videos remain. Future releases keep the same release key.
 
-This release includes Android and Linux binaries. A Windows 4.0.0 binary is not included.
+This release includes Android, Windows x64 and Linux x64 binaries. Windows and Linux each include a desktop app and a command-line tool.
 
 ## [3.5.0] - 2026-10-18
 

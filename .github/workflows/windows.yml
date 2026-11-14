@@ -1,0 +1,119 @@
+name: Windows release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag
+        required: true
+        default: v4.0.0
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - run: pip install -e '.[dev]'
+      - name: Check the release version
+        shell: python
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          import os
+          from kodikdown import __version__
+          assert os.environ["RELEASE_TAG"] == f"v{__version__}", "Version does not match tag"
+      - name: Build the desktop app
+        env:
+          KODIKDOWN_BUILD_NAME: kodikdown-windows-x86_64
+        run: pyinstaller packaging/kodikdown.spec --noconfirm
+      - name: Build the command-line tool
+        env:
+          KODIKDOWN_BUILD_NAME: kodikdown-windows-x86_64-cli
+        run: pyinstaller packaging/kodikdown-cli.spec --noconfirm
+      - name: Check the packaged apps
+        shell: python
+        run: |
+          import ctypes
+          from ctypes import wintypes
+          import subprocess
+          import time
+          from pathlib import Path
+          from kodikdown import __version__
+
+          version = subprocess.check_output(
+              [str(Path("dist/kodikdown-windows-x86_64-cli.exe").resolve()), "--version"],
+              text=True, timeout=60,
+          )
+          assert __version__ in version, version
+          print(version.strip())
+          user32 = ctypes.WinDLL("user32", use_last_error=True)
+          user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+          user32.FindWindowW.restype = wintypes.HWND
+          user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+          user32.GetWindowRect.restype = wintypes.BOOL
+          process = subprocess.Popen([str(Path("dist/kodikdown-windows-x86_64.exe").resolve())])
+          try:
+              deadline = time.monotonic() + 60
+              while time.monotonic() < deadline:
+                  assert process.poll() is None, f"Desktop app exited: {process.returncode}"
+                  window = user32.FindWindowW(None, "KodikDown")
+                  rect = wintypes.RECT()
+                  if (window and user32.GetWindowRect(window, ctypes.byref(rect))
+                          and rect.right - rect.left >= 600 and rect.bottom - rect.top >= 450):
+                      break
+                  time.sleep(0.5)
+              else:
+                  raise RuntimeError("The packaged desktop app did not open its main window")
+              time.sleep(5)
+              assert process.poll() is None, "Desktop app exited after opening"
+              print("Packaged Windows GUI opened its main window and stayed running.")
+          finally:
+              subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False)
+              process.wait(timeout=15)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kodikdown-windows
+          if-no-files-found: error
+          path: |
+            dist/kodikdown-windows-x86_64.exe
+            dist/kodikdown-windows-x86_64-cli.exe
+
+  publish:
+    if: github.event_name == 'workflow_dispatch'
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: kodikdown-windows
+          path: dist
+      - name: Add Windows files to the existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh release view "$RELEASE_TAG"
+          gh release download "$RELEASE_TAG" --pattern SHA256SUMS --dir dist
+          cd dist
+          sha256sum kodikdown-windows-*.exe >> SHA256SUMS
+          gh release upload "$RELEASE_TAG" kodikdown-windows-*.exe
+          gh release upload "$RELEASE_TAG" SHA256SUMS --clobber

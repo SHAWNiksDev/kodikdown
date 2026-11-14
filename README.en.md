@@ -15,6 +15,8 @@ Get the files from [release 4.0.0](https://github.com/SHAWNiksDev/kodikdown/rele
 | Platform | File |
 | --- | --- |
 | Android 7.0+ | `kodikdown-android.apk` |
+| Windows 10/11 x64 | `kodikdown-windows-x86_64.exe` |
+| Windows x64, CLI | `kodikdown-windows-x86_64-cli.exe` |
 | Linux x64 | `kodikdown-linux-x86_64` |
 | Linux x64, CLI | `kodikdown-linux-x86_64-cli` |
 
@@ -23,9 +25,7 @@ chmod +x kodikdown-linux-x86_64
 ./kodikdown-linux-x86_64
 ```
 
-The packaged apps do not require Python. Linux needs a graphical desktop; install **FFmpeg** for HLS processing and check `ffmpeg -version` in a terminal. FFmpeg is not bundled.
-
-Android and Linux were tested for this release. The desktop code is shared with Windows, but a Windows 4.0.0 binary is not included. See the source installation instructions below.
+The packaged apps do not require Python. On Windows, download and open the EXE. Linux needs a graphical desktop. On Windows and Linux, install **FFmpeg** for HLS processing and check `ffmpeg -version` in a terminal. FFmpeg is not bundled. On Windows, you can use `winget install --id Gyan.FFmpeg -e`, then reopen the app.
 
 If the Android release will not install over an older test build, uninstall the old app first: the signing certificate has changed. Uninstalling resets settings and history; videos in the shared downloads folder remain. Future releases will keep the same release signing key.
 
