@@ -41,6 +41,8 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       # Release signing stays local. CI verifies the published APK without
       # receiving a private key or a signing password.

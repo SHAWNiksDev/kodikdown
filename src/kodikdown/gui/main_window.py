@@ -479,13 +479,14 @@ class MainWindow(QMainWindow):
         self, mode: str, *, animate: bool = False, origin: QWidget | None = None
     ) -> None:
         target = palette_for(mode)
+        central = self.centralWidget()
         if (
             animate
             and self.settings.animations
             and target.mode != self._palette.mode
             and self.isVisible()
+            and central is not None
         ):
-            central = self.centralWidget()
             point = (
                 origin.mapTo(central, origin.rect().center())
                 if origin is not None
@@ -1041,7 +1042,8 @@ class MainWindow(QMainWindow):
         theme_changed = updated.theme != previous.theme
         if language_changed and not theme_changed and updated.animations and self.isVisible():
             central = self.centralWidget()
-            self.appearance_overlay.capture(central.rect().center(), circular=False)
+            if central is not None:
+                self.appearance_overlay.capture(central.rect().center(), circular=False)
         self.settings = updated
         self.pool.setMaxThreadCount(updated.concurrent_downloads)
         self.folder_label.setText(str(updated.download_dir))
