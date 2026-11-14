@@ -10,7 +10,13 @@ import typer
 
 from kodikdown import __version__
 from kodikdown.config import ConfigStore, Settings
-from kodikdown.downloader import DownloadCancelled, Downloader, DownloadFailed, ProgressSnapshot
+from kodikdown.downloader import (
+    DownloadCancelled,
+    Downloader,
+    DownloadFailed,
+    DownloadSource,
+    ProgressSnapshot,
+)
 from kodikdown.i18n import set_language, t
 from kodikdown.kodik.client import KodikClient
 from kodikdown.kodik.errors import (
@@ -157,6 +163,8 @@ def download(
     title = filename or resolved.title or "kodik-video"
 
     def _cli_progress(snapshot: ProgressSnapshot) -> None:
+        if snapshot.quality is not None:
+            typer.echo(f"\n{t('cli_stream_fallback', quality=snapshot.quality)}", err=True)
         parts: list[str] = []
         if snapshot.fragments and snapshot.total:
             pct = f"{100.0 * snapshot.downloaded / snapshot.total:.0f}%"
@@ -181,6 +189,11 @@ def download(
         listener=_cli_progress,
         concurrent_fragments=max(8, settings.concurrent_downloads * 4),
         filename=title,
+        fallback_sources=tuple(
+            DownloadSource(v.direct_mp4 if as_mp4 and v.direct_mp4 else v.url, v.quality)
+            for v in resolved.variants
+            if v.quality < variant.quality
+        ),
     )
 
     try:

@@ -22,10 +22,40 @@ class HistoryAdapter(
     private val onRedownloadClicked: (HistoryItem) -> Unit,
     private val onPlayClicked: (HistoryItem) -> Unit,
     private val onCopyClicked: (HistoryItem) -> Unit,
-    private val onDeleteClicked: (HistoryItem) -> Unit
+    private val onDeleteClicked: (HistoryItem) -> Unit,
+    private val onItemClick: (HistoryItem) -> Unit = {},
+    private val onItemLongClick: (HistoryItem) -> Boolean = { false }
 ) : ListAdapter<HistoryItem, HistoryAdapter.HistoryViewHolder>(DiffCallback) {
 
     private val dateFormat = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault())
+
+    var isSelectionMode: Boolean = false
+        set(value) {
+            field = value
+            notifyDataSetChanged()
+        }
+
+    val selectedIds: MutableSet<String> = mutableSetOf()
+
+    fun selectAll() {
+        selectedIds.clear()
+        currentList.forEach { selectedIds.add(it.id) }
+        notifyDataSetChanged()
+    }
+
+    fun clearSelection() {
+        selectedIds.clear()
+        notifyDataSetChanged()
+    }
+
+    fun toggleSelection(id: String) {
+        if (selectedIds.contains(id)) {
+            selectedIds.remove(id)
+        } else {
+            selectedIds.add(id)
+        }
+        notifyDataSetChanged()
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): HistoryViewHolder {
         val binding = ItemHistoryBinding.inflate(LayoutInflater.from(parent.context), parent, false)
@@ -45,14 +75,17 @@ class HistoryAdapter(
         }
 
         fun bind(item: HistoryItem) {
+            val active = com.shawniks.kodikdown.downloader.DownloadManager.isActive(item.id)
+            val available = com.shawniks.kodikdown.data.MediaFiles.isAvailable(item.savedPath, item.contentUri)
+            val isSelected = selectedIds.contains(item.id)
             val context = binding.root.context
             binding.tvHistoryTitle.text = item.title
 
             // Status Badge
             when (item.status) {
                 DownloadStatus.FINISHED -> {
-                    binding.tvHistoryStatus.text = context.getString(R.string.status_completed)
-                    binding.tvHistoryStatus.setTextColor(ContextCompat.getColor(context, R.color.dark_success))
+                    binding.tvHistoryStatus.text = context.getString(if (available) R.string.status_completed else R.string.file_missing)
+                    binding.tvHistoryStatus.setTextColor(ContextCompat.getColor(context, if (available) R.color.dark_success else R.color.dark_text_muted))
                 }
                 DownloadStatus.CANCELLED -> {
                     binding.tvHistoryStatus.text = context.getString(R.string.cancelled)
@@ -62,10 +95,32 @@ class HistoryAdapter(
                     binding.tvHistoryStatus.text = context.getString(R.string.failed, "").trimEnd(':', ' ')
                     binding.tvHistoryStatus.setTextColor(ContextCompat.getColor(context, R.color.dark_danger))
                 }
-                else -> {
-                    binding.tvHistoryStatus.text = context.getString(R.string.starting)
+                DownloadStatus.DOWNLOADING -> {
+                    binding.tvHistoryStatus.text = context.getString(R.string.status_downloading)
                     binding.tvHistoryStatus.setTextColor(ContextCompat.getColor(context, R.color.dark_accent))
                 }
+                DownloadStatus.ASSEMBLING -> {
+                    binding.tvHistoryStatus.text = context.getString(R.string.stage_processing)
+                    binding.tvHistoryStatus.setTextColor(ContextCompat.getColor(context, R.color.dark_accent))
+                }
+                else -> {
+                    binding.tvHistoryStatus.text = context.getString(R.string.queued)
+                    binding.tvHistoryStatus.setTextColor(ContextCompat.getColor(context, R.color.dark_accent))
+                }
+            }
+
+            // Selection Checkbox & Card Highlight
+            if (isSelectionMode) {
+                binding.ivSelectCheck.visibility = View.VISIBLE
+                binding.ivSelectCheck.setImageResource(
+                    if (isSelected) R.drawable.ic_checkbox_checked else R.drawable.ic_checkbox_unchecked
+                )
+                binding.root.setBackgroundResource(
+                    if (isSelected) R.drawable.bg_card_selected else R.drawable.bg_card
+                )
+            } else {
+                binding.ivSelectCheck.visibility = View.GONE
+                binding.root.setBackgroundResource(R.drawable.bg_card)
             }
 
             // Metadata text
@@ -85,14 +140,27 @@ class HistoryAdapter(
                 binding.tvHistoryError.visibility = View.GONE
             }
 
-            // Check if file exists on disk or MediaStore contentUri for "Play" button
-            val hasFile = (!item.savedPath.isNullOrEmpty() && File(item.savedPath!!).exists()) || !item.contentUri.isNullOrEmpty()
-            binding.btnHistoryPlay.visibility = if (hasFile) View.VISIBLE else View.GONE
+            binding.btnHistoryPlay.visibility = if (available && item.status == DownloadStatus.FINISHED) View.VISIBLE else View.GONE
+            binding.btnHistoryDelete.isEnabled = !active
+            binding.btnHistoryDelete.alpha = if (active) 0.35f else 1f
+            binding.btnHistoryRedownload.isEnabled = !active
+            binding.btnHistoryRedownload.alpha = if (active) 0.35f else 1f
 
-            binding.btnHistoryRedownload.setOnClickListener { onRedownloadClicked(item) }
+            binding.root.setOnClickListener {
+                if (isSelectionMode && !active) {
+                    toggleSelection(item.id)
+                    onItemClick(item)
+                }
+            }
+
+            binding.root.setOnLongClickListener {
+                if (active) false else onItemLongClick(item)
+            }
+
+            binding.btnHistoryRedownload.setOnClickListener { if (!com.shawniks.kodikdown.downloader.DownloadManager.isActive(item.id)) onRedownloadClicked(item) }
             binding.btnHistoryPlay.setOnClickListener { onPlayClicked(item) }
             binding.btnHistoryCopy.setOnClickListener { onCopyClicked(item) }
-            binding.btnHistoryDelete.setOnClickListener { onDeleteClicked(item) }
+            binding.btnHistoryDelete.setOnClickListener { if (!com.shawniks.kodikdown.downloader.DownloadManager.isActive(item.id)) onDeleteClicked(item) }
         }
     }
 

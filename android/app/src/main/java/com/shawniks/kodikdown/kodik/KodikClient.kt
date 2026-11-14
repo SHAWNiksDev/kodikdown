@@ -6,35 +6,38 @@ import com.shawniks.kodikdown.data.PlayerPayload
 import com.shawniks.kodikdown.data.ResolvedVideo
 import com.shawniks.kodikdown.data.StreamVariant
 import com.shawniks.kodikdown.data.Translation
+import com.shawniks.kodikdown.net.readResponse
+import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import java.io.IOException
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 
-class KodikClient(
-    private val client: OkHttpClient = defaultHttpClient()
-) {
+class KodikClient(private val client: OkHttpClient = defaultHttpClient()) {
     private val endpointCache = ConcurrentHashMap<String, String>()
     private var preferredHost: String? = null
 
     companion object {
-        const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        const val USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         private val RETRY_STATUSES = setOf(429, 500, 502, 503, 504)
         private const val PROXY_MARKER = "/s/m/"
         private const val POST_ATTEMPTS = 3
 
         fun defaultHttpClient(): OkHttpClient {
-            val dispatcher = okhttp3.Dispatcher().apply {
-                maxRequests = 256
-                maxRequestsPerHost = 64
-            }
+            val dispatcher =
+                okhttp3.Dispatcher().apply {
+                    maxRequests = 256
+                    maxRequestsPerHost = 64
+                }
             val pool = okhttp3.ConnectionPool(64, 5, TimeUnit.MINUTES)
             return OkHttpClient.Builder()
                 .dispatcher(dispatcher)
@@ -49,25 +52,34 @@ class KodikClient(
         }
     }
 
-    suspend fun resolve(rawUrl: String, translation: Translation? = null): ResolvedVideo = withContext(Dispatchers.IO) {
-        val embed = KodikParser.extractEmbed(rawUrl)
-        var lastError: Exception? = null
+    suspend fun resolve(rawUrl: String, translation: Translation? = null): ResolvedVideo =
+        withContext(Dispatchers.IO) {
+            val embed = KodikParser.extractEmbed(rawUrl)
+            var lastError: Exception? = null
 
-        val hosts = candidateHosts(embed.domain)
-        for (host in hosts) {
-            try {
-                val resolved = resolveOn(host, embed, translation)
-                preferredHost = host
-                return@withContext resolved
-            } catch (e: Exception) {
-                lastError = e
-                continue
+            val hosts = candidateHosts(embed.domain)
+            for (host in hosts) {
+                try {
+                    val resolved = withTimeout(90_000) { resolveOn(host, embed, translation) }
+                    preferredHost = host
+                    return@withContext resolved
+                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                    lastError = IOException("Player host timed out: $host", e)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    lastError = e
+                    continue
+                }
             }
+            throw lastError ?: IOException("Could not reach any Kodik mirror")
         }
-        throw lastError ?: IOException("Could not reach any Kodik mirror")
-    }
 
-    private suspend fun resolveOn(host: String, embed: EmbedInfo, translation: Translation?): ResolvedVideo {
+    private suspend fun resolveOn(
+        host: String,
+        embed: EmbedInfo,
+        translation: Translation?,
+    ): ResolvedVideo {
         val page = loadPage(host, embed)
         val payload = translation?.asPayload() ?: page.payload
         val data = fetchLinks(host, embed, page, payload)
@@ -90,7 +102,7 @@ class KodikClient(
             translations = page.translations,
             translation = translation ?: page.currentTranslation,
             defaultQuality = defaultQ,
-            warnings = warnings
+            warnings = warnings,
         )
     }
 
@@ -104,7 +116,7 @@ class KodikClient(
         host: String,
         embed: EmbedInfo,
         initialPage: PlayerPage,
-        payload: PlayerPayload
+        payload: PlayerPayload,
     ): JSONObject {
         var page = initialPage
         var lastError = ""
@@ -132,12 +144,12 @@ class KodikClient(
         throw IOException("Video-info request failed: ${result.second.ifEmpty { lastError }}")
     }
 
-    private fun postLinks(
+    private suspend fun postLinks(
         host: String,
         embed: EmbedInfo,
         page: PlayerPage,
         payload: PlayerPayload,
-        endpoint: String
+        endpoint: String,
     ): Pair<JSONObject?, String> {
         val url = "https://$host$endpoint"
         val form = page.signedForm(payload)
@@ -146,64 +158,68 @@ class KodikClient(
             bodyBuilder.add(k, v)
         }
 
-        val request = Request.Builder()
-            .url(url)
-            .post(bodyBuilder.build())
-            .header("User-Agent", USER_AGENT)
-            .header("Referer", embed.urlOn(host))
-            .header("Origin", "https://$host")
-            .header("X-Requested-With", "XMLHttpRequest")
-            .header("Accept", "application/json, text/javascript, */*; q=0.01")
-            .build()
+        val request =
+            Request.Builder()
+                .url(url)
+                .post(bodyBuilder.build())
+                .header("User-Agent", USER_AGENT)
+                .header("Referer", embed.urlOn(host))
+                .header("Origin", "https://$host")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                .build()
 
         return try {
-            client.newCall(request).execute().use { response ->
-                parseReply(response, "POST")
-            }
+            client.readResponse(request) { response -> parseReply(response, "POST") }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Pair(null, "POST $endpoint failed: ${e.message}")
         }
     }
 
-    private fun getLinks(
+    private suspend fun getLinks(
         host: String,
         endpoint: String,
-        payload: PlayerPayload
+        payload: PlayerPayload,
     ): Pair<JSONObject?, String> {
-        val baseUrl = "https://$host$endpoint".toHttpUrlOrNull() ?: return Pair(null, "Invalid endpoint URL")
+        val baseUrl =
+            "https://$host$endpoint".toHttpUrlOrNull() ?: return Pair(null, "Invalid endpoint URL")
         val urlBuilder = baseUrl.newBuilder()
         for ((k, v) in payload.asForm()) {
             urlBuilder.addQueryParameter(k, v)
         }
 
-        val request = Request.Builder()
-            .url(urlBuilder.build())
-            .header("User-Agent", USER_AGENT)
-            .header("Referer", "https://$host/")
-            .header("X-Requested-With", "XMLHttpRequest")
-            .header("Accept", "application/json, text/javascript, */*; q=0.01")
-            .build()
+        val request =
+            Request.Builder()
+                .url(urlBuilder.build())
+                .header("User-Agent", USER_AGENT)
+                .header("Referer", "https://$host/")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                .build()
 
         return try {
-            client.newCall(request).execute().use { response ->
-                parseReply(response, "GET")
-            }
+            client.readResponse(request) { response -> parseReply(response, "GET") }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Pair(null, "GET $endpoint failed: ${e.message}")
         }
     }
 
     private suspend fun endpointFor(host: String, page: PlayerPage): String {
-        val cached = endpointCache[host]
+        val cacheKey = "$host/${page.playerJsPath}"
+        val cached = endpointCache[cacheKey]
+        if (cached != null) return cached
         if (page.playerJsPath.isEmpty()) {
-            if (cached != null) return cached
             throw IOException("Page does not link the player script")
         }
 
         val jsUrl = "https://$host/${page.playerJsPath}"
         val playerJs = getText(jsUrl, referer = "https://$host/")
         val endpoint = KodikParser.extractEndpoint(playerJs)
-        endpointCache[host] = endpoint
+        endpointCache[cacheKey] = endpoint
         return endpoint
     }
 
@@ -219,17 +235,18 @@ class KodikClient(
         return response.second!!
     }
 
-    private fun executeRequest(url: String, referer: String?): Pair<Int, String?> {
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", USER_AGENT)
-            .header("Referer", referer ?: url)
-            .build()
+    private suspend fun executeRequest(url: String, referer: String?): Pair<Int, String?> {
+        val request =
+            Request.Builder()
+                .url(url)
+                .header("User-Agent", USER_AGENT)
+                .header("Referer", referer ?: url)
+                .build()
 
         return try {
-            client.newCall(request).execute().use { res ->
-                Pair(res.code, res.body?.string())
-            }
+            client.readResponse(request) { res -> Pair(res.code, res.body?.string()) }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Pair(0, null)
         }
@@ -247,6 +264,8 @@ class KodikClient(
             } else {
                 Pair(json, "")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Pair(null, "$method reply is not valid JSON")
         }
@@ -271,7 +290,7 @@ class KodikClient(
         val keys = links.keys()
         while (keys.hasNext()) {
             val key = keys.next()
-            val quality = key.toIntOrNull() ?: continue
+            val quality = key.toIntOrNull()?.takeIf { it > 0 } ?: continue
             val entries = links.optJSONArray(key) ?: continue
 
             var bestVariant: StreamVariant? = null
@@ -282,34 +301,26 @@ class KodikClient(
                 val src = entry.optString("src", "")
                 if (src.isEmpty()) continue
 
-                val decoded = KodikDecoder.decodeStreamUrl(src, KodikDecoder.KNOWN_SHIFT) ?: continue
+                val decoded =
+                    KodikDecoder.decodeStreamUrl(src, KodikDecoder.KNOWN_SHIFT) ?: continue
                 val type = entry.optString("type", "").lowercase()
-                val rank = when {
-                    type.contains("mpegurl") || type.contains("m3u8") -> 0
-                    type.contains("dash") || type.contains("mpd") -> 1
-                    type.contains("mp4") || type.contains("video") -> 2
-                    else -> 3
-                }
+                val rank =
+                    when {
+                        type.contains("mpegurl") || type.contains("m3u8") -> 0
+                        type.contains("dash") || type.contains("mpd") -> 1
+                        type.contains("mp4") || type.contains("video") -> 2
+                        else -> 3
+                    }
                 if (rank >= bestRank) continue
 
-                var url = KodikDecoder.normaliseUrl(decoded.first)
-
-                // If the decoded stream URL carries a lower resolution filename (e.g. /480.mp4 under quality 720)
-                // promote the path to match the requested quality
-                val fileRes = Regex("""/(\d{3,4})\.mp4""").find(url)?.groupValues?.get(1)?.toIntOrNull()
-                if (fileRes != null && quality > fileRes) {
-                    url = url.replace(Regex("""/(\d{3,4})\.mp4"""), "/$quality.mp4")
-                }
+                val url = KodikDecoder.normaliseUrl(decoded.first)
 
                 val (kind, directMp4) = KodikDecoder.streamKind(url)
+                if (kind == "dash") continue
                 val direct = directMp4?.let { KodikDecoder.normaliseUrl(it) }
 
-                bestVariant = StreamVariant(
-                    quality = quality,
-                    url = url,
-                    kind = kind,
-                    directMp4 = direct
-                )
+                bestVariant =
+                    StreamVariant(quality = quality, url = url, kind = kind, directMp4 = direct)
                 bestRank = rank
             }
 

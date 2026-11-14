@@ -1,17 +1,19 @@
 package com.shawniks.kodikdown.data
 
 import android.content.Context
+import android.util.AtomicFile
 import android.util.Log
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 
 object HistoryManager {
     private const val FILE_NAME = "download_history.json"
@@ -20,36 +22,62 @@ object HistoryManager {
     private val _items = MutableStateFlow<List<HistoryItem>>(emptyList())
     val items: StateFlow<List<HistoryItem>> = _items.asStateFlow()
 
+    private data class Command(
+        val context: Context,
+        val transform: ((List<HistoryItem>) -> List<HistoryItem>)?,
+    )
+
+    private val commands = Channel<Command>(Channel.UNLIMITED)
     private var initialized = false
 
-    fun init(context: Context) {
-        if (initialized) return
-        initialized = true
+    init {
         scope.launch {
-            loadFromDisk(context)
+            for (command in commands) {
+                if (!initialized) {
+                    loadFromDisk(command.context)
+                    initialized = true
+                }
+                command.transform?.let { transform ->
+                    val updated = transform(_items.value)
+                    _items.value = updated
+                    saveToDisk(command.context, updated)
+                }
+            }
         }
+    }
+
+    fun init(context: Context) {
+        commands.trySend(Command(context.applicationContext, null))
+    }
+
+    private fun mutate(context: Context, transform: (List<HistoryItem>) -> List<HistoryItem>) {
+        commands.trySend(Command(context.applicationContext, transform))
     }
 
     fun recordFromDownload(
         context: Context,
         downloadItem: DownloadItem,
-        translationTitle: String? = null
+        translationTitle: String? = null,
     ) {
-        val entry = HistoryItem(
-            id = downloadItem.id,
-            title = downloadItem.title,
-            fileName = downloadItem.fileName,
-            url = downloadItem.url,
-            quality = downloadItem.quality,
-            translation = translationTitle,
-            isMp4 = downloadItem.isMp4,
-            status = downloadItem.status,
-            savedPath = downloadItem.savedPath,
-            contentUri = downloadItem.contentUri,
-            fileSize = downloadItem.downloadedBytes.takeIf { it > 0 } ?: (downloadItem.totalBytes ?: 0L),
-            timestamp = System.currentTimeMillis(),
-            errorMessage = downloadItem.errorMessage
-        )
+        val entry =
+            HistoryItem(
+                id = downloadItem.id,
+                title = downloadItem.title,
+                fileName = downloadItem.fileName,
+                url = downloadItem.url,
+                quality = downloadItem.quality,
+                translation = translationTitle,
+                isMp4 = downloadItem.isMp4,
+                status = downloadItem.status,
+                savedPath = downloadItem.savedPath,
+                contentUri = downloadItem.contentUri,
+                fileSize =
+                    downloadItem.downloadedBytes.takeIf { it > 0 }
+                        ?: (downloadItem.totalBytes ?: 0L),
+                timestamp = System.currentTimeMillis(),
+                errorMessage = downloadItem.errorMessage,
+                sourceInput = downloadItem.sourceInput,
+            )
         recordOrUpdate(context, entry)
     }
 
@@ -60,76 +88,87 @@ object HistoryManager {
         savedPath: String? = null,
         contentUri: String? = null,
         fileSize: Long? = null,
-        error: String? = null
+        error: String? = null,
     ) {
-        val currentList = _items.value.toMutableList()
-        val index = currentList.indexOfFirst { it.id == id }
-        if (index != -1) {
-            val item = currentList[index].copy(
-                status = status,
-                savedPath = savedPath ?: currentList[index].savedPath,
-                contentUri = contentUri ?: currentList[index].contentUri,
-                fileSize = fileSize ?: currentList[index].fileSize,
-                errorMessage = error ?: currentList[index].errorMessage
-            )
-            currentList[index] = item
-            _items.value = currentList
-            saveToDisk(context, currentList)
+        mutate(context) { list ->
+            list.map { item ->
+                if (item.id != id) item
+                else
+                    item.copy(
+                        status = status,
+                        savedPath = savedPath ?: item.savedPath,
+                        contentUri = contentUri ?: item.contentUri,
+                        fileSize = fileSize ?: item.fileSize,
+                        errorMessage = error,
+                    )
+            }
         }
     }
 
     fun recordOrUpdate(context: Context, item: HistoryItem) {
-        val currentList = _items.value.toMutableList()
-        val index = currentList.indexOfFirst { it.id == item.id }
-        if (index != -1) {
-            currentList[index] = item
-        } else {
-            currentList.add(0, item)
+        mutate(context) { list ->
+            val old = list.firstOrNull { it.id == item.id }
+            val entry =
+                item.copy(
+                    translation = item.translation ?: old?.translation,
+                    sourceInput = item.sourceInput ?: old?.sourceInput,
+                    timestamp = old?.timestamp ?: item.timestamp,
+                )
+            if (old == null) listOf(entry) + list
+            else list.map { if (it.id == entry.id) entry else it }
         }
-        _items.value = currentList
-        saveToDisk(context, currentList)
     }
 
     fun remove(context: Context, id: String) {
-        val currentList = _items.value.toMutableList()
-        currentList.removeAll { it.id == id }
-        _items.value = currentList
-        saveToDisk(context, currentList)
+        mutate(context) { list -> list.filterNot { it.id == id && !com.shawniks.kodikdown.downloader.DownloadManager.isActive(it.id) } }
     }
 
     fun clear(context: Context) {
-        _items.value = emptyList()
-        saveToDisk(context, emptyList())
+        mutate(context) { list -> list.filter { com.shawniks.kodikdown.downloader.DownloadManager.isActive(it.id) } }
     }
 
     fun findCompleted(url: String, fileName: String): HistoryItem? {
         return _items.value.firstOrNull {
-            it.status == DownloadStatus.FINISHED && (it.url == url || it.fileName.equals(fileName, ignoreCase = true))
+            it.status == DownloadStatus.FINISHED &&
+                (it.url == url || it.fileName.equals(fileName, ignoreCase = true))
         }
     }
 
     private fun loadFromDisk(context: Context) {
         try {
-            val file = File(context.filesDir, FILE_NAME)
-            if (!file.exists()) return
+            val file = AtomicFile(File(context.filesDir, FILE_NAME))
+            if (!file.baseFile.exists() && !File(context.filesDir, "$FILE_NAME.bak").exists())
+                return
 
-            val jsonStr = file.readText()
+            val jsonStr = file.openRead().bufferedReader().use { it.readText() }
             val array = JSONArray(jsonStr)
             val list = mutableListOf<HistoryItem>()
 
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
                 val statusStr = obj.optString("status", DownloadStatus.FINISHED.name)
-                val status = try {
-                    DownloadStatus.valueOf(statusStr)
-                } catch (_: Exception) {
-                    DownloadStatus.FINISHED
-                }
+                val status =
+                    try {
+                        DownloadStatus.valueOf(statusStr)
+                    } catch (_: Exception) {
+                        DownloadStatus.FAILED
+                    }
 
-                val translation = if (obj.has("translation") && !obj.isNull("translation")) obj.getString("translation") else null
-                val savedPath = if (obj.has("savedPath") && !obj.isNull("savedPath")) obj.getString("savedPath") else null
-                val contentUri = if (obj.has("contentUri") && !obj.isNull("contentUri")) obj.getString("contentUri") else null
-                val errorMessage = if (obj.has("errorMessage") && !obj.isNull("errorMessage")) obj.getString("errorMessage") else null
+                val translation =
+                    if (obj.has("translation") && !obj.isNull("translation"))
+                        obj.getString("translation")
+                    else null
+                val savedPath =
+                    if (obj.has("savedPath") && !obj.isNull("savedPath")) obj.getString("savedPath")
+                    else null
+                val contentUri =
+                    if (obj.has("contentUri") && !obj.isNull("contentUri"))
+                        obj.getString("contentUri")
+                    else null
+                val errorMessage =
+                    if (obj.has("errorMessage") && !obj.isNull("errorMessage"))
+                        obj.getString("errorMessage")
+                    else null
 
                 list.add(
                     HistoryItem(
@@ -138,14 +177,35 @@ object HistoryManager {
                         fileName = obj.getString("fileName"),
                         url = obj.getString("url"),
                         quality = obj.getInt("quality"),
+                        sourceInput = if (obj.has("sourceInput") && !obj.isNull("sourceInput")) obj.getString("sourceInput") else null,
                         translation = translation,
                         isMp4 = obj.optBoolean("isMp4", false),
-                        status = status,
+                        status =
+                            if (
+                                status in
+                                    setOf(
+                                        DownloadStatus.QUEUED,
+                                        DownloadStatus.DOWNLOADING,
+                                        DownloadStatus.ASSEMBLING,
+                                    )
+                            )
+                                DownloadStatus.FAILED
+                            else status,
                         savedPath = savedPath,
                         contentUri = contentUri,
                         fileSize = obj.optLong("fileSize", 0L),
                         timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
-                        errorMessage = errorMessage
+                        errorMessage =
+                            if (
+                                status in
+                                    setOf(
+                                        DownloadStatus.QUEUED,
+                                        DownloadStatus.DOWNLOADING,
+                                        DownloadStatus.ASSEMBLING,
+                                    )
+                            )
+                                "Download interrupted; retry to start again"
+                            else errorMessage,
                     )
                 )
             }
@@ -156,15 +216,16 @@ object HistoryManager {
     }
 
     private fun saveToDisk(context: Context, list: List<HistoryItem>) {
-        scope.launch {
-            try {
-                val array = JSONArray()
-                for (item in list) {
-                    val obj = JSONObject().apply {
+        try {
+            val array = JSONArray()
+            for (item in list) {
+                val obj =
+                    JSONObject().apply {
                         put("id", item.id)
                         put("title", item.title)
                         put("fileName", item.fileName)
                         put("url", item.url)
+                        put("sourceInput", item.sourceInput)
                         put("quality", item.quality)
                         if (item.translation != null) put("translation", item.translation)
                         put("isMp4", item.isMp4)
@@ -175,13 +236,19 @@ object HistoryManager {
                         put("timestamp", item.timestamp)
                         if (item.errorMessage != null) put("errorMessage", item.errorMessage)
                     }
-                    array.put(obj)
-                }
-                val file = File(context.filesDir, FILE_NAME)
-                file.writeText(array.toString(2))
-            } catch (e: Exception) {
-                Log.e("HistoryManager", "Failed to save history to disk", e)
+                array.put(obj)
             }
+            val file = AtomicFile(File(context.filesDir, FILE_NAME))
+            val stream = file.startWrite()
+            try {
+                stream.write(array.toString(2).toByteArray(Charsets.UTF_8))
+                file.finishWrite(stream)
+            } catch (e: Exception) {
+                file.failWrite(stream)
+                throw e
+            }
+        } catch (e: Exception) {
+            Log.e("HistoryManager", "Failed to save history to disk", e)
         }
     }
 }

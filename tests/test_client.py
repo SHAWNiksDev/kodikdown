@@ -9,7 +9,6 @@ from kodikdown.kodik.errors import (
     HostUnavailableError,
     InvalidUrlError,
     NoStreamsError,
-    PageStructureError,
     RequestFailedError,
 )
 
@@ -239,14 +238,18 @@ async def test_all_hosts_dead_raises_host_unavailable(
 
 
 @respx.mock
-async def test_broken_page_is_not_retried_on_other_hosts() -> None:
+async def test_broken_page_is_retried_on_other_hosts(
+    player_page_html: str, player_js_snippet: str, video_info_json: dict[str, object]
+) -> None:
     url = f"https://mock.local/video/91873/{HASH}/720p"
     page = respx.get(url).respond(200, text="<html>hello</html>")
 
-    async with KodikClient() as client:
-        with pytest.raises(PageStructureError):
-            await client.resolve(url)
-
+    mirror = "https://kodikplayer.com"
+    respx.get(f"{mirror}/video/91873/{HASH}/720p").respond(200, text=player_page_html)
+    _mock_js(player_js_snippet, f"{mirror}/assets/js/app.player_single")
+    respx.post(f"{mirror}/ftor").respond(200, json=video_info_json)
+    async with KodikClient(hosts=("kodikplayer.com",)) as client:
+        assert (await client.resolve(url)).variants
     assert page.call_count == 1
 
 
@@ -311,7 +314,7 @@ def test_build_variants_dedupes_same_quality(video_info_json: dict[str, object])
     assert [variant.quality for variant in variants] == [720, 360]
 
 
-def test_build_variants_promotes_mismatched_resolution() -> None:
+def test_build_variants_preserves_server_url() -> None:
     # Simulates Kodik returning /480.mp4 under quality key '720'
     entry = {
         "src": "https://cdn.example/video/480.mp4:hls:manifest.m3u8",
@@ -321,8 +324,8 @@ def test_build_variants_promotes_mismatched_resolution() -> None:
 
     assert len(variants) == 1
     assert variants[0].quality == 720
-    assert variants[0].url == "https://cdn.example/video/720.mp4:hls:manifest.m3u8"
-    assert variants[0].direct_mp4 == "https://cdn.example/video/720.mp4"
+    assert variants[0].url == entry["src"]
+    assert variants[0].direct_mp4 == "https://cdn.example/video/480.mp4"
 
 
 def test_build_variants_does_not_demote_resolution() -> None:
@@ -336,3 +339,16 @@ def test_build_variants_does_not_demote_resolution() -> None:
     assert len(variants) == 1
     assert variants[0].quality == 360
     assert variants[0].url == "https://cdn.example/video/480.mp4:hls:manifest.m3u8"
+
+
+@respx.mock
+async def test_player_bundle_is_cached_by_path(
+    player_page_html: str, player_js_snippet: str, video_info_json: dict[str, object]
+) -> None:
+    _mock_page(player_page_html)
+    script = _mock_js(player_js_snippet)
+    respx.post("https://mock.local/ftor").respond(200, json=video_info_json)
+    async with _client() as client:
+        await client.resolve(PAGE_URL)
+        await client.resolve(PAGE_URL)
+    assert script.call_count == 1

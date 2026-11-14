@@ -1,10 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <style name="WindowAnimation.NoAnimation" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/no_anim</item>
+        <item name="android:activityOpenExitAnimation">@anim/no_anim</item>
+        <item name="android:activityCloseEnterAnimation">@anim/no_anim</item>
+        <item name="android:activityCloseExitAnimation">@anim/no_anim</item>
+        <item name="android:taskOpenEnterAnimation">@anim/no_anim</item>
+        <item name="android:taskOpenExitAnimation">@anim/no_anim</item>
+        <item name="android:taskCloseEnterAnimation">@anim/no_anim</item>
+        <item name="android:taskCloseExitAnimation">@anim/no_anim</item>
+    </style>
+
     <style name="Theme.KodikDown" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:statusBarColor">?attr/app_surface</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:navigationBarColor">?attr/app_background</item>
         <item name="android:windowBackground">?attr/app_background</item>
+        <item name="android:windowAnimationStyle">@style/WindowAnimation.NoAnimation</item>
 
         <!-- Material3 mappings -->
         <item name="colorPrimary">@color/light_accent</item>

@@ -1,15 +1,78 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/rootContainer"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="?attr/app_background">
+    android:layout_height="match_parent">
 
-    <LinearLayout
+    <androidx.coordinatorlayout.widget.CoordinatorLayout
+        android:id="@+id/mainContent"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:background="?attr/app_background">
+
+    <com.shawniks.kodikdown.ui.ContentColumn
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center_horizontal"
         android:orientation="vertical">
+
+        <!-- Selection Bar for Multi-Select -->
+        <LinearLayout
+            android:id="@+id/selectionBar"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:background="?attr/app_surface"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/btnSelectionClose"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/close"
+                android:padding="8dp"
+                android:src="@drawable/ic_close"
+                app:tint="?attr/app_text" />
+
+            <TextView
+                android:id="@+id/tvSelectionTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:textColor="?attr/app_text"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                tools:text="Выбрано: 2" />
+
+            <ImageView
+                android:id="@+id/btnSelectionShare"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/share_file"
+                android:padding="8dp"
+                android:src="@drawable/ic_share"
+                app:tint="?attr/app_text" />
+
+            <ImageView
+                android:id="@+id/btnSelectionDelete"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/delete"
+                android:padding="8dp"
+                android:src="@drawable/ic_trash"
+                app:tint="?attr/app_danger" />
+        </LinearLayout>
 
         <!-- Top Header Bar -->
         <LinearLayout
@@ -25,7 +88,7 @@
             android:paddingBottom="12dp">
 
             <!-- Brand row -->
-            <ImageView
+            <ImageView android:contentDescription="@null"
                 android:layout_width="28dp"
                 android:layout_height="28dp"
                 android:background="@drawable/bg_badge"
@@ -54,28 +117,12 @@
                 android:layout_height="1dp"
                 android:layout_weight="1" />
 
-            <!-- Theme Toggle Button -->
-            <ImageView
-                android:id="@+id/btnThemeToggle"
-                android:layout_width="34dp"
-                android:layout_height="34dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/toggle_theme"
-                android:padding="6dp"
-                android:src="@drawable/ic_sun"
-                app:tint="?attr/app_text_muted" />
+            <com.shawniks.kodikdown.ui.SettingsSaveIndicatorView
+                android:id="@+id/settingsSaveIndicator"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:importantForAccessibility="yes" />
 
-            <!-- Settings Button -->
-            <ImageView
-                android:id="@+id/btnSettings"
-                android:layout_width="34dp"
-                android:layout_height="34dp"
-                android:layout_marginStart="4dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/settings_title"
-                android:padding="6dp"
-                android:src="@drawable/ic_settings"
-                app:tint="?attr/app_text_muted" />
         </LinearLayout>
 
         <View
@@ -106,7 +153,7 @@
                 android:paddingBottom="12dp">
 
                 <!-- URL Row -->
-                <LinearLayout
+                <com.shawniks.kodikdown.ui.AdaptiveRow
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
@@ -115,18 +162,22 @@
                     <!-- URL input with Clear button inside -->
                     <FrameLayout
                         android:layout_width="0dp"
-                        android:layout_height="40dp"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
                         android:layout_weight="1">
 
                         <EditText
                             android:id="@+id/etUrl"
                             android:layout_width="match_parent"
-                            android:layout_height="match_parent"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
                             android:background="@drawable/bg_input"
+                            android:gravity="center_vertical"
                             android:ellipsize="end"
                             android:hint="@string/url_placeholder"
                             android:imeOptions="actionDone"
-                            android:inputType="text|textNoSuggestions"
+                            android:inputType="textUri|textNoSuggestions"
+                            android:importantForAutofill="no"
                             android:singleLine="true"
                             android:maxLines="1"
                             android:paddingStart="10dp"
@@ -153,7 +204,8 @@
                     <LinearLayout
                         android:id="@+id/btnPaste"
                         android:layout_width="wrap_content"
-                        android:layout_height="40dp"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
                         android:layout_marginStart="6dp"
                         android:background="@drawable/bg_button_secondary"
                         android:gravity="center"
@@ -161,7 +213,7 @@
                         android:paddingStart="10dp"
                         android:paddingEnd="10dp">
 
-                        <ImageView
+                        <ImageView android:contentDescription="@null"
                             android:layout_width="14dp"
                             android:layout_height="14dp"
                             android:src="@drawable/ic_clipboard"
@@ -180,7 +232,8 @@
                     <LinearLayout
                         android:id="@+id/btnFind"
                         android:layout_width="wrap_content"
-                        android:layout_height="40dp"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
                         android:layout_marginStart="6dp"
                         android:background="@drawable/bg_button_primary"
                         android:gravity="center"
@@ -188,7 +241,7 @@
                         android:paddingStart="12dp"
                         android:paddingEnd="12dp">
 
-                        <ImageView
+                        <ImageView android:contentDescription="@null"
                             android:id="@+id/ivFindIcon"
                             android:layout_width="14dp"
                             android:layout_height="14dp"
@@ -205,7 +258,7 @@
                             android:textSize="12sp"
                             android:textStyle="bold" />
                     </LinearLayout>
-                </LinearLayout>
+                </com.shawniks.kodikdown.ui.AdaptiveRow>
 
                 <!-- Status row -->
                 <TextView
@@ -258,7 +311,7 @@
                         android:visibility="gone" />
 
                     <!-- File Name Row -->
-                    <LinearLayout
+                    <com.shawniks.kodikdown.ui.AdaptiveRow
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
@@ -274,8 +327,12 @@
 
                         <EditText
                             android:id="@+id/etFileName"
+                            android:inputType="textCapSentences"
+                            android:singleLine="true"
+                            android:importantForAutofill="no"
                             android:layout_width="0dp"
-                            android:layout_height="36dp"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
                             android:layout_weight="1"
                             android:background="@drawable/bg_input"
                             android:ellipsize="end"
@@ -284,10 +341,10 @@
                             android:paddingEnd="10dp"
                             android:textColor="?attr/app_text"
                             android:textSize="12sp" />
-                    </LinearLayout>
+                    </com.shawniks.kodikdown.ui.AdaptiveRow>
 
                     <!-- Voice-over Row -->
-                    <LinearLayout
+                    <com.shawniks.kodikdown.ui.AdaptiveRow
                         android:id="@+id/rowTranslation"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -305,15 +362,16 @@
                         <Spinner
                             android:id="@+id/spTranslation"
                             android:layout_width="0dp"
-                            android:layout_height="36dp"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
                             android:layout_weight="1"
                             android:background="@drawable/bg_input"
                             android:paddingStart="6dp"
                             android:paddingEnd="6dp" />
-                    </LinearLayout>
+                    </com.shawniks.kodikdown.ui.AdaptiveRow>
 
                     <!-- Quality Row -->
-                    <LinearLayout
+                    <com.shawniks.kodikdown.ui.AdaptiveRow
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
@@ -340,10 +398,10 @@
                                 android:gravity="center_vertical"
                                 android:orientation="horizontal" />
                         </HorizontalScrollView>
-                    </LinearLayout>
+                    </com.shawniks.kodikdown.ui.AdaptiveRow>
 
                     <!-- Actions Bottom Row -->
-                    <LinearLayout
+                    <com.shawniks.kodikdown.ui.AdaptiveRow
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
@@ -367,14 +425,15 @@
                         <LinearLayout
                             android:id="@+id/btnResultOpenFolder"
                             android:layout_width="wrap_content"
-                            android:layout_height="36dp"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
                             android:background="@drawable/bg_button_secondary"
                             android:gravity="center"
                             android:orientation="horizontal"
                             android:paddingStart="10dp"
                             android:paddingEnd="10dp">
 
-                            <ImageView
+                            <ImageView android:contentDescription="@null"
                                 android:layout_width="14dp"
                                 android:layout_height="14dp"
                                 android:src="@drawable/ic_folder"
@@ -392,7 +451,8 @@
                         <LinearLayout
                             android:id="@+id/btnDownload"
                             android:layout_width="wrap_content"
-                            android:layout_height="36dp"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
                             android:layout_marginStart="8dp"
                             android:background="@drawable/bg_button_primary"
                             android:gravity="center"
@@ -400,7 +460,7 @@
                             android:paddingStart="14dp"
                             android:paddingEnd="14dp">
 
-                            <ImageView
+                            <ImageView android:contentDescription="@null"
                                 android:layout_width="14dp"
                                 android:layout_height="14dp"
                                 android:src="@drawable/ic_download"
@@ -415,7 +475,7 @@
                                 android:textSize="12sp"
                                 android:textStyle="bold" />
                         </LinearLayout>
-                    </LinearLayout>
+                    </com.shawniks.kodikdown.ui.AdaptiveRow>
                 </LinearLayout>
 
                 <!-- Downloads Header -->
@@ -448,7 +508,7 @@
                         android:orientation="horizontal"
                         android:padding="4dp">
 
-                        <ImageView
+                        <ImageView android:contentDescription="@null"
                             android:layout_width="14dp"
                             android:layout_height="14dp"
                             android:src="@drawable/ic_trash"
@@ -559,14 +619,15 @@
                 <LinearLayout
                     android:id="@+id/btnLibraryOpenFolder"
                     android:layout_width="wrap_content"
-                    android:layout_height="32dp"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
                     android:background="@drawable/bg_button_secondary"
                     android:gravity="center"
                     android:orientation="horizontal"
                     android:paddingStart="10dp"
                     android:paddingEnd="10dp">
 
-                    <ImageView
+                    <ImageView android:contentDescription="@null"
                         android:layout_width="14dp"
                         android:layout_height="14dp"
                         android:src="@drawable/ic_folder"
@@ -604,7 +665,7 @@
                 android:orientation="vertical"
                 android:padding="24dp">
 
-                <ImageView
+                <ImageView android:contentDescription="@null"
                     android:layout_width="56dp"
                     android:layout_height="56dp"
                     android:src="@drawable/ic_video_library"
@@ -673,14 +734,15 @@
                 <LinearLayout
                     android:id="@+id/btnHistoryClearAll"
                     android:layout_width="wrap_content"
-                    android:layout_height="32dp"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
                     android:background="@drawable/bg_button_secondary"
                     android:gravity="center"
                     android:orientation="horizontal"
                     android:paddingStart="10dp"
                     android:paddingEnd="10dp">
 
-                    <ImageView
+                    <ImageView android:contentDescription="@null"
                         android:layout_width="14dp"
                         android:layout_height="14dp"
                         android:src="@drawable/ic_trash"
@@ -706,7 +768,7 @@
                 android:orientation="vertical"
                 android:padding="24dp">
 
-                <ImageView
+                <ImageView android:contentDescription="@null"
                     android:layout_width="56dp"
                     android:layout_height="56dp"
                     android:src="@drawable/ic_history"
@@ -743,6 +805,894 @@
                 tools:listitem="@layout/item_history" />
         </LinearLayout>
 
+        <!-- Tab 4: Settings -->
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/viewSettings"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingTop="12dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="24dp">
+
+                <!-- Title Header -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_title"
+                    android:textColor="?attr/app_text"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <!-- SECTION 1: APPEARANCE -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/settings_appearance"
+                    android:textColor="?attr/app_text_muted"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <!-- Theme -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/theme"
+                        android:textColor="?attr/app_text"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <com.shawniks.kodikdown.ui.AdaptiveRow
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/btnThemeAuto"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_pill_inactive"
+                            android:gravity="center"
+                            android:text="@string/theme_auto"
+                            android:textColor="?attr/app_text_muted"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/btnThemeLight"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_marginStart="6dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_pill_inactive"
+                            android:gravity="center"
+                            android:text="@string/theme_light"
+                            android:textColor="?attr/app_text_muted"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/btnThemeDark"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_marginStart="6dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_pill_inactive"
+                            android:gravity="center"
+                            android:text="@string/theme_dark"
+                            android:textColor="?attr/app_text_muted"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </com.shawniks.kodikdown.ui.AdaptiveRow>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp"
+                        android:background="?attr/app_border" />
+
+                    <!-- Language -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/language"
+                        android:textColor="?attr/app_text"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <com.shawniks.kodikdown.ui.AdaptiveRow
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/btnLangAuto"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_pill_inactive"
+                            android:gravity="center"
+                            android:text="@string/language_auto"
+                            android:textColor="?attr/app_text_muted"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/btnLangRu"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_marginStart="6dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_pill_inactive"
+                            android:gravity="center"
+                            android:text="@string/language_ru"
+                            android:textColor="?attr/app_text_muted"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/btnLangEn"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_marginStart="6dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_pill_inactive"
+                            android:gravity="center"
+                            android:text="@string/language_en"
+                            android:textColor="?attr/app_text_muted"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </com.shawniks.kodikdown.ui.AdaptiveRow>
+                </LinearLayout>
+
+                <!-- SECTION 2: DOWNLOADS -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/settings_downloads"
+                    android:textColor="?attr/app_text_muted"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvSettingsLocked"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/settings_transfer_locked"
+                    android:textColor="?attr/app_warning"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <!-- Download Folder -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/download_dir"
+                        android:textColor="?attr/app_text"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvSettingsDownloadDir"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:ellipsize="middle"
+                        android:maxLines="2"
+                        android:textColor="?attr/app_text_muted"
+                        android:textSize="11sp"
+                        tools:text="/storage/emulated/0/Download/KodikDown" />
+
+                    <com.shawniks.kodikdown.ui.AdaptiveRow
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:id="@+id/btnSettingsBrowseFolder"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
+                            android:background="@drawable/bg_button_secondary"
+                            android:gravity="center"
+                            android:orientation="horizontal"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp">
+
+                            <ImageView
+                                android:layout_width="14dp"
+                                android:layout_height="14dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_folder"
+                                app:tint="?attr/app_accent" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="4dp"
+                                android:text="@string/browse"
+                                android:textColor="?attr/app_accent"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/btnSettingsResetFolder"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
+                            android:layout_marginStart="8dp"
+                            android:background="@drawable/bg_button_secondary"
+                            android:gravity="center"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:text="@string/default_folder"
+                            android:textColor="?attr/app_text_muted"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </com.shawniks.kodikdown.ui.AdaptiveRow>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp"
+                        android:background="?attr/app_border" />
+
+                    <!-- Concurrent Downloads -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/concurrent_downloads"
+                            android:textColor="?attr/app_text"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="34dp"
+                            android:background="@drawable/bg_input"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:id="@+id/btnSettingsMinusConcurrent"
+                                android:layout_width="34dp"
+                                android:layout_height="match_parent"
+                                android:background="?attr/selectableItemBackground"
+                                android:gravity="center"
+                                android:text="-"
+                                android:textColor="?attr/app_text"
+                                android:textSize="16sp" />
+
+                            <TextView
+                                android:id="@+id/tvSettingsConcurrentCount"
+                                android:layout_width="28dp"
+                                android:layout_height="wrap_content"
+                                android:gravity="center"
+                                android:text="3"
+                                android:textColor="?attr/app_text"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/btnSettingsPlusConcurrent"
+                                android:layout_width="34dp"
+                                android:layout_height="match_parent"
+                                android:background="?attr/selectableItemBackground"
+                                android:gravity="center"
+                                android:text="+"
+                                android:textColor="?attr/app_text"
+                                android:textSize="16sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp"
+                        android:background="?attr/app_border" />
+
+                    <!-- Default Quality Spinner -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/default_quality"
+                        android:textColor="?attr/app_text"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <Spinner
+                        android:id="@+id/spDefaultQuality"
+                        android:layout_width="match_parent"
+                        android:layout_height="38dp"
+                        android:layout_marginTop="6dp"
+                        android:background="@drawable/bg_input"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp"
+                        android:background="?attr/app_border" />
+
+                    <!-- Prefer MP4 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/prefer_mp4"
+                                android:textColor="?attr/app_text"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/prefer_mp4_hint"
+                                android:textColor="?attr/app_text_muted"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            app:trackTint="@color/settings_switch_track"
+                            app:thumbTint="@color/settings_switch_thumb"
+                            android:id="@+id/switchPreferMp4"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp"
+                        android:background="?attr/app_border" />
+
+                    <!-- Wi-Fi Only -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/wifi_only"
+                                android:textColor="?attr/app_text"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/wifi_only_hint"
+                                android:textColor="?attr/app_text_muted"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            app:trackTint="@color/settings_switch_track"
+                            app:thumbTint="@color/settings_switch_thumb"
+                            android:id="@+id/switchWifiOnly"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp"
+                        android:background="?attr/app_border" />
+
+                    <!-- Auto Paste -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/auto_paste"
+                                android:textColor="?attr/app_text"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/auto_paste_hint"
+                                android:textColor="?attr/app_text_muted"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            app:trackTint="@color/settings_switch_track"
+                            app:thumbTint="@color/settings_switch_thumb"
+                            android:id="@+id/switchAutoPaste"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- SECTION 3: GESTURES & CONTROLS -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/settings_gestures"
+                    android:textColor="?attr/app_text_muted"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <!-- Swipe to Delete -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/swipe_to_delete"
+                                android:textColor="?attr/app_text"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/swipe_to_delete_hint"
+                                android:textColor="?attr/app_text_muted"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            app:trackTint="@color/settings_switch_track"
+                            app:thumbTint="@color/settings_switch_thumb"
+                            android:id="@+id/switchSwipeDelete"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp"
+                        android:background="?attr/app_border" />
+
+                    <!-- Confirm Swipe Delete -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/confirm_swipe_delete"
+                                android:textColor="?attr/app_text"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/confirm_swipe_delete_hint"
+                                android:textColor="?attr/app_text_muted"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            app:trackTint="@color/settings_switch_track"
+                            app:thumbTint="@color/settings_switch_thumb"
+                            android:id="@+id/switchConfirmSwipeDelete"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp"
+                        android:background="?attr/app_border" />
+
+                    <!-- Confirm Download Cancellation -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/confirm_cancel_download"
+                                android:textColor="?attr/app_text"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/confirm_cancel_download_hint"
+                                android:textColor="?attr/app_text_muted"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            app:trackTint="@color/settings_switch_track"
+                            app:thumbTint="@color/settings_switch_thumb"
+                            android:id="@+id/switchConfirmCancelDownload"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp"
+                        android:background="?attr/app_border" />
+
+                    <!-- Haptic Feedback -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/haptics"
+                                android:textColor="?attr/app_text"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/haptics_hint"
+                                android:textColor="?attr/app_text_muted"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            app:trackTint="@color/settings_switch_track"
+                            app:thumbTint="@color/settings_switch_thumb"
+                            android:id="@+id/switchHapticFeedback"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- SECTION 4: STORAGE & DATA -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/settings_storage"
+                    android:textColor="?attr/app_text_muted"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <!-- Cache Row -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/tvSettingsCacheSize"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textColor="?attr/app_text"
+                            android:textSize="13sp"
+                            android:textStyle="bold"
+                            tools:text="Кэш: 2.4 МБ" />
+
+                        <TextView
+                            android:id="@+id/btnSettingsClearCache"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
+                            android:background="@drawable/bg_button_secondary"
+                            android:gravity="center"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="12dp"
+                            android:text="@string/clear_cache"
+                            android:textColor="?attr/app_text"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp"
+                        android:background="?attr/app_border" />
+
+                    <!-- Clear Finished Downloads Button -->
+                    <TextView
+                        android:id="@+id/btnSettingsClearCompleted"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:background="@drawable/bg_button_secondary"
+                        android:gravity="center"
+                        android:text="@string/clear_completed_downloads"
+                        android:textColor="?attr/app_text"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp"
+                        android:background="?attr/app_border" />
+
+                    <!-- Clear History Button -->
+                    <TextView
+                        android:id="@+id/btnSettingsClearAllHistory"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:background="@drawable/bg_button_secondary"
+                        android:gravity="center"
+                        android:text="@string/clear_history"
+                        android:textColor="?attr/app_danger"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:gravity="center"
+                    android:text="@string/auto_saved_hint"
+                    android:textColor="?attr/app_text_muted"
+                    android:textSize="11sp" />
+
+                <!-- Reset Defaults Button -->
+                <LinearLayout
+                    android:id="@+id/btnResetSettings"
+                    android:layout_width="match_parent"
+                    android:layout_height="42dp"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_button_secondary"
+                    android:gravity="center"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_refresh"
+                        app:tint="?attr/app_text_muted" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/reset_defaults"
+                        android:textColor="?attr/app_text"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- SECTION 6: ABOUT -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="@string/about_section"
+                    android:textColor="?attr/app_text_muted"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <com.shawniks.kodikdown.ui.AdaptiveRow
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="32dp"
+                            android:layout_height="32dp"
+                            android:background="@drawable/bg_badge"
+                            android:backgroundTint="?attr/app_accent"
+                            android:contentDescription="@null"
+                            android:padding="6dp"
+                            android:src="@drawable/ic_play"
+                            app:tint="@color/white" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="KodikDown v4.0.0"
+                                android:textColor="?attr/app_text"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/author"
+                                android:textColor="?attr/app_text_muted"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/btnSettingsGithub"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
+                            android:background="@drawable/bg_button_secondary"
+                            android:gravity="center"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="12dp"
+                            android:drawableStart="@drawable/ic_github"
+                            android:drawablePadding="6dp"
+                            android:drawableTint="?attr/app_accent"
+                            android:text="@string/github"
+                            android:textColor="?attr/app_accent"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </com.shawniks.kodikdown.ui.AdaptiveRow>
+                </LinearLayout>
+
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
     </FrameLayout>
 
     <View
@@ -753,8 +1703,10 @@
     <!-- Bottom Navigation Bar -->
     <LinearLayout
         android:id="@+id/bottomNavBar"
+        android:baselineAligned="false"
         android:layout_width="match_parent"
-        android:layout_height="54dp"
+        android:layout_height="wrap_content"
+        android:minHeight="48dp"
         android:background="?attr/app_surface"
         android:gravity="center_vertical"
         android:orientation="horizontal">
@@ -769,7 +1721,7 @@
             android:gravity="center"
             android:orientation="vertical">
 
-            <ImageView
+            <ImageView android:contentDescription="@null"
                 android:id="@+id/ivTabDownloader"
                 android:layout_width="20dp"
                 android:layout_height="20dp"
@@ -783,7 +1735,7 @@
                 android:layout_marginTop="2dp"
                 android:text="@string/tab_downloader"
                 android:textColor="?attr/app_accent"
-                android:textSize="10sp"
+                android:textSize="11sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
@@ -797,7 +1749,7 @@
             android:gravity="center"
             android:orientation="vertical">
 
-            <ImageView
+            <ImageView android:contentDescription="@null"
                 android:id="@+id/ivTabLibrary"
                 android:layout_width="20dp"
                 android:layout_height="20dp"
@@ -811,7 +1763,7 @@
                 android:layout_marginTop="2dp"
                 android:text="@string/tab_library"
                 android:textColor="?attr/app_text_muted"
-                android:textSize="10sp"
+                android:textSize="11sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
@@ -825,7 +1777,7 @@
             android:gravity="center"
             android:orientation="vertical">
 
-            <ImageView
+            <ImageView android:contentDescription="@null"
                 android:id="@+id/ivTabHistory"
                 android:layout_width="20dp"
                 android:layout_height="20dp"
@@ -839,12 +1791,40 @@
                 android:layout_marginTop="2dp"
                 android:text="@string/tab_history"
                 android:textColor="?attr/app_text_muted"
-                android:textSize="10sp"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Tab 4: Settings -->
+        <LinearLayout
+            android:id="@+id/tabSettings"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView android:contentDescription="@null"
+                android:id="@+id/ivTabSettings"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_settings"
+                app:tint="?attr/app_text_muted" />
+
+            <TextView
+                android:id="@+id/tvTabSettings"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/tab_settings"
+                android:textColor="?attr/app_text_muted"
+                android:textSize="11sp"
                 android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
 
-</LinearLayout>
+</com.shawniks.kodikdown.ui.ContentColumn>
 
 <!-- Floating Toast Overlay -->
 <FrameLayout
@@ -857,3 +1837,12 @@
     android:padding="16dp" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
+
+<!-- Theme Transition Overlay for Circular Reveal on Top of Content -->
+<com.shawniks.kodikdown.ui.ThemeRevealOverlayView
+    android:id="@+id/themeOverlay"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:visibility="gone" />
+
+</FrameLayout>

@@ -13,6 +13,21 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 _PATHS: dict[str, str] = {
+    "github": (
+        '<path fill="currentColor" stroke="none" d="M12 .75a11.25 11.25 0 0 0-3.56 21.92'
+        "c.56.1.77-.24.77-.54v-2.1c-3.13.68-3.79-1.33-3.79-1.33-.51-1.3-1.25-1.65-1.25-1.65"
+        "-1.02-.7.08-.69.08-.69 1.13.08 1.73 1.16 1.73 1.16 1 1.72 2.63 1.22 3.27.93"
+        ".1-.73.39-1.22.71-1.5-2.5-.29-5.13-1.25-5.13-5.56 0-1.23.44-2.23 1.16-3.02"
+        "-.12-.28-.5-1.43.11-2.98 0 0 .95-.3 3.09 1.15a10.76 10.76 0 0 1 5.62 0"
+        "c2.14-1.45 3.08-1.15 3.08-1.15.62 1.55.23 2.7.12 2.98.72.79 1.15 1.79 1.15 3.02"
+        " 0 4.32-2.63 5.27-5.14 5.55.4.35.76 1.03.76 2.08v3.11c0 .3.2.65.78.54"
+        'A11.25 11.25 0 0 0 12 .75z"/>'
+    ),
+    "library": (
+        '<rect x="5" y="3" width="16" height="16" rx="2"/><path d="M2 7v14h15M11 7l6 4-6 4z"/>'
+    ),
+    "history": '<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/>',
+    "refresh": '<path d="M20 11a8 8 0 1 0-2 6M20 4v7h-7"/>',
     "sun": (
         '<circle cx="12" cy="12" r="4.1"/>'
         '<path d="M12 2.8v2.1M12 19.1v2.1M2.8 12h2.1M19.1 12h2.1'
@@ -57,7 +72,7 @@ _PATHS: dict[str, str] = {
 def icon_svg(name: str, color: str) -> str:
     body = _PATHS[name]
     return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" color="{color}" '
         f'stroke="{color}" stroke-width="1.7" stroke-linecap="round" '
         f'stroke-linejoin="round">{body}</svg>'
     )
@@ -75,23 +90,25 @@ def icon(name: str, color: str, size: int = 20) -> QIcon:
     return QIcon(pixmap)
 
 
+@lru_cache(maxsize=16)
 def app_icon(color: str = "#3B7DFF", size: int = 256) -> QIcon:
     """A rounded square with a play mark, painted at runtime."""
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-    body = QPainterPath()
-    body.addRoundedRect(QRectF(8, 8, size - 16, size - 16), size * 0.22, size * 0.22)
-    painter.fillPath(body, QColor(color))
-
-    triangle = QPainterPath()
-    inset = size * 0.32
-    triangle.moveTo(inset + size * 0.06, inset)
-    triangle.lineTo(size - inset + size * 0.04, size / 2)
-    triangle.lineTo(inset + size * 0.06, size - inset)
-    triangle.closeSubpath()
-    painter.fillPath(triangle, QColor("#FFFFFF"))
-    painter.end()
-    return QIcon(pixmap)
+    result = QIcon()
+    for pixels in sorted({16, 20, 24, 28, 32, 48, 64, 128, 256, size}):
+        pixmap = QPixmap(pixels, pixels)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.scale(pixels / 256, pixels / 256)
+        body = QPainterPath()
+        body.addRoundedRect(QRectF(16, 16, 224, 224), 56, 56)
+        painter.fillPath(body, QColor(color))
+        triangle = QPainterPath()
+        triangle.moveTo(102, 78)
+        triangle.lineTo(182, 128)
+        triangle.lineTo(102, 178)
+        triangle.closeSubpath()
+        painter.fillPath(triangle, QColor("#FFFFFF"))
+        painter.end()
+        result.addPixmap(pixmap)
+    return result

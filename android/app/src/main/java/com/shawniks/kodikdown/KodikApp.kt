@@ -1,12 +1,10 @@
 package com.shawniks.kodikdown
 
 import android.app.Application
-import android.content.Context
-import android.content.res.Configuration
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import com.shawniks.kodikdown.data.PreferencesManager
 import com.shawniks.kodikdown.downloader.DownloadManager
-import java.util.Locale
 
 class KodikApp : Application() {
     companion object {
@@ -21,15 +19,19 @@ class KodikApp : Application() {
             }
         }
 
-        fun applyLocale(context: Context, langCode: String): Context {
-            if (langCode == "auto") {
-                return context
+        fun updateAppLocale(langCode: String) {
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                instance.getSystemService(android.app.LocaleManager::class.java).applicationLocales =
+                    if (langCode == "auto") android.os.LocaleList.getEmptyLocaleList()
+                    else android.os.LocaleList.forLanguageTags(langCode)
+                return
             }
-            val locale = Locale(langCode)
-            Locale.setDefault(locale)
-            val config = Configuration(context.resources.configuration)
-            config.setLocale(locale)
-            return context.createConfigurationContext(config)
+            val locales = if (langCode == "auto") {
+                LocaleListCompat.getEmptyLocaleList()
+            } else {
+                LocaleListCompat.forLanguageTags(langCode)
+            }
+            AppCompatDelegate.setApplicationLocales(locales)
         }
     }
 
@@ -38,6 +40,7 @@ class KodikApp : Application() {
         instance = this
         val prefs = PreferencesManager(this)
         applyTheme(prefs.theme)
+        updateAppLocale(prefs.language)
         DownloadManager.maxConcurrentDownloads = prefs.concurrentDownloads
     }
 }

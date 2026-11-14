@@ -59,6 +59,9 @@
 
         <EditText
             android:id="@+id/etDownloadDir"
+                        android:inputType="textUri"
+                        android:importantForAutofill="no"
+                        android:hint="@string/download_dir"
             android:layout_width="0dp"
             android:layout_height="40dp"
             android:layout_weight="1"
@@ -81,7 +84,7 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp">
 
-            <ImageView
+            <ImageView android:contentDescription="@null"
                 android:layout_width="16dp"
                 android:layout_height="16dp"
                 android:src="@drawable/ic_folder"
@@ -228,7 +231,7 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp">
 
-            <ImageView
+            <ImageView android:contentDescription="@null"
                 android:layout_width="16dp"
                 android:layout_height="16dp"
                 android:src="@drawable/ic_folder"
@@ -254,7 +257,7 @@
             android:paddingStart="16dp"
             android:paddingEnd="16dp">
 
-            <ImageView
+            <ImageView android:contentDescription="@null"
                 android:layout_width="16dp"
                 android:layout_height="16dp"
                 android:src="@drawable/ic_check"

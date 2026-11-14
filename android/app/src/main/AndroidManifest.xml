@@ -38,14 +38,13 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.KodikDown"
-        android:largeHeap="true"
         android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"
-            android:windowSoftInputMode="adjustResize">
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|locale|layoutDirection|uiMode"
+            android:windowSoftInputMode="adjustResize|stateAlwaysHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -61,8 +60,15 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="*kodik*" />
-                <data android:scheme="http" android:host="*kodik*" />
+                <data android:scheme="https" />
+                <data android:scheme="http" />
+                <data android:host="kodikplayer.com" />
+                <data android:host="*.kodikplayer.com" />
+                <data android:host="kodikonline.com" />
+                <data android:host="kodik.info" />
+                <data android:host="kodik.biz" />
+                <data android:host="kodik.cc" />
+                <data android:host="aniqit.com" />
             </intent-filter>
         </activity>
 

@@ -6,13 +6,14 @@ import gc
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from glob import escape as glob_escape
 from pathlib import Path
 
 import yt_dlp
 
+from kodikdown.kodik.models import referer_for
 from kodikdown.net import USER_AGENT
 
 _PROGRESS_INTERVAL = 0.12
@@ -41,6 +42,12 @@ _TRANSIENT_MARKERS = (
 
 
 @dataclass(frozen=True)
+class DownloadSource:
+    url: str
+    quality: int | None = None
+
+
+@dataclass(frozen=True)
 class ProgressSnapshot:
     downloaded: int = 0
     total: int | None = None
@@ -51,6 +58,7 @@ class ProgressSnapshot:
     # "monitor" snapshots only know the bytes on disk: they must not fight the
     # accurate totals yt-dlp reports later.
     source: str = "ytdlp"
+    quality: int | None = None
 
 
 ProgressListener = Callable[[ProgressSnapshot], None]
@@ -67,6 +75,11 @@ _TEMPLATE_CHARS = re.compile(r"%")
 # .part on top while the fragment itself is still being written).
 _PARTIAL_SUFFIXES = (".part", ".ytdl", ".frag")
 _PARTIAL_MARKER = ".part-Frag"
+_TARGET_SUFFIX_RE = re.compile(
+    r"\.(?:(?:mp4|mkv|webm|avi|mov|m4v|flv|wmv|ts)"
+    r"(?:\.part(?:-Frag\d+)?(?:\.part)?|\.ytdl|\.frag)?|part|ytdl|frag)$",
+    re.IGNORECASE,
+)
 _REMOVAL_ATTEMPTS = 6
 
 # Windows does not allow these names even with a fine extension.
@@ -97,6 +110,16 @@ _RESERVED_TARGETS: set[str] = set()
 _RESERVED_LOCK = threading.Lock()
 
 
+def is_pending_output(path: Path) -> bool:
+    """Whether a video is still owned by a transfer or postprocessor."""
+    resolved = path.resolve()
+    with _RESERVED_LOCK:
+        return any(
+            resolved.parent == Path(base).parent and resolved.name.startswith(Path(base).name + ".")
+            for base in _RESERVED_TARGETS
+        )
+
+
 def unique_target(directory: Path, stem: str) -> Path:
     """`clip` -> `clip (2)` when a finished file with that name already exists.
 
@@ -124,13 +147,17 @@ def _existing_media(target_base: Path) -> bool:
     if not target_base.parent.exists():
         return False
     pattern = f"{glob_escape(target_base.name)}.*"
-    return any(
-        path
-        for path in target_base.parent.glob(pattern)
-        if path.is_file()
-        and path.suffix.lower() not in _PARTIAL_SUFFIXES
-        and _PARTIAL_MARKER not in path.name
-    )
+    return any(path.is_file() for path in target_base.parent.glob(pattern))
+
+
+def _target_files(target_base: Path) -> Iterator[Path]:
+    """Match output suffixes, never another title that extends this title."""
+    if not target_base.parent.exists():
+        return
+    prefix = target_base.name
+    for path in target_base.parent.glob(f"{glob_escape(prefix)}.*"):
+        if _TARGET_SUFFIX_RE.fullmatch(path.name[len(prefix) :]):
+            yield path
 
 
 class DownloadCancelled(Exception):
@@ -177,6 +204,7 @@ class Downloader:
         socket_timeout: float = 15.0,
         retries: int = 10,
         filename: str | None = None,
+        fallback_sources: tuple[DownloadSource, ...] = (),
     ) -> None:
         self.output_dir = Path(output_dir)
         self._listener = listener
@@ -185,6 +213,7 @@ class Downloader:
         self._socket_timeout = max(5.0, socket_timeout)
         self._retries = max(0, retries)
         self._filename = filename
+        self._fallback_sources = fallback_sources
         self._last_emit = 0.0
         self._last_snapshot: ProgressSnapshot | None = None
         self._logger = _CollectingLogger()
@@ -200,7 +229,11 @@ class Downloader:
         return self._cancel_event.is_set()
 
     async def download(self, url: str, title: str, referer: str) -> Path:
-        return await asyncio.to_thread(self.download_blocking, url, title, referer)
+        try:
+            return await asyncio.to_thread(self.download_blocking, url, title, referer)
+        except asyncio.CancelledError:
+            self.cancel()
+            raise
 
     # -- the actual work ---------------------------------------------------
     def download_blocking(self, url: str, title: str, referer: str) -> Path:
@@ -215,29 +248,38 @@ class Downloader:
 
         stem = safe_filename(self._filename or title)
         target_base = unique_target(self.output_dir, stem)
-        self._start_monitor(target_base)
-        cancelled = False
         try:
-            self._transfer_with_retries(target_base, url, referer)
-        except DownloadCancelled:
-            cancelled = True
+            self._start_monitor(target_base)
+            cancelled = False
+            failure: str | None = None
+            try:
+                self._transfer_with_retries(target_base, url, referer)
+            except (DownloadCancelled, KeyboardInterrupt):
+                self.cancel()
+                cancelled = True
+            except DownloadFailed as exc:
+                failure = str(exc)
+            finally:
+                self._stop_monitor()
+
+            # Leave the handler before cleanup so traceback cycles release files on Windows.
+            if cancelled or self.cancelled:
+                self._cleanup_cancelled(target_base)
+                raise DownloadCancelled
+
+            if failure is not None:
+                self._cleanup_cancelled(target_base)
+                raise DownloadFailed(failure)
+            produced = self._pick_result(target_base)
+            if produced is None or produced.stat().st_size == 0:
+                self._cleanup_cancelled(target_base)
+                detail = self._logger.last_error or "no video file was written"
+                raise DownloadFailed(f"download finished without a file: {detail}")
+            return produced
         finally:
-            self._stop_monitor()
+            # Hold the name through cancellation cleanup: a new transfer must not
+            # resume files that the cancelled worker is about to delete.
             release_target(target_base)
-
-        # Clean up only after leaving the exception handler: yt-dlp's traceback
-        # keeps the unfinished files referenced (and on Windows open), so they
-        # would survive the deletion.
-        if cancelled or self.cancelled:
-            self._cleanup_cancelled(target_base)
-            raise DownloadCancelled
-
-        produced = self._pick_result(target_base)
-        if produced is None:
-            self._cleanup_cancelled(target_base)
-            detail = self._logger.last_error or "no file was written"
-            raise DownloadFailed(f"download finished without a file: {detail}")
-        return produced
 
     # -- progress monitor --------------------------------------------------
     def _start_monitor(self, target_base: Path) -> None:
@@ -280,46 +322,40 @@ class Downloader:
         Partial files are deliberately kept between attempts: yt-dlp resumes
         the fragments it already has, so the retry is cheap.
         """
-        urls_to_try = [url]
-        file_match = re.search(r"/(\d{3,4})\.mp4", url)
-        if file_match:
-            res = int(file_match.group(1))
-            if res > 720:
-                urls_to_try.append(
-                    re.sub(r"/(\d{3,4})\.mp4(?=(:hls|\?|$))", "/720.mp4", url, count=1)
-                )
-            if res > 480:
-                urls_to_try.append(
-                    re.sub(r"/(\d{3,4})\.mp4(?=(:hls|\?|$))", "/480.mp4", url, count=1)
-                )
+        sources = [DownloadSource(url)]
+        seen = {url}
+        for source in self._fallback_sources:
+            if source.url not in seen:
+                sources.append(source)
+                seen.add(source.url)
 
-        last_exc: Exception | None = None
-        for current_url in urls_to_try:
+        for index, source in enumerate(sources):
+            if index:
+                if self._remove_partials(target_base):
+                    raise DownloadFailed("could not remove the previous stream's partial files")
+                self._last_snapshot = None
+                self._emit(ProgressSnapshot(quality=source.quality), force=True)
             for attempt in range(_TRANSFER_ATTEMPTS):
+                if self.cancelled:
+                    raise DownloadCancelled
+                self._logger.last_error = ""
                 try:
-                    self._transfer(target_base, current_url, referer)
+                    self._transfer(
+                        target_base, source.url, referer if index == 0 else referer_for(source.url)
+                    )
                     return
                 except DownloadFailed as exc:
-                    last_exc = exc
-                    err = str(exc).lower()
-                    if current_url != urls_to_try[-1] and any(
-                        m in err for m in ("404", "not found", "403")
-                    ):
-                        self._remove_partials(target_base)
+                    if self.cancelled:
+                        raise DownloadCancelled from exc
+                    unavailable = any(
+                        marker in str(exc).lower() for marker in ("403", "404", "not found")
+                    )
+                    if unavailable and index + 1 < len(sources):
                         break
-                    last = attempt + 1 == _TRANSFER_ATTEMPTS
-                    if last or self.cancelled or not _is_transient(str(exc)):
-                        if current_url != urls_to_try[-1] and any(
-                            m in err for m in ("404", "not found", "403")
-                        ):
-                            self._remove_partials(target_base)
-                            break
+                    if attempt + 1 == _TRANSFER_ATTEMPTS or not _is_transient(str(exc)):
                         raise
                     if self._cancel_event.wait(_RETRY_DELAY * (attempt + 1)):
                         raise DownloadCancelled from exc
-
-        if last_exc is not None:
-            raise last_exc
 
     def _transfer(self, target_base: Path, url: str, referer: str) -> None:
         try:
@@ -333,17 +369,19 @@ class Downloader:
             if self.cancelled:
                 raise DownloadCancelled from exc
             raise DownloadFailed(self._failure_message(exc)) from exc
+        except ValueError as exc:
+            # Some yt-dlp versions close the destination in a failing fragment
+            # worker before another worker appends its bytes.
+            raise DownloadFailed(self._failure_message(exc)) from exc
         except OSError as exc:
             raise DownloadFailed(f"could not write to {self.output_dir}: {exc}") from exc
 
     def _pick_result(self, target_base: Path) -> Path | None:
-        parent = target_base.parent
-        pattern = f"{glob_escape(target_base.name)}.*"
         produced = [
             path
-            for path in parent.glob(pattern)
+            for path in _target_files(target_base)
             if path.is_file()
-            and path.suffix.lower() not in _PARTIAL_SUFFIXES
+            and _MEDIA_SUFFIX_RE.search(path.name)
             and _PARTIAL_MARKER not in path.name
         ]
         if not produced:
@@ -380,13 +418,15 @@ class Downloader:
             "concurrent_fragment_downloads": self._concurrent_fragments,
             "retries": self._retries,
             "fragment_retries": self._retries,
+            "skip_unavailable_fragments": False,
             "extractor_retries": 4,
             "file_access_retries": 3,
             # Short timeout so a stalled server (or a cancel during a stall)
             # fails fast instead of hanging.
             "socket_timeout": self._socket_timeout,
             "http_chunk_size": 10 * 1024 * 1024,
-            "buffersize": 1024 * 1024,
+            # Keep yt-dlp's adaptive buffer: a forced 1 MiB initial read hides
+            # progress and delays cancellation on small or slow MP4 transfers.
             "hls_prefer_native": True,
             "continuedl": True,
             "overwrites": False,
@@ -402,12 +442,8 @@ class Downloader:
 
     def _remove_partials(self, target_base: Path) -> bool:
         """Delete leftovers; returns True when something is still locked."""
-        parent = target_base.parent
-        if not parent.exists():
-            return False
-        pattern = f"{glob_escape(target_base.name)}.*"
         blocked = False
-        for path in parent.glob(pattern):
+        for path in _target_files(target_base):
             if path.suffix.lower() not in _PARTIAL_SUFFIXES and _PARTIAL_MARKER not in path.name:
                 continue
             try:
@@ -483,11 +519,8 @@ class Downloader:
 
 def _bytes_on_disk(target_base: Path) -> int:
     """Everything yt-dlp has written for this target so far, fragmented or not."""
-    parent = target_base.parent
-    if not parent.exists():
-        return 0
     total = 0
-    for path in parent.glob(f"{glob_escape(target_base.name)}.*"):
+    for path in _target_files(target_base):
         if path.is_dir():
             continue
         try:

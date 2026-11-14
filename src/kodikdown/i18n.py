@@ -77,6 +77,7 @@ _CATALOG: dict[str, Translations] = {
         "cli_invalid_url": "Could not recognize the player link.",
         "cli_download_done": "Saved to {path}",
         "cli_quality_fallback": "Wanted {wanted}p, using {picked}p. Available: {list}",
+        "cli_stream_fallback": "Using {quality}p after the previous stream failed.",
         "cli_qualities": "{title}: {list}",
         "cli_translations": "Voice-overs of {title}:",
         "cli_translation_unknown": "No voice-over matches {name}. Available: {list}",
@@ -154,6 +155,7 @@ _CATALOG: dict[str, Translations] = {
         "cli_invalid_url": "Не удалось распознать ссылку плеера.",
         "cli_download_done": "Сохранено в {path}",
         "cli_quality_fallback": "Запрошено {wanted}p, скачиваю {picked}p. Доступно: {list}",
+        "cli_stream_fallback": "Используется {quality}p после ошибки предыдущего потока.",
         "cli_qualities": "{title}: {list}",
         "cli_translations": "Озвучки {title}:",
         "cli_translation_unknown": "Озвучка «{name}» не найдена. Доступно: {list}",
@@ -162,6 +164,177 @@ _CATALOG: dict[str, Translations] = {
         "cli_print_url": "{url}",
     },
 }
+
+
+# Shared desktop pages use the same labels and behavior as the Android app.
+_CATALOG["en"].update(
+    {
+        "tab_downloads": "Downloads",
+        "tab_library": "Library",
+        "tab_history": "History",
+        "tab_settings": "Settings",
+        "clear_link": "Clear link",
+        "settings_saving": "Saving settings…",
+        "tray_show": "Open KodikDown",
+        "tray_quit": "Quit",
+        "settings_appearance": "Appearance",
+        "settings_downloads": "Downloads",
+        "settings_controls": "Controls",
+        "settings_storage": "History and data",
+        "about_section": "About",
+        "animations": "Animate appearance changes",
+        "default_quality": "Default quality",
+        "quality_ask": "Choose when looking up a video",
+        "auto_paste": "Automatically paste a player link from the clipboard",
+        "confirm_cancel_download": "Ask before cancelling a download",
+        "confirm_delete": "Ask before deleting videos or records",
+        "settings_transfer_locked": (
+            "Download settings are locked while looking up, downloading or assembling a video."
+        ),
+        "settings_saved": "Settings applied",
+        "settings_save_failed": "Could not save settings: {detail}",
+        "reset_folder": "Default",
+        "reset_defaults": "Reset settings",
+        "reset_defaults_confirm": "Reset all settings to their defaults?",
+        "clear_history": "Clear history",
+        "clear_history_confirm": "Clear history? Active downloads and video files will be kept.",
+        "history_empty": (
+            "Your downloads will appear here. History is kept after you close the app."
+        ),
+        "library_empty": "No videos in the selected download folder yet.",
+        "video_count": "Videos: {count}",
+        "history_queued": "Queued",
+        "history_downloading": "Downloading",
+        "history_assembling": "Assembling",
+        "history_finished": "Downloaded",
+        "history_failed": "Failed",
+        "history_cancelled": "Cancelled",
+        "history_interrupted": "Interrupted",
+        "available": "Available",
+        "status": "Status",
+        "file_size": "Size",
+        "date": "Date",
+        "play": "Watch",
+        "download_again": "Download again",
+        "copy_link": "Copy original link",
+        "link_copied": "Original link copied",
+        "original_link_missing": "The original player link is not available for this record.",
+        "refresh": "Refresh",
+        "delete_file": "Delete video",
+        "delete_selected_confirm": "Delete the selected items ({count})? This cannot be undone.",
+        "remove_history_confirm": (
+            "Remove the selected history records ({count})? Video files will be kept."
+        ),
+        "delete_failed": "Could not delete video: {detail}",
+        "file_deleted": "Video deleted",
+        "stop_download": "Stop download",
+        "cancel_download_confirm": "Stop downloading “{title}”? Temporary files will be removed.",
+        "assembly_protected": "Please wait until the video has finished assembling.",
+        "already_downloaded_title": "This video already exists",
+        "already_downloaded_message": "“{title}” already exists. Download another copy?",
+        "translation_unavailable": (
+            "The original voice-over is no longer available. Find "
+            "the video again to choose another one."
+        ),
+        "history_save_failed": "Could not save download history: {detail}",
+    }
+)
+_CATALOG["ru"].update(
+    {
+        "tab_downloads": "Загрузки",
+        "tab_library": "Библиотека",
+        "tab_history": "История",
+        "tab_settings": "Настройки",
+        "clear_link": "Очистить ссылку",
+        "settings_saving": "Сохранение настроек…",
+        "tray_show": "Открыть KodikDown",
+        "tray_quit": "Выйти",
+        "settings_appearance": "Внешний вид",
+        "settings_downloads": "Загрузка видео",
+        "settings_controls": "Управление",
+        "settings_storage": "История и данные",
+        "about_section": "О приложении",
+        "animations": "Анимация смены оформления",
+        "default_quality": "Качество по умолчанию",
+        "quality_ask": "Выбирать при поиске видео",
+        "auto_paste": "Автоматически вставлять ссылку из буфера обмена",
+        "confirm_cancel_download": "Спрашивать перед отменой загрузки",
+        "confirm_delete": "Подтверждать удаление видео и записей",
+        "settings_transfer_locked": (
+            "Настройки загрузки недоступны во время поиска, скачивания и сборки видео."
+        ),
+        "settings_saved": "Настройки применены",
+        "settings_save_failed": "Не удалось сохранить настройки: {detail}",
+        "reset_folder": "По умолчанию",
+        "reset_defaults": "Сбросить настройки",
+        "reset_defaults_confirm": "Сбросить все настройки до стандартных значений?",
+        "clear_history": "Очистить историю",
+        "clear_history_confirm": "Очистить историю? Активные загрузки и файлы видео сохранятся.",
+        "history_empty": (
+            "Здесь появятся ваши загрузки. История сохраняется после закрытия приложения."
+        ),
+        "library_empty": "В выбранной папке загрузок пока нет видео.",
+        "video_count": "Видео: {count}",
+        "history_queued": "В очереди",
+        "history_downloading": "Загрузка",
+        "history_assembling": "Сборка файла",
+        "history_finished": "Скачано",
+        "history_failed": "Ошибка",
+        "history_cancelled": "Отменено",
+        "history_interrupted": "Прервано",
+        "available": "Доступно",
+        "status": "Состояние",
+        "file_size": "Размер",
+        "date": "Дата",
+        "play": "Смотреть",
+        "download_again": "Скачать заново",
+        "copy_link": "Скопировать исходную ссылку",
+        "link_copied": "Исходная ссылка скопирована",
+        "original_link_missing": "Для этой записи исходная ссылка на плеер не сохранилась.",
+        "refresh": "Обновить",
+        "delete_file": "Удалить видео",
+        "delete_selected_confirm": (
+            "Удалить выбранные элементы ({count})? Отменить это действие нельзя."
+        ),
+        "remove_history_confirm": (
+            "Убрать выбранные записи из истории ({count})? Видео останутся на диске."
+        ),
+        "delete_failed": "Не удалось удалить видео: {detail}",
+        "file_deleted": "Видео удалено",
+        "stop_download": "Остановить загрузку",
+        "cancel_download_confirm": (
+            "Остановить скачивание «{title}»? Временные файлы будут удалены."
+        ),
+        "assembly_protected": "Дождитесь окончания сборки видео.",
+        "already_downloaded_title": "Это видео уже скачано",
+        "already_downloaded_message": "Файл «{title}» уже есть. Скачать ещё одну копию?",
+        "translation_unavailable": (
+            "Эта озвучка больше недоступна. Найдите видео заново и выберите другую."
+        ),
+        "history_save_failed": "Не удалось сохранить историю: {detail}",
+    }
+)
+
+_CATALOG["en"].update(
+    {
+        "select_download_hint": "Ctrl+click to select finished downloads; right-click for actions.",
+        "remove_selected": "Remove selected ({count})",
+        "remove_downloads_confirm": (
+            "Remove the selected download records ({count})? Video files will be kept."
+        ),
+    }
+)
+_CATALOG["ru"].update(
+    {
+        "select_download_hint": (
+            "Ctrl+щелчок — выделить завершённые загрузки; действия — правой кнопкой."
+        ),
+        "remove_selected": "Убрать выбранные ({count})",
+        "remove_downloads_confirm": (
+            "Убрать записи выбранных загрузок ({count})? Видео останутся на диске."
+        ),
+    }
+)
 
 # Language names are intentionally in their own language.
 LANGUAGE_NAMES = {"en": "English", "ru": "Русский"}

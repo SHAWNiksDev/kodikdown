@@ -21,8 +21,25 @@ import java.io.File
 class DownloadAdapter(
     private val onCancelClicked: (DownloadItem) -> Unit,
     private val onOpenClicked: (DownloadItem) -> Unit,
+    private val onItemClick: (DownloadItem) -> Unit = {},
+    private val onItemLongClick: (DownloadItem) -> Boolean = { false },
     private val onShareClicked: (DownloadItem) -> Unit
 ) : ListAdapter<DownloadItem, DownloadAdapter.ViewHolder>(DiffCallback) {
+
+    var isSelectionMode = false
+    val selectedIds = mutableSetOf<String>()
+
+    fun selectAll() {
+        selectedIds.clear()
+        selectedIds.addAll(currentList.filter { it.isTerminal }.map { it.id })
+        notifyDataSetChanged()
+    }
+
+    fun clearSelection() {
+        selectedIds.clear()
+        isSelectionMode = false
+        notifyDataSetChanged()
+    }
 
     object DiffCallback : DiffUtil.ItemCallback<DownloadItem>() {
         override fun areItemsTheSame(oldItem: DownloadItem, newItem: DownloadItem): Boolean {
@@ -50,6 +67,8 @@ class DownloadAdapter(
 
         fun bind(item: DownloadItem) {
             val context = binding.root.context
+            val available = com.shawniks.kodikdown.data.MediaFiles.isAvailable(item.savedPath, item.contentUri)
+            val protected = !item.isTerminal
 
             binding.tvTitle.text = item.title
             val qualitySuffix = if (item.isMp4) " • MP4" else ""
@@ -76,7 +95,7 @@ class DownloadAdapter(
                 DownloadStatus.DOWNLOADING -> {
                     binding.cardLayout.setBackgroundResource(R.drawable.bg_card)
                     binding.progressBar.visibility = View.VISIBLE
-                    binding.progressBar.isIndeterminate = false
+                    binding.progressBar.isIndeterminate = item.totalBytes == null && item.fragmentCount == 0
                     val percent = (item.progress * 100).toInt()
                     binding.progressBar.progress = percent
                     binding.btnCancel.visibility = View.VISIBLE
@@ -91,20 +110,22 @@ class DownloadAdapter(
                         speedText.takeIf { it.isNotEmpty() },
                         etaText.takeIf { it.isNotEmpty() }
                     )
-                    binding.tvStatus.text = statusParts.joinToString(" • ")
+                    val progressText = if (item.fragmentCount > 0)
+                        "$percent% (${item.downloadedFragments}/${item.fragmentCount})" else "$percent%"
+                    binding.tvStatus.text = (listOf(progressText) + statusParts).joinToString(" • ")
                     binding.tvStatus.setTextColor(getThemeColor(context, R.attr.app_text_muted))
                 }
                 DownloadStatus.ASSEMBLING -> {
                     binding.cardLayout.setBackgroundResource(R.drawable.bg_card)
                     binding.progressBar.visibility = View.VISIBLE
                     binding.progressBar.isIndeterminate = true
-                    binding.btnCancel.visibility = View.VISIBLE
+                    binding.btnCancel.visibility = View.GONE
                     binding.layoutActions.visibility = View.GONE
                     binding.tvStatus.text = context.getString(R.string.stage_processing)
                     binding.tvStatus.setTextColor(getThemeColor(context, R.attr.app_text_muted))
                 }
                 DownloadStatus.FINISHED -> {
-                    binding.cardLayout.setBackgroundResource(R.drawable.bg_card_finished)
+                    binding.cardLayout.setBackgroundResource(if (available) R.drawable.bg_card_finished else R.drawable.bg_card)
                     binding.progressBar.visibility = View.VISIBLE
                     binding.progressBar.isIndeterminate = false
                     binding.progressBar.progress = 100
@@ -116,8 +137,9 @@ class DownloadAdapter(
                     }
 
                     val savedText = context.getString(R.string.saved_to, item.savedPath ?: item.fileName)
-                    binding.tvStatus.text = savedText
-                    binding.tvStatus.setTextColor(getThemeColor(context, R.attr.app_success))
+                    binding.tvStatus.text = if (available) savedText else context.getString(R.string.file_missing)
+                    binding.tvStatus.setTextColor(getThemeColor(context, if (available) R.attr.app_success else R.attr.app_text_muted))
+                    if (!available) binding.layoutActions.visibility = View.GONE
                 }
                 DownloadStatus.FAILED -> {
                     binding.cardLayout.setBackgroundResource(R.drawable.bg_card_failed)
@@ -138,21 +160,38 @@ class DownloadAdapter(
                     binding.tvStatus.setTextColor(getThemeColor(context, R.attr.app_text_muted))
                 }
             }
+            if (item.waitingForNetwork && item.status == DownloadStatus.DOWNLOADING)
+                binding.tvStatus.text = context.getString(R.string.network_reconnecting)
+            binding.ivSelectCheck.visibility = if (isSelectionMode && !protected) View.VISIBLE else View.GONE
+            binding.ivSelectCheck.setImageResource(if (item.id in selectedIds)
+                R.drawable.ic_checkbox_checked else R.drawable.ic_checkbox_unchecked)
+            if (item.id in selectedIds) binding.cardLayout.setBackgroundResource(R.drawable.bg_card_selected)
+            binding.root.setOnLongClickListener { if (protected) false else onItemLongClick(item) }
+            binding.root.setOnClickListener {
+                if (isSelectionMode && !protected) {
+                    if (!selectedIds.add(item.id)) selectedIds.remove(item.id)
+                    currentList.indexOfFirst { it.id == item.id }.takeIf { it >= 0 }
+                        ?.let { notifyItemChanged(it) }
+                    onItemClick(item)
+                } else if (item.isFinished && available) onOpenClicked(item)
+            }
+            binding.btnCancel.visibility = if (isSelectionMode && item.isTerminal) View.GONE else binding.btnCancel.visibility
+            if (isSelectionMode) binding.layoutActions.visibility = View.GONE
         }
 
         private fun formatSpeed(bytesPerSec: Long): String {
             if (bytesPerSec <= 0) return ""
             return when {
-                bytesPerSec >= 1024 * 1024 -> String.format("%.1f MB/s", bytesPerSec.toDouble() / (1024 * 1024))
-                bytesPerSec >= 1024 -> String.format("%.0f KB/s", bytesPerSec.toDouble() / 1024)
+                bytesPerSec >= 1024 * 1024 -> String.format(binding.root.resources.configuration.locales[0], "%.1f MB/s", bytesPerSec.toDouble() / (1024 * 1024))
+                bytesPerSec >= 1024 -> String.format(binding.root.resources.configuration.locales[0], "%.0f KB/s", bytesPerSec.toDouble() / 1024)
                 else -> "$bytesPerSec B/s"
             }
         }
 
         private fun formatSizes(downloaded: Long, total: Long?): String {
-            val dMb = String.format("%.1f MB", downloaded.toDouble() / (1024 * 1024))
+            val dMb = String.format(binding.root.resources.configuration.locales[0], "%.1f MB", downloaded.toDouble() / (1024 * 1024))
             return if (total != null && total > 0) {
-                val tMb = String.format("%.1f MB", total.toDouble() / (1024 * 1024))
+                val tMb = String.format(binding.root.resources.configuration.locales[0], "%.1f MB", total.toDouble() / (1024 * 1024))
                 "$dMb / $tMb"
             } else {
                 dMb
@@ -163,7 +202,7 @@ class DownloadAdapter(
             if (etaSeconds <= 0) return ""
             val mins = etaSeconds / 60
             val secs = etaSeconds % 60
-            val time = String.format("%02d:%02d", mins, secs)
+            val time = String.format(binding.root.resources.configuration.locales[0], "%02d:%02d", mins, secs)
             return context.getString(R.string.eta, time)
         }
 

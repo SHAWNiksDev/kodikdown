@@ -8,18 +8,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            gui: kodikdown-linux-x86_64
-            cli: kodikdown-linux-x86_64-cli
-          - os: windows-latest
-            gui: kodikdown-windows-x86_64.exe
-            cli: kodikdown-windows-x86_64-cli.exe
-    runs-on: ${{ matrix.os }}
+  linux:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,21 +18,64 @@ jobs:
       - run: pip install -e '.[dev]'
       - name: Build the desktop app
         env:
-          KODIKDOWN_BUILD_NAME: ${{ matrix.gui }}
+          KODIKDOWN_BUILD_NAME: kodikdown-linux-x86_64
         run: pyinstaller packaging/kodikdown.spec --noconfirm
       - name: Build the command-line tool
         env:
-          KODIKDOWN_BUILD_NAME: ${{ matrix.cli }}
+          KODIKDOWN_BUILD_NAME: kodikdown-linux-x86_64-cli
         run: pyinstaller packaging/kodikdown-cli.spec --noconfirm
+      - run: dist/kodikdown-linux-x86_64-cli --version
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.gui }}
+          name: kodikdown-linux
           path: |
-            dist/${{ matrix.gui }}
-            dist/${{ matrix.cli }}
+            dist/kodikdown-linux-x86_64
+            dist/kodikdown-linux-x86_64-cli
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      # Release signing stays local. CI verifies the published APK without
+      # receiving a private key or a signing password.
+      - name: Verify the signed Android release
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          tools = Path(os.environ["ANDROID_HOME"]) / "build-tools" / "35.0.0"
+          apk = "packaging/kodikdown-android.apk"
+          cert = subprocess.check_output(
+              [str(tools / "apksigner"), "verify", "--print-certs", apk], text=True
+          )
+          expected = "68f6befb12d7f54328707615981be9edf60c948bb5b697d883740f73c5637ccc"
+          actual = re.search(r"certificate SHA-256 digest: (\w+)", cert)
+          if actual is None or actual.group(1) != expected:
+              raise SystemExit("The APK is not signed with the release certificate.")
+          manifest = subprocess.check_output([str(tools / "aapt"), "dump", "badging", apk], text=True)
+          version = re.search(r"versionName='([^']+)'", manifest)
+          if version is None or version.group(1) != os.environ["GITHUB_REF_NAME"].removeprefix("v"):
+              raise SystemExit("The APK version does not match the release tag.")
+          if "application-debuggable" in manifest:
+              raise SystemExit("A debug APK must not be published as the release.")
+          print("APK signature, version and release flags verified.")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kodikdown-android
+          path: packaging/kodikdown-android.apk
 
   release:
-    needs: build
+    needs: [linux, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +85,7 @@ jobs:
           path: dist
       - name: Take the notes for this tag from the changelog
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           import os
           import pathlib
           import re
@@ -64,11 +97,11 @@ jobs:
           )
           body = section.group(0).strip() if section else f"KodikDown {version}."
           pathlib.Path("release-notes.md").write_text(body + "\n", encoding="utf-8")
-          print(body.splitlines()[0])
           PY
+      - name: Calculate download checksums
+        run: cd dist && sha256sum kodikdown-* > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/*
-            packaging/kodikdown-android.apk
+          name: KodikDown ${{ github.ref_name }}
+          files: dist/*
           body_path: release-notes.md

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
+from urllib.parse import urlsplit, urlunsplit
 
 _SHIFT_BOUND = 26
 # The rotation the player currently uses; verified live in September 2026 and
@@ -70,12 +71,13 @@ def normalise_url(url: str) -> str:
 
 def stream_kind(url: str) -> tuple[str, str | None]:
     """Classify a decoded link, plus the plain mp4 hiding behind an HLS one."""
-    hls = _HLS_SUFFIX_RE.search(url)
+    parsed = urlsplit(url)
+    hls = _HLS_SUFFIX_RE.search(parsed.path)
     if hls:
-        return "hls", url[: hls.start()]
-    if _DASH_SUFFIX_RE.search(url):
+        return "hls", urlunsplit(parsed._replace(path=parsed.path[: hls.start()]))
+    if _DASH_SUFFIX_RE.search(parsed.path):
         return "dash", None
-    lowered = url.split("?", 1)[0].lower()
+    lowered = parsed.path.lower()
     if lowered.endswith(".m3u8"):
         return "hls", None
     if lowered.endswith(".mpd"):

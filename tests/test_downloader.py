@@ -17,7 +17,9 @@ from kodikdown.downloader import (
     DownloadCancelled,
     Downloader,
     DownloadFailed,
+    DownloadSource,
     ProgressSnapshot,
+    _bytes_on_disk,
     _is_transient,
     release_target,
     safe_filename,
@@ -83,11 +85,40 @@ def test_unique_target_reserves_names_for_parallel_jobs(tmp_path: Path) -> None:
     release_target(third)
 
 
-def test_unique_target_ignores_partial_files(tmp_path: Path) -> None:
+def test_unique_target_avoids_resuming_unknown_partial_files(tmp_path: Path) -> None:
     (tmp_path / "clip.mp4.part").write_bytes(b"half")
     (tmp_path / "clip.mp4.part-Frag3").write_bytes(b"frag")
 
-    assert unique_target(tmp_path, "clip").name == "clip"
+    assert unique_target(tmp_path, "clip").name == "clip (2)"
+
+
+@pytest.mark.parametrize("stem", ["episode", "episode[1]"])
+def test_parallel_dotted_titles_keep_their_own_files(tmp_path: Path, stem: str) -> None:
+    first = unique_target(tmp_path, stem)
+    second = unique_target(tmp_path, f"{stem}.2")
+    try:
+        downloader = Downloader(tmp_path)
+        other_video = tmp_path / f"{second.name}.mp4"
+        other_partial = tmp_path / f"{second.name}.mp4.part-Frag3.part"
+        other_video.write_bytes(b"other video")
+        other_partial.write_bytes(b"other fragment")
+        assert downloader._pick_result(first) is None
+        assert _bytes_on_disk(first) == 0
+
+        own_video = tmp_path / f"{first.name}.mp4"
+        own_partial = tmp_path / f"{first.name}.mp4.part"
+        own_video.write_bytes(b"own")
+        own_partial.write_bytes(b"half")
+        assert downloader._pick_result(first) == own_video.resolve()
+        assert _bytes_on_disk(first) == 7
+        assert not downloader._remove_partials(first)
+        assert not own_partial.exists()
+        assert own_video.read_bytes() == b"own"
+        assert other_video.read_bytes() == b"other video"
+        assert other_partial.read_bytes() == b"other fragment"
+    finally:
+        release_target(first)
+        release_target(second)
 
 
 def test_download_options_send_browser_identity(tmp_path: Path) -> None:
@@ -390,6 +421,52 @@ def test_download_blocking_uses_the_requested_filename(hls_server: object, tmp_p
     assert produced.name == "Custom Name.mp4"
 
 
+def test_slow_mp4_reports_progress_and_can_cancel_before_end_of_file(tmp_path: Path) -> None:
+    progress = threading.Event()
+    waited_for_eof = threading.Event()
+    payload = b"video bytes" * 8192
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            try:
+                self.wfile.write(payload[:2048])
+                self.wfile.flush()
+                if not progress.wait(3):
+                    waited_for_eof.set()
+                self.wfile.write(payload[2048:])
+            except OSError:
+                pass
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def on_progress(snapshot):
+        if snapshot.downloaded:
+            progress.set()
+            downloader.cancel()
+
+    downloader = Downloader(output_dir=tmp_path, listener=on_progress)
+    try:
+        with pytest.raises(DownloadCancelled):
+            downloader.download_blocking(
+                f"http://127.0.0.1:{server.server_port}/slow.mp4", "slow", "http://127.0.0.1/"
+            )
+        assert progress.is_set()
+        assert not waited_for_eof.is_set()
+        assert not list(tmp_path.iterdir())
+    finally:
+        progress.set()
+        server.shutdown()
+        server.server_close()
+
+
 def test_download_blocking_handles_bracketed_title(hls_server: object, tmp_path: Path) -> None:
     downloader = Downloader(output_dir=tmp_path)
     produced = downloader.download_blocking(
@@ -510,9 +587,7 @@ def test_cancel_interrupts_slow_download(tmp_path: Path) -> None:
         server.shutdown()
 
 
-def test_transfer_with_retries_falls_back_on_404_promoted_resolution(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_transfer_with_retries_uses_supplied_fallback_on_404(tmp_path: Path, monkeypatch) -> None:
     attempts: list[str] = []
 
     def mock_transfer(self: Downloader, target_base: Path, url: str, referer: str) -> None:
@@ -523,7 +598,10 @@ def test_transfer_with_retries_falls_back_on_404_promoted_resolution(
         target_base.with_suffix(".mp4").write_bytes(b"fallback content")
 
     monkeypatch.setattr(Downloader, "_transfer", mock_transfer)
-    downloader = Downloader(output_dir=tmp_path)
+    downloader = Downloader(
+        output_dir=tmp_path,
+        fallback_sources=(DownloadSource("https://cdn/video/480.mp4:hls:manifest.m3u8", 480),),
+    )
     produced = downloader.download_blocking(
         "https://cdn/video/720.mp4:hls:manifest.m3u8", "clip", "https://cdn/"
     )
@@ -543,7 +621,10 @@ def test_transfer_with_retries_fails_if_all_fallbacks_404(tmp_path: Path, monkey
         raise DownloadFailed("HTTP Error 404: Not Found")
 
     monkeypatch.setattr(Downloader, "_transfer", mock_transfer)
-    downloader = Downloader(output_dir=tmp_path)
+    downloader = Downloader(
+        output_dir=tmp_path,
+        fallback_sources=(DownloadSource("https://cdn/video/480.mp4:hls:manifest.m3u8", 480),),
+    )
 
     with pytest.raises(DownloadFailed, match="HTTP Error 404"):
         downloader.download_blocking(
@@ -553,3 +634,70 @@ def test_transfer_with_retries_fails_if_all_fallbacks_404(tmp_path: Path, monkey
     assert len(attempts) == 2
     assert "720.mp4" in attempts[0]
     assert "480.mp4" in attempts[1]
+
+
+def test_missing_hls_segment_never_reports_success(tmp_path: Path) -> None:
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+    root = tmp_path / "server"
+    root.mkdir()
+    _make_hls(root, duration=3, gop=10)
+    fragments = sorted(root.glob("stream*.ts"))
+    assert len(fragments) == 3
+    fragments[1].unlink()
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        downloader = Downloader(output_dir=tmp_path / "out", retries=0)
+        url = f"http://127.0.0.1:{server.server_port}/stream.m3u8"
+        with pytest.raises(DownloadFailed):
+            downloader.download_blocking(url, "incomplete", "http://127.0.0.1/")
+        assert not list((tmp_path / "out").glob("*.mp4"))
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_does_not_invent_fallback_urls(tmp_path: Path, monkeypatch) -> None:
+    attempts = []
+
+    def transfer(self, target, url, referer):
+        attempts.append(url)
+        raise DownloadFailed("HTTP Error 404")
+
+    monkeypatch.setattr(Downloader, "_transfer", transfer)
+    url = "https://cdn/720.mp4:hls:manifest.m3u8?signature=keep"
+    with pytest.raises(DownloadFailed):
+        Downloader(tmp_path).download_blocking(url, "clip", "https://cdn/")
+    assert attempts == [url]
+
+
+def test_fallback_uses_360p_and_clears_previous_fragments(tmp_path: Path, monkeypatch) -> None:
+    attempts = []
+    snapshots = []
+
+    def transfer(self, target, url, referer):
+        attempts.append(url)
+        if "360" in url:
+            assert not target.with_suffix(".mp4.part").exists()
+            target.with_suffix(".mp4").write_bytes(b"complete")
+        else:
+            target.with_suffix(".mp4.part").write_bytes(b"wrong resolution")
+            raise DownloadFailed("HTTP Error 403")
+
+    monkeypatch.setattr(Downloader, "_transfer", transfer)
+    downloader = Downloader(
+        tmp_path,
+        listener=snapshots.append,
+        fallback_sources=(
+            DownloadSource("https://cdn/480.mp4", 480),
+            DownloadSource("https://cdn/360.mp4", 360),
+        ),
+    )
+    assert (
+        downloader.download_blocking("https://cdn/720.mp4", "clip", "https://cdn/").read_bytes()
+        == b"complete"
+    )
+    assert len(attempts) == 3
+    assert [s.quality for s in snapshots] == [480, 360]

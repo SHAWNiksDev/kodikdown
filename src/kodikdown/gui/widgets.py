@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import (
     QEasingCurve,
+    QPoint,
     QPropertyAnimation,
+    QRectF,
     QSize,
     Qt,
     QTimer,
@@ -13,20 +15,25 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
+    QContextMenuEvent,
     QFontMetrics,
     QHideEvent,
-    QIcon,
     QLinearGradient,
+    QMouseEvent,
     QPainter,
     QPainterPath,
     QPaintEvent,
+    QPen,
     QResizeEvent,
+    QShowEvent,
 )
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QStyle,
@@ -37,63 +44,95 @@ from PySide6.QtWidgets import (
 
 from kodikdown.downloader import ProgressSnapshot
 from kodikdown.gui.icons import icon
-from kodikdown.gui.theme import Palette
+from kodikdown.gui.theme import LIGHT, Palette
 from kodikdown.i18n import t
 
 
-class AnimatedIconButton(QPushButton):
-    """Icon button with a smooth rotation animation on trigger."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._angle = 0.0
-        self._anim = QVariantAnimation(self)
-        self._anim.setDuration(360)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._anim.valueChanged.connect(self._on_angle_changed)
-        self._anim.finished.connect(self._on_anim_finished)
-
-    def trigger_spin(self) -> None:
-        self._anim.stop()
-        self._anim.setStartValue(0.0)
-        self._anim.setEndValue(360.0)
-        self._anim.start()
-
-    def _on_angle_changed(self, val: object) -> None:
-        self._angle = float(val)  # type: ignore[arg-type]
-        self.update()
-
-    def _on_anim_finished(self) -> None:
-        self._angle = 0.0
-        self.update()
+class CheckBox(QCheckBox):
+    """Keep an explicit check mark when the stylesheet paints the indicator."""
 
     def paintEvent(self, event: QPaintEvent) -> None:
-        if self._angle in (0.0, 360.0):
-            super().paintEvent(event)
+        super().paintEvent(event)
+        if not self.isChecked():
             return
-
-        opt = QStyleOptionButton()
-        self.initStyleOption(opt)
-        opt.icon = QIcon()
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        rect = self.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator, option, self)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        self.style().drawControl(QStyle.ControlElement.CE_PushButton, opt, painter, self)
+        pen = QPen(QColor("#ffffff"), 2.1)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setOpacity(1.0 if self.isEnabled() else 0.5)
+        check = QPainterPath()
+        check.moveTo(rect.x() + rect.width() * 0.23, rect.y() + rect.height() * 0.50)
+        check.lineTo(rect.x() + rect.width() * 0.43, rect.y() + rect.height() * 0.70)
+        check.lineTo(rect.x() + rect.width() * 0.77, rect.y() + rect.height() * 0.29)
+        painter.drawPath(check)
 
-        icon_obj = self.icon()
-        if not icon_obj.isNull():
-            sz = self.iconSize()
-            if sz.isEmpty() or sz.width() <= 0:
-                sz = QSize(20, 20)
-            pix = icon_obj.pixmap(sz)
-            cx = self.width() / 2.0
-            cy = self.height() / 2.0
-            painter.save()
-            painter.translate(cx, cy)
-            painter.rotate(self._angle)
-            painter.drawPixmap(int(-sz.width() / 2.0), int(-sz.height() / 2.0), pix)
-            painter.restore()
-        painter.end()
+
+class SettingsSwitch(QCheckBox):
+    """Keyboard-accessible checkbox painted as a readable Android-like switch."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._palette = LIGHT
+        self._fraction = 0.0
+        self._animation = QVariantAnimation(self)
+        self._animation.setDuration(130)
+        self._animation.valueChanged.connect(self._advance)
+        self.toggled.connect(self._toggle)
+
+    def apply_palette(self, palette: Palette) -> None:
+        self._palette = palette
+        self.update()
+
+    def setChecked(self, checked: bool) -> None:
+        if checked != self.isChecked():
+            self._animation.stop()
+            self._fraction = float(checked)
+        super().setChecked(checked)
+
+    def _toggle(self, checked: bool) -> None:
+        self._animation.stop()
+        self._animation.setStartValue(self._fraction)
+        self._animation.setEndValue(float(checked))
+        self._animation.start()
+
+    def _advance(self, value: object) -> None:
+        self._fraction = float(value)  # type: ignore[arg-type]
+        self.update()
+
+    def sizeHint(self) -> QSize:
+        return QSize(self.fontMetrics().horizontalAdvance(self.text()) + 54, 36)
+
+    def hitButton(self, pos: QPoint) -> bool:
+        return bool(self.rect().contains(pos))
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if not self.isEnabled():
+            painter.setOpacity(0.5)
+        y = (self.height() - 22) / 2
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(
+            QColor(self._palette.accent if self.isChecked() else self._palette.border_strong)
+        )
+        painter.drawRoundedRect(QRectF(0, y, 40, 22), 11, 11)
+        painter.setBrush(QColor("#ffffff" if self.isChecked() else self._palette.text_muted))
+        painter.drawEllipse(QRectF(3 + 18 * self._fraction, y + 3, 16, 16))
+        painter.setPen(QColor(self._palette.text))
+        text_rect = self.rect().adjusted(52, 0, 0, 0)
+        text = self.fontMetrics().elidedText(
+            self.text(), Qt.TextElideMode.ElideRight, text_rect.width()
+        )
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, text)
+        if self.hasFocus():
+            painter.setPen(QColor(self._palette.accent))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(self.rect().adjusted(0, 1, -1, -1), 6, 6)
 
 
 class ElidedLabel(QLabel):
@@ -168,7 +207,8 @@ class ProgressBar(QWidget):
         self._busy = True
         self._animation.stop()
         self._value = 0.0
-        self._busy_timer.start()
+        if self.isVisible():
+            self._busy_timer.start()
         self.update()
 
     def reset(self) -> None:
@@ -182,8 +222,13 @@ class ProgressBar(QWidget):
             self._busy_timer.stop()
 
     def hideEvent(self, event: QHideEvent) -> None:
-        self._stop_busy()
+        self._busy_timer.stop()
         super().hideEvent(event)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._busy:
+            self._busy_timer.start()
 
     def _on_animated(self, value: object) -> None:
         self._value = float(value)  # type: ignore[arg-type]
@@ -314,6 +359,7 @@ class DownloadRow(QFrame):
     open_requested = Signal(str)
     folder_requested = Signal(str)
     remove_requested = Signal(str)
+    selection_requested = Signal(str)
 
     def __init__(
         self,
@@ -328,6 +374,14 @@ class DownloadRow(QFrame):
         self.setProperty("state", "active")
         self.job_id = job_id
         self.path = ""
+        self._terminal = False
+        self.setProperty("selected", False)
+        self._assembling = False
+        self._outcome = ""
+        self._failure_detail = ""
+        self._available = True
+        self._last_snapshot: ProgressSnapshot | None = None
+        self._stage = "starting"
         self._palette = palette
 
         layout = QVBoxLayout(self)
@@ -346,7 +400,13 @@ class DownloadRow(QFrame):
         self.cancel_button.setObjectName("icon")
         self.cancel_button.setFixedSize(QSize(28, 28))
         self.cancel_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.cancel_button.clicked.connect(lambda: self.cancel_requested.emit(self.job_id))
+        self.cancel_button.clicked.connect(
+            lambda: (
+                self.remove_requested.emit(self.job_id)
+                if self._terminal
+                else self.cancel_requested.emit(self.job_id)
+            )
+        )
         top.addWidget(self.title_label, 1)
         top.addWidget(self.status_icon)
         top.addWidget(self.badge)
@@ -380,6 +440,7 @@ class DownloadRow(QFrame):
     def apply_palette(self, palette: Palette) -> None:
         self._palette = palette
         self.cancel_button.setIcon(icon("close", palette.text_muted, 16))
+        self.cancel_button.setToolTip(t("remove") if self._terminal else t("cancel"))
         self.open_button.setText(t("open_file"))
         self.open_button.setIcon(icon("play", palette.accent, 14))
         self.folder_button.setText(t("open_folder"))
@@ -394,8 +455,49 @@ class DownloadRow(QFrame):
 
     def retranslate(self) -> None:
         self.apply_palette(self._palette)
+        if self._outcome == "done":
+            self.refresh_availability(self._available)
+        elif self._outcome == "cancelled":
+            self.detail.setText(t("cancelled"))
+        elif self._outcome == "failed":
+            self.detail.setText(t("failed", detail=self._failure_detail))
+        elif self._last_snapshot is not None:
+            self.update_progress(self._last_snapshot)
+        else:
+            self.detail.setText(t(self._stage))
+
+    def refresh_availability(self, available: bool) -> None:
+        if self._outcome != "done":
+            return
+        self._available = available
+        self.setProperty("state", "done" if available else "missing")
+        self.detail.setText(t("saved_to", path=self.path) if available else t("file_missing"))
+        self.detail.setProperty("state", "success" if available else "")
+        self.open_button.setVisible(available)
+        self.folder_button.setVisible(available)
+        self.status_icon.setPixmap(
+            icon(
+                "check" if available else "warning",
+                self._palette.success if available else self._palette.text_muted,
+                16,
+            ).pixmap(16, 16)
+        )
+        self._restyle()
 
     def update_progress(self, snapshot: ProgressSnapshot) -> None:
+        self._last_snapshot = snapshot
+        if snapshot.source != "monitor":
+            self._assembling = snapshot.stage in {"processing", "finished"}
+        self.cancel_button.setVisible(not self._assembling)
+        if self._assembling:
+            self.bar.set_busy()
+            self.detail.setText(t("stage_processing"))
+            self.detail.setProperty("state", "")
+            self._restyle()
+            return
+        if snapshot.quality is not None:
+            self.badge.setText(f"{snapshot.quality}p")
+            self.bar.reset()
         if snapshot.source == "monitor":
             # Only the byte counter is known; keep whatever the bar shows.
             self.detail.setText(_progress_details(snapshot))
@@ -421,6 +523,8 @@ class DownloadRow(QFrame):
         self._restyle()
 
     def mark_done(self, path: str) -> None:
+        self._outcome = "done"
+        self._available = True
         self.path = path
         self.setProperty("state", "done")
         self.bar.set_value(100.0)
@@ -437,6 +541,7 @@ class DownloadRow(QFrame):
         self._restyle()
 
     def mark_cancelled(self) -> None:
+        self._outcome = "cancelled"
         self.setProperty("state", "failed")
         self.detail.setText(t("cancelled"))
         self.detail.setProperty("state", "")
@@ -447,6 +552,8 @@ class DownloadRow(QFrame):
         self._restyle()
 
     def mark_failed(self, detail: str) -> None:
+        self._outcome = "failed"
+        self._failure_detail = detail
         self.setProperty("state", "failed")
         self.detail.setText(t("failed", detail=detail))
         self.detail.setProperty("state", "error")
@@ -458,19 +565,51 @@ class DownloadRow(QFrame):
         self._restyle()
 
     def mark_starting(self) -> None:
+        self._stage = "starting"
         self.detail.setText(t("starting"))
         self.bar.set_busy()
 
+    def mark_downloading(self) -> None:
+        self._stage = "history_downloading"
+        self.detail.setText(t(self._stage))
+
     def mark_queued(self) -> None:
+        self._stage = "queued"
         self.detail.setText(t("queued"))
         self.bar.set_busy()
 
     def mark_cancelling(self) -> None:
+        self._stage = "cancelling"
         self.detail.setText(t("cancelling"))
 
     def _finish(self) -> None:
-        self.cancel_button.hide()
+        self._terminal = True
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.setToolTip(t("remove"))
+        self.cancel_button.show()
+        self.setToolTip(t("select_download_hint"))
         self._restyle()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if (
+            self._terminal
+            and event.button() == Qt.MouseButton.LeftButton
+            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        ):
+            self.selection_requested.emit(self.job_id)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:
+        menu = QMenu(self)
+        if self._terminal:
+            menu.addAction(t("remove"), lambda: self.remove_requested.emit(self.job_id))
+        elif not self._assembling:
+            menu.addAction(t("stop_download"), lambda: self.cancel_requested.emit(self.job_id))
+        else:
+            return
+        menu.exec(event.globalPos())
 
     def _restyle(self) -> None:
         for widget in (self, self.detail):
@@ -495,7 +634,7 @@ def _progress_details(snapshot: ProgressSnapshot) -> str:
         remaining = (snapshot.total - snapshot.downloaded) / snapshot.speed
         if remaining > 0:
             parts.append(t("eta", time=_duration(remaining)))
-    return " · ".join(parts)
+    return " · ".join(parts) or t("history_downloading")
 
 
 def _size(value: float | int | None) -> str:
@@ -528,7 +667,7 @@ def _duration(seconds: float) -> str:
 
 
 class FadeMixin:
-    """Helper for opacity and crossfade animations."""
+    """Short opacity effects for rows and progress indicators."""
 
     @staticmethod
     def fade_in(widget: QWidget, duration: int = 220, start: float = 0.0) -> None:
@@ -546,41 +685,3 @@ class FadeMixin:
             lambda: widget.setGraphicsEffect(None)  # type: ignore[arg-type]
         )
         animation.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
-
-    @staticmethod
-    def crossfade_widget(
-        target: QWidget,
-        new_stylesheet: str,
-        duration: int = 280,
-    ) -> None:
-        """Smoothly crossfade widget appearance when switching themes."""
-        central = target.findChild(QWidget, "window") or target
-        if not central.isVisible() or central.width() <= 0 or central.height() <= 0:
-            target.setStyleSheet(new_stylesheet)
-            return
-
-        pixmap = central.grab()
-        if pixmap.isNull():
-            target.setStyleSheet(new_stylesheet)
-            return
-
-        overlay = QLabel(central)
-        overlay.setPixmap(pixmap)
-        overlay.setGeometry(0, 0, central.width(), central.height())
-        overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        overlay.show()
-        overlay.raise_()
-
-        target.setStyleSheet(new_stylesheet)
-
-        effect = QGraphicsOpacityEffect(overlay)
-        overlay.setGraphicsEffect(effect)
-        effect.setOpacity(1.0)
-
-        anim = QPropertyAnimation(effect, b"opacity", overlay)
-        anim.setDuration(duration)
-        anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        anim.setStartValue(1.0)
-        anim.setEndValue(0.0)
-        anim.finished.connect(overlay.deleteLater)
-        anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)

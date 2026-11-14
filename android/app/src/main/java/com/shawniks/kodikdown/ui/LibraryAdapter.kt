@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import com.shawniks.kodikdown.R
 import com.shawniks.kodikdown.data.LibraryItem
 import com.shawniks.kodikdown.databinding.ItemLibraryBinding
 import com.shawniks.kodikdown.ui.AnimationExtensions.applyPressEffect
@@ -17,10 +18,40 @@ import java.util.Locale
 class LibraryAdapter(
     private val onPlayClicked: (LibraryItem) -> Unit,
     private val onShareClicked: (LibraryItem) -> Unit,
-    private val onDeleteClicked: (LibraryItem) -> Unit
+    private val onDeleteClicked: (LibraryItem) -> Unit,
+    private val onItemClick: (LibraryItem) -> Unit = {},
+    private val onItemLongClick: (LibraryItem) -> Boolean = { false }
 ) : ListAdapter<LibraryItem, LibraryAdapter.LibraryViewHolder>(DiffCallback) {
 
     private val dateFormat = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault())
+
+    var isSelectionMode: Boolean = false
+        set(value) {
+            field = value
+            notifyDataSetChanged()
+        }
+
+    val selectedIds: MutableSet<String> = mutableSetOf()
+
+    fun selectAll() {
+        selectedIds.clear()
+        currentList.forEach { selectedIds.add(it.id) }
+        notifyDataSetChanged()
+    }
+
+    fun clearSelection() {
+        selectedIds.clear()
+        notifyDataSetChanged()
+    }
+
+    fun toggleSelection(id: String) {
+        if (selectedIds.contains(id)) {
+            selectedIds.remove(id)
+        } else {
+            selectedIds.add(id)
+        }
+        notifyDataSetChanged()
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): LibraryViewHolder {
         val binding = ItemLibraryBinding.inflate(LayoutInflater.from(parent.context), parent, false)
@@ -39,6 +70,8 @@ class LibraryAdapter(
         }
 
         fun bind(item: LibraryItem) {
+            val isSelected = selectedIds.contains(item.id)
+
             binding.tvTitle.text = item.title
 
             val sizeStr = FileUtils.formatFileSize(item.fileSizeBytes)
@@ -51,6 +84,32 @@ class LibraryAdapter(
             } else {
                 binding.tvQualityBadge.visibility = View.VISIBLE
                 binding.tvQualityBadge.text = if (item.isMp4) "MP4" else "VIDEO"
+            }
+
+            if (isSelectionMode) {
+                binding.ivSelectCheck.visibility = View.VISIBLE
+                binding.ivSelectCheck.setImageResource(
+                    if (isSelected) R.drawable.ic_checkbox_checked else R.drawable.ic_checkbox_unchecked
+                )
+                binding.root.setBackgroundResource(
+                    if (isSelected) R.drawable.bg_card_selected else R.drawable.bg_card
+                )
+            } else {
+                binding.ivSelectCheck.visibility = View.GONE
+                binding.root.setBackgroundResource(R.drawable.bg_card)
+            }
+
+            binding.root.setOnClickListener {
+                if (isSelectionMode) {
+                    toggleSelection(item.id)
+                    onItemClick(item)
+                } else {
+                    onPlayClicked(item)
+                }
+            }
+
+            binding.root.setOnLongClickListener {
+                onItemLongClick(item)
             }
 
             binding.btnPlay.setOnClickListener { onPlayClicked(item) }

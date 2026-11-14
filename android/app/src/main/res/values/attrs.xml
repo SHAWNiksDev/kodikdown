@@ -13,4 +13,8 @@
     <attr name="app_success" format="color" />
     <attr name="app_danger" format="color" />
     <attr name="app_warning" format="color" />
+    <declare-styleable name="SettingsSaveIndicatorView">
+        <attr name="app_accent" />
+        <attr name="app_success" />
+    </declare-styleable>
 </resources>

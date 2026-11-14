@@ -47,6 +47,8 @@ def run(argv: list[str] | None = None, url: str | None = None) -> int:
     _install_excepthook()
 
     window = MainWindow(store, settings)
+    application.setQuitOnLastWindowClosed(False)
+    window.exit_requested.connect(application.quit)
     window.show()
     prefill_url = url if url is not None else _url_argument(argv if argv is not None else sys.argv)
     if prefill_url:

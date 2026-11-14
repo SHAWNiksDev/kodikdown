@@ -80,21 +80,19 @@ object KodikDecoder {
     }
 
     fun streamKind(url: String): Pair<String, String?> {
-        if (url.endsWith(HLS_SUFFIX)) {
-            val direct = url.substring(0, url.length - HLS_SUFFIX.length)
-            return Pair("hls", direct)
+        val clean = url.substringBefore('?').substringBefore('#')
+        val suffix = url.substring(clean.length)
+        if (clean.endsWith(HLS_SUFFIX)) {
+            return Pair("hls", clean.removeSuffix(HLS_SUFFIX) + suffix)
         }
-        if (url.endsWith(DASH_SUFFIX)) {
-            return Pair("dash", null)
-        }
-        val clean = url.substringBefore('?').lowercase()
-        if (clean.endsWith(".m3u8")) {
+        if (clean.endsWith(DASH_SUFFIX)) return Pair("dash", null)
+        if (clean.lowercase().endsWith(".m3u8")) {
             return Pair("hls", null)
         }
-        if (clean.endsWith(".mpd")) {
+        if (clean.lowercase().endsWith(".mpd")) {
             return Pair("dash", null)
         }
-        if (clean.endsWith(".mp4")) {
+        if (clean.lowercase().endsWith(".mp4")) {
             return Pair("mp4", url)
         }
         return Pair("hls", null)

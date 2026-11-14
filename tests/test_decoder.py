@@ -86,3 +86,12 @@ def test_stream_kind_recognises_plain_media() -> None:
 def test_normalise_url_adds_scheme() -> None:
     assert normalise_url("//cdn.example/x.m3u8") == "https://cdn.example/x.m3u8"
     assert normalise_url("https://cdn.example/x.m3u8") == "https://cdn.example/x.m3u8"
+
+
+def test_manifest_query_is_preserved_in_direct_mp4() -> None:
+    from kodikdown.kodik.decoder import stream_kind
+
+    assert stream_kind("https://cdn/video/480.mp4:hls:manifest.m3u8?token=a%2Bb") == (
+        "hls",
+        "https://cdn/video/480.mp4?token=a%2Bb",
+    )

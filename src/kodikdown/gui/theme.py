@@ -161,6 +161,52 @@ def stylesheet(palette: Palette) -> str:
         font-weight: 700;
         letter-spacing: -0.2px;
     }}
+    #page-title {{
+        font-size: 20px;
+        font-weight: 700;
+    }}
+    #navigation {{
+        background: {palette.surface};
+        border-top: 1px solid {palette.border};
+    }}
+    QPushButton#navigation-button {{
+        background: transparent;
+        border: none;
+        color: {palette.text_muted};
+    }}
+    QPushButton#navigation-button:checked {{
+        background: {palette.accent_soft};
+        color: {palette.accent};
+    }}
+    QPushButton#setting-choice {{
+        border-radius: 14px;
+        background: {palette.surface_alt};
+        color: {palette.text_muted};
+    }}
+    QPushButton#setting-choice:checked {{
+        border: 1px solid {palette.accent};
+        background: {palette.accent_soft};
+        color: {palette.accent};
+    }}
+    QPushButton#danger {{
+        color: {palette.danger};
+    }}
+    QTreeWidget#media-list {{
+        background: {palette.surface};
+        alternate-background-color: {palette.surface_alt};
+        border: 1px solid {palette.border};
+        border-radius: 10px;
+        selection-background-color: {palette.accent_soft};
+        selection-color: {palette.text};
+    }}
+    QTreeWidget::item {{ padding: 10px 6px; }}
+    QHeaderView::section {{
+        background: {palette.surface};
+        color: {palette.text_muted};
+        border: none;
+        border-bottom: 1px solid {palette.border};
+        padding: 10px 6px;
+    }}
     #brand-sub {{
         color: {palette.text_muted};
         font-size: 10px;
@@ -204,6 +250,10 @@ def stylesheet(palette: Palette) -> str:
     QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{
         border-color: {palette.border_strong};
     }}
+    QSpinBox {{ padding: 8px 6px; }}
+    QSpinBox QLineEdit {{ padding: 0px; border: none; background: transparent; }}
+    QSpinBox#concurrency-stepper::up-button,
+    QSpinBox#concurrency-stepper::down-button {{ width: 0px; height: 0px; }}
     QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
         border-color: {palette.accent};
     }}
@@ -345,6 +395,13 @@ def stylesheet(palette: Palette) -> str:
     #download-row[state="failed"] {{
         border-color: {palette.danger};
     }}
+    #download-row[state="missing"] {{
+        border-color: {palette.border_strong};
+    }}
+    #download-row[selected="true"] {{
+        border: 1px solid {palette.accent};
+        background: {palette.accent_soft};
+    }}
     #row-title {{
         font-weight: 600;
         font-size: 13px;
@@ -380,9 +437,9 @@ def stylesheet(palette: Palette) -> str:
     QCheckBox::indicator {{
         width: 17px;
         height: 17px;
-        border: 1px solid {palette.border_strong};
+        border: 2px solid {palette.text_muted};
         border-radius: 4px;
-        background: {palette.surface};
+        background: {palette.surface_alt};
     }}
     QCheckBox::indicator:hover {{
         border-color: {palette.accent};

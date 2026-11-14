@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 # kodik.info and kodik.biz were lost to domain squatters; the player lives on
 # kodikplayer.com now. The rest are long-lived mirrors. Any of them serves the
@@ -28,8 +28,9 @@ def referer_for(stream_url: str) -> str:
 
 def direct_mp4_url(stream_url: str) -> str | None:
     """The plain mp4 behind an HLS manifest link, when the CDN serves one."""
-    if stream_url.endswith(_HLS_MANIFEST_SUFFIX):
-        return stream_url[: -len(_HLS_MANIFEST_SUFFIX)]
+    parsed = urlsplit(stream_url)
+    if parsed.path.endswith(_HLS_MANIFEST_SUFFIX):
+        return urlunsplit(parsed._replace(path=parsed.path[: -len(_HLS_MANIFEST_SUFFIX)]))
     return None
 
 

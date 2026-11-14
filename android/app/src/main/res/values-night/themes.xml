@@ -5,6 +5,7 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:navigationBarColor">?attr/app_background</item>
         <item name="android:windowBackground">?attr/app_background</item>
+        <item name="android:windowAnimationStyle">@style/WindowAnimation.NoAnimation</item>
 
         <!-- Material3 mappings -->
         <item name="colorPrimary">@color/dark_accent</item>

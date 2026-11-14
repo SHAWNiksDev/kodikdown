@@ -28,6 +28,11 @@ class Settings:
     theme: str = "auto"
     concurrent_downloads: int = 2
     prefer_mp4: bool = False
+    default_quality: str = "ask"
+    auto_paste: bool = False
+    confirm_cancel_download: bool = True
+    confirm_delete: bool = True
+    animations: bool = True
 
     def updated(
         self,
@@ -37,6 +42,11 @@ class Settings:
         theme: str | None = None,
         concurrent_downloads: int | None = None,
         prefer_mp4: bool | None = None,
+        default_quality: str | None = None,
+        auto_paste: bool | None = None,
+        confirm_cancel_download: bool | None = None,
+        confirm_delete: bool | None = None,
+        animations: bool | None = None,
     ) -> Settings:
         return replace(
             self,
@@ -47,6 +57,15 @@ class Settings:
                 self.concurrent_downloads if concurrent_downloads is None else concurrent_downloads
             ),
             prefer_mp4=self.prefer_mp4 if prefer_mp4 is None else prefer_mp4,
+            default_quality=self.default_quality if default_quality is None else default_quality,
+            auto_paste=self.auto_paste if auto_paste is None else auto_paste,
+            confirm_cancel_download=(
+                self.confirm_cancel_download
+                if confirm_cancel_download is None
+                else confirm_cancel_download
+            ),
+            confirm_delete=self.confirm_delete if confirm_delete is None else confirm_delete,
+            animations=self.animations if animations is None else animations,
         )
 
 
@@ -57,17 +76,22 @@ class ConfigStore:
     def load(self) -> Settings:
         try:
             stored: dict[str, object] = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, ValueError):
             stored = {}
         if not isinstance(stored, dict):
             stored = {}
 
         raw_directory = stored.get("download_dir")
-        download_dir = (
-            Path(raw_directory).expanduser()
-            if isinstance(raw_directory, str) and raw_directory.strip()
-            else default_download_dir()
-        )
+        download_dir = default_download_dir()
+        if isinstance(raw_directory, str) and raw_directory.strip():
+            try:
+                if "\x00" in raw_directory:
+                    raise ValueError("Download directory contains a null character")
+                download_dir = Path(raw_directory).expanduser()
+            except (OSError, RuntimeError, ValueError):
+                # A stale ~user or malformed path must not stop app startup or
+                # discard the remaining valid preferences.
+                pass
 
         language = _choice(stored.get("language"), LANGUAGE_CHOICES, "auto")
         theme = _choice(stored.get("theme"), THEME_CHOICES, "auto")
@@ -83,6 +107,13 @@ class ConfigStore:
             theme=theme,
             concurrent_downloads=concurrent,
             prefer_mp4=stored.get("prefer_mp4") is True,
+            default_quality=_choice(
+                stored.get("default_quality"), ("ask", "1080", "720", "480", "360"), "ask"
+            ),
+            auto_paste=stored.get("auto_paste") is True,
+            confirm_cancel_download=stored.get("confirm_cancel_download", True) is not False,
+            confirm_delete=stored.get("confirm_delete", True) is not False,
+            animations=stored.get("animations", True) is not False,
         )
 
     def save(self, settings: Settings) -> None:
@@ -94,6 +125,11 @@ class ConfigStore:
                 "theme": settings.theme,
                 "concurrent_downloads": settings.concurrent_downloads,
                 "prefer_mp4": settings.prefer_mp4,
+                "default_quality": settings.default_quality,
+                "auto_paste": settings.auto_paste,
+                "confirm_cancel_download": settings.confirm_cancel_download,
+                "confirm_delete": settings.confirm_delete,
+                "animations": settings.animations,
             },
             indent=2,
             ensure_ascii=False,

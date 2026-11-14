@@ -7,13 +7,19 @@ import contextlib
 import logging
 import threading
 from collections.abc import Coroutine
-from concurrent.futures import Future
+from concurrent.futures import CancelledError, Future
 from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, QRunnable, Signal, SignalInstance
 
-from kodikdown.downloader import DownloadCancelled, Downloader, DownloadFailed, ProgressSnapshot
+from kodikdown.downloader import (
+    DownloadCancelled,
+    Downloader,
+    DownloadFailed,
+    DownloadSource,
+    ProgressSnapshot,
+)
 from kodikdown.kodik.client import KodikClient
 from kodikdown.kodik.errors import (
     HostUnavailableError,
@@ -42,8 +48,7 @@ class ResolverWorker(QObject):
         self._client = KodikClient()
         self._loop = asyncio.new_event_loop()
         self._ready = threading.Event()
-        self._current: asyncio.Task[Any] | None = None
-        self._lock = threading.Lock()
+        self._future: Future[Any] | None = None
         self._is_shut_down = False
         self._thread = threading.Thread(target=self._run_loop, name="kodikdown-async", daemon=True)
         self._thread.start()
@@ -53,32 +58,32 @@ class ResolverWorker(QObject):
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
         self._ready.set()
-        with contextlib.suppress(RuntimeError):
+        try:
             self._loop.run_forever()
+        finally:
+            pending = asyncio.all_tasks(self._loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            self._loop.run_until_complete(self._loop.shutdown_asyncgens())
+            self._loop.close()
 
     def _submit(self, coroutine: Coroutine[Any, Any, Any]) -> Future[Any]:
-        async def runner() -> Any:
-            with self._lock:
-                self._current = asyncio.current_task()
-            try:
-                return await coroutine
-            finally:
-                with self._lock:
-                    self._current = None
-
-        return asyncio.run_coroutine_threadsafe(runner(), self._loop)
+        return asyncio.run_coroutine_threadsafe(coroutine, self._loop)
 
     # -- public API --------------------------------------------------------
     def resolve(self, request_id: int, url: str, translation: Translation | None) -> None:
         self.cancel()
+        if self._is_shut_down:
+            return
         future = self._submit(self._client.resolve(url, translation))
+        self._future = future
         future.add_done_callback(lambda done: self._deliver(request_id, done))
 
     def cancel(self) -> None:
-        with self._lock:
-            task = self._current
-        if task is not None and not task.done():
-            self._loop.call_soon_threadsafe(task.cancel)
+        if self._future is not None:
+            self._future.cancel()
 
     def shutdown(self) -> None:
         if self._is_shut_down:
@@ -93,25 +98,28 @@ class ResolverWorker(QObject):
         self._thread.join(timeout=3)
 
     def _deliver(self, request_id: int, future: Future[Any]) -> None:
-        try:
-            resolved: ResolvedVideo = future.result()
-        except asyncio.CancelledError:
+        if self._is_shut_down:
             return
-        except InvalidUrlError:
-            self.failed.emit(request_id, "invalid_url", "")
-        except NoStreamsError as exc:
-            self.failed.emit(request_id, "no_streams", str(exc))
-        except PageStructureError as exc:
-            self.failed.emit(request_id, "page_changed", str(exc))
-        except HostUnavailableError as exc:
-            self.failed.emit(request_id, "network", str(exc))
-        except RequestFailedError as exc:
-            self.failed.emit(request_id, "network", str(exc))
-        except Exception as exc:
-            logger.exception("resolve failed")
-            self.failed.emit(request_id, "unexpected", str(exc))
-        else:
-            self.resolved.emit(request_id, resolved)
+        with contextlib.suppress(RuntimeError):
+            try:
+                resolved: ResolvedVideo = future.result()
+            except (asyncio.CancelledError, CancelledError):
+                return
+            except InvalidUrlError:
+                self.failed.emit(request_id, "invalid_url", "")
+            except NoStreamsError as exc:
+                self.failed.emit(request_id, "no_streams", str(exc))
+            except PageStructureError as exc:
+                self.failed.emit(request_id, "page_changed", str(exc))
+            except HostUnavailableError as exc:
+                self.failed.emit(request_id, "network", str(exc))
+            except RequestFailedError as exc:
+                self.failed.emit(request_id, "network", str(exc))
+            except Exception as exc:
+                logger.exception("resolve failed")
+                self.failed.emit(request_id, "unexpected", str(exc))
+            else:
+                self.resolved.emit(request_id, resolved)
 
 
 class DownloadSignals(QObject):
@@ -140,6 +148,7 @@ class DownloadTask(QRunnable):
         concurrent_fragments: int = 8,
         socket_timeout: float = 15.0,
         signals: DownloadSignals | None = None,
+        fallback_sources: tuple[DownloadSource, ...] = (),
     ) -> None:
         super().__init__()
         self.job_id = job_id
@@ -148,8 +157,9 @@ class DownloadTask(QRunnable):
         self._downloader = Downloader(
             output_dir=output_dir,
             listener=self._emit_progress,
-            concurrent_fragments=max(8, concurrent_fragments),
+            concurrent_fragments=max(1, min(8, concurrent_fragments)),
             socket_timeout=socket_timeout,
+            fallback_sources=fallback_sources,
         )
         self._title = title
         self._referer = referer

@@ -8,22 +8,52 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.shawniks.kodikdown.R
+import com.shawniks.kodikdown.data.MediaFiles
 import java.io.File
 import java.util.regex.Pattern
+import kotlinx.coroutines.CancellationException
 
 object FileUtils {
+    /** Active transfers own this directory, even while a new job is being queued. */
+    fun clearCache(cacheDir: File, codeCacheDir: File) {
+        cacheDir.listFiles()?.filter { it.name != "downloads" }?.forEach { it.deleteRecursively() }
+        codeCacheDir.listFiles()?.forEach { it.deleteRecursively() }
+    }
+
     private val ILLEGAL_CHARS = Pattern.compile("""[<>:"/\\|?*\x00-\x1f]""")
-    private val MEDIA_SUFFIX_RE = Pattern.compile("""\.(mp4|mkv|webm|avi|mov|m4v|flv|wmv|ts)$""", Pattern.CASE_INSENSITIVE)
+    private val MEDIA_SUFFIX_RE =
+        Pattern.compile("""\.(mp4|mkv|webm|avi|mov|m4v|flv|wmv|ts)$""", Pattern.CASE_INSENSITIVE)
     private val TEMPLATE_CHARS = Pattern.compile("%")
-    private val RESERVED_NAMES = setOf(
-        "con", "prn", "aux", "nul",
-        "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
-        "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9"
-    )
+    private val RESERVED_NAMES =
+        setOf(
+            "con",
+            "prn",
+            "aux",
+            "nul",
+            "com1",
+            "com2",
+            "com3",
+            "com4",
+            "com5",
+            "com6",
+            "com7",
+            "com8",
+            "com9",
+            "lpt1",
+            "lpt2",
+            "lpt3",
+            "lpt4",
+            "lpt5",
+            "lpt6",
+            "lpt7",
+            "lpt8",
+            "lpt9",
+        )
 
     fun safeFileName(raw: String, fallback: String = "video"): String {
         var cleaned = ILLEGAL_CHARS.matcher(raw).replaceAll("_").trim(' ', '.')
@@ -44,80 +74,135 @@ object FileUtils {
     }
 
     /**
-     * Saves a completed video into public user storage using MediaStore (Android 10+)
-     * or standard filesystem (Android 9 and below), bypassing Scoped Storage write restrictions.
+     * Saves a completed video into public user storage using MediaStore (Android 10+) or standard
+     * filesystem (Android 9 and below), bypassing Scoped Storage write restrictions.
      */
+    fun publicDirectory(targetFolder: String): String {
+        val external = runCatching { Environment.getExternalStorageDirectory().absolutePath.trimEnd('/') }.getOrDefault("")
+        var relative = targetFolder.trim('/')
+        if (external.isNotEmpty() && relative.startsWith(external.trim('/'))) {
+            relative = relative.removePrefix(external.trim('/')).trim('/')
+        }
+        relative = relative
+            .removePrefix("storage/emulated/0/")
+            .removePrefix("storage/emulated/0")
+            .removePrefix("sdcard/")
+            .removePrefix("sdcard")
+            .removePrefix("storage/self/primary/")
+            .removePrefix("storage/self/primary")
+            .trim('/')
+        val root = relative.substringBefore('/')
+        if (
+            root !in setOf("Download", "Movies", "DCIM") ||
+                relative.split('/').any { it == "." || it == ".." }
+        ) {
+            throw java.io.IOException("Choose this folder using the folder picker in Settings")
+        }
+        return relative
+    }
+
     fun saveToPublicStorage(
         context: Context,
         sourceTempFile: File,
         baseFileName: String,
-        targetFolder: String
+        targetFolder: String,
+        isCancelled: () -> Boolean = { false },
     ): Pair<String, Uri> {
-        val fileName = "$baseFileName.mp4"
-        val isMovies = targetFolder.contains("Movie", ignoreCase = true)
-        val relativeSubDir = when {
-            targetFolder.contains("/storage/emulated/0/") -> {
-                val sub = targetFolder.substringAfter("/storage/emulated/0/").trim('/')
-                when {
-                    sub.startsWith("Download", ignoreCase = true) || sub.startsWith("Movies", ignoreCase = true) || sub.startsWith("DCIM", ignoreCase = true) -> sub
-                    isMovies -> "Movies/$sub"
-                    else -> "Download/$sub"
+        val fileName = "${safeFileName(baseFileName)}.mp4"
+        fun copyTo(out: java.io.OutputStream) {
+            sourceTempFile.inputStream().use { input ->
+                val buffer = ByteArray(128 * 1024)
+                while (true) {
+                    if (isCancelled()) throw CancellationException("Download cancelled")
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    out.write(buffer, 0, count)
                 }
             }
-            targetFolder.startsWith("Download", ignoreCase = true) -> targetFolder
-            targetFolder.startsWith("Movies", ignoreCase = true) -> targetFolder
-            isMovies -> "Movies/KodikDown"
-            else -> "Download/KodikDown"
+            if (isCancelled()) throw CancellationException("Download cancelled")
         }
-
+        if (isCancelled()) throw CancellationException("Download cancelled")
+        if (targetFolder.startsWith("content://")) {
+            val tree = Uri.parse(targetFolder)
+            val parent =
+                DocumentsContract.buildDocumentUriUsingTree(
+                    tree,
+                    DocumentsContract.getTreeDocumentId(tree),
+                )
+            val document =
+                DocumentsContract.createDocument(
+                    context.contentResolver,
+                    parent,
+                    "video/mp4",
+                    fileName,
+                ) ?: throw java.io.IOException("Could not create video in the selected folder")
+            MediaFiles.setPending(document.toString(), true)
+            try {
+                (context.contentResolver.openOutputStream(document)
+                        ?: throw java.io.IOException("Could not open the selected folder"))
+                    .use { copyTo(it) }
+                return Pair(document.toString(), document)
+            } catch (e: Exception) {
+                runCatching { DocumentsContract.deleteDocument(context.contentResolver, document) }
+                throw e
+            } finally { MediaFiles.setPending(document.toString(), false) }
+        }
+        val relativeSubDir = publicDirectory(targetFolder)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val contentValues = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
-                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                put(MediaStore.Video.Media.RELATIVE_PATH, relativeSubDir)
-                put(MediaStore.Video.Media.IS_PENDING, 1)
-            }
-
-            val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            val uri = context.contentResolver.insert(collection, contentValues)
-                ?: throw java.io.IOException("Failed to create MediaStore record for $fileName")
-
-            context.contentResolver.openOutputStream(uri).use { out ->
-                if (out == null) throw java.io.IOException("Could not open output stream for $uri")
-                sourceTempFile.inputStream().use { input ->
-                    input.copyTo(out)
+            val values =
+                ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${relativeSubDir.trimEnd('/')}/")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
+            val collection =
+                if (relativeSubDir.substringBefore('/') == "Download") {
+                    MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                } else MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val uri =
+                context.contentResolver.insert(collection, values)
+                    ?: throw java.io.IOException("Could not create video in public storage")
+            try {
+                (context.contentResolver.openOutputStream(uri)
+                        ?: throw java.io.IOException("Could not open video output"))
+                    .use { copyTo(it) }
+                values.clear()
+                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                if (context.contentResolver.update(uri, values, null, null) != 1) {
+                    throw java.io.IOException("Could not publish downloaded video")
+                }
+                // MediaStore may choose a different name to avoid overwriting an existing video.
+                val actualName =
+                    context.contentResolver
+                        .query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)
+                        ?.use { if (it.moveToFirst()) it.getString(0) else fileName } ?: fileName
+                return Pair("/storage/emulated/0/$relativeSubDir/$actualName", uri)
+            } catch (e: Exception) {
+                runCatching { context.contentResolver.delete(uri, null, null) }
+                throw e
             }
-
-            contentValues.clear()
-            contentValues.put(MediaStore.Video.Media.IS_PENDING, 0)
-            context.contentResolver.update(uri, contentValues, null, null)
-
-            val displayPath = "/storage/emulated/0/$relativeSubDir/$fileName"
-            return Pair(displayPath, uri)
-        } else {
-            // Android 9 and lower: direct file copy
-            val publicDir = if (isMovies) {
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-            } else {
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            }
-            val appDir = File(publicDir, "KodikDown")
-            if (!appDir.exists()) appDir.mkdirs()
-
-            var targetFile = File(appDir, fileName)
-            var index = 2
-            while (targetFile.exists()) {
-                targetFile = File(appDir, "$baseFileName ($index).mp4")
-                index++
-            }
-
-            sourceTempFile.copyTo(targetFile, overwrite = true)
-            scanMedia(context, targetFile)
-
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", targetFile)
-            return Pair(targetFile.absolutePath, uri)
         }
+        val directory = File(Environment.getExternalStorageDirectory(), relativeSubDir)
+        if (!directory.isDirectory && !directory.mkdirs())
+            throw java.io.IOException("Could not create download folder")
+        var target = File(directory, fileName)
+        var index = 2
+        while (!target.createNewFile()) {
+            target = File(directory, "${safeFileName(baseFileName)} (${index++}).mp4")
+        }
+        MediaFiles.setPending(target.absolutePath, true)
+        try {
+            target.outputStream().use { copyTo(it) }
+            scanMedia(context, target)
+            return Pair(
+                target.absolutePath,
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", target),
+            )
+        } catch (e: Exception) {
+            target.delete()
+            throw e
+        } finally { MediaFiles.setPending(target.absolutePath, false) }
     }
 
     fun scanMedia(context: Context, file: File) {
@@ -126,26 +211,52 @@ object FileUtils {
                 context.applicationContext,
                 arrayOf(file.absolutePath),
                 arrayOf("video/mp4"),
-                null
+                null,
             )
         } catch (_: Exception) {}
     }
 
-    /**
-     * Opens a folder in the user's preferred file manager.
-     */
+    /** Opens a folder in the user's preferred file manager. */
     fun openFolder(context: Context, targetFolder: String) {
-        val isMovies = targetFolder.contains("Movie", ignoreCase = true)
-        val relativeSubDir = when {
-            targetFolder.contains("/storage/emulated/0/") -> {
-                val sub = targetFolder.substringAfter("/storage/emulated/0/").trim('/')
-                if (sub.isNotEmpty()) sub else if (isMovies) "Movies/KodikDown" else "Download/KodikDown"
+        if (targetFolder.startsWith("content://")) {
+            try {
+                val tree = Uri.parse(targetFolder)
+                val document =
+                    DocumentsContract.buildDocumentUriUsingTree(
+                        tree,
+                        DocumentsContract.getTreeDocumentId(tree),
+                    )
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(document, DocumentsContract.Document.MIME_TYPE_DIR)
+                        addFlags(
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+                        )
+                    }
+                )
+            } catch (e: Exception) {
+                Toast.makeText(
+                        context,
+                        context.getString(R.string.open_folder) + ": " + e.message,
+                        Toast.LENGTH_LONG,
+                    )
+                    .show()
             }
-            targetFolder.startsWith("Download", ignoreCase = true) -> targetFolder
-            targetFolder.startsWith("Movies", ignoreCase = true) -> targetFolder
-            isMovies -> "Movies/KodikDown"
-            else -> "Download/KodikDown"
+            return
         }
+        val isMovies = targetFolder.contains("Movie", ignoreCase = true)
+        val relativeSubDir =
+            when {
+                targetFolder.contains("/storage/emulated/0/") -> {
+                    val sub = targetFolder.substringAfter("/storage/emulated/0/").trim('/')
+                    if (sub.isNotEmpty()) sub
+                    else if (isMovies) "Movies/KodikDown" else "Download/KodikDown"
+                }
+                targetFolder.startsWith("Download", ignoreCase = true) -> targetFolder
+                targetFolder.startsWith("Movies", ignoreCase = true) -> targetFolder
+                isMovies -> "Movies/KodikDown"
+                else -> "Download/KodikDown"
+            }
 
         val dir = File(targetFolder)
         if (!dir.exists()) {
@@ -157,20 +268,25 @@ object FileUtils {
         }
 
         // 1. Try DocumentsContract folder URI with mime "vnd.android.document/directory"
-        val possibleDocIds = listOf(
-            "primary:$relativeSubDir",
-            if (isMovies) "primary:Movies" else "primary:Download",
-            "primary:"
-        )
+        val possibleDocIds =
+            listOf(
+                "primary:$relativeSubDir",
+                if (isMovies) "primary:Movies" else "primary:Download",
+                "primary:",
+            )
 
         for (docId in possibleDocIds) {
             try {
                 val encoded = Uri.encode(docId)
-                val contentUri = Uri.parse("content://com.android.externalstorage.documents/document/$encoded")
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(contentUri, "vnd.android.document/directory")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
+                val contentUri =
+                    Uri.parse("content://com.android.externalstorage.documents/document/$encoded")
+                val intent =
+                    Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(contentUri, "vnd.android.document/directory")
+                        addFlags(
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+                        )
+                    }
                 context.startActivity(intent)
                 return
             } catch (_: Exception) {}
@@ -178,90 +294,126 @@ object FileUtils {
 
         // 2. Try ACTION_VIEW_DOWNLOADS (standard system Downloads view)
         try {
-            val intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
+            val intent =
+                Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
             context.startActivity(intent)
             return
         } catch (_: Exception) {}
 
         // 3. Fallback: FileProvider
         try {
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", dir)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "vnd.android.document/directory")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
+            val uri =
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", dir)
+            val intent =
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "vnd.android.document/directory")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
             context.startActivity(intent)
             return
         } catch (_: Exception) {}
 
-        Toast.makeText(context, "${context.getString(R.string.download_dir)}: $targetFolder", Toast.LENGTH_LONG).show()
+        Toast.makeText(
+                context,
+                "${context.getString(R.string.download_dir)}: $targetFolder",
+                Toast.LENGTH_LONG,
+            )
+            .show()
     }
 
     fun openFile(context: Context, savedPathOrUri: String) {
+        com.shawniks.kodikdown.data.MediaFiles.withAvailable(context, savedPathOrUri) {
+            openFileUnchecked(context, savedPathOrUri)
+        }
+    }
+
+    private fun openFileUnchecked(context: Context, savedPathOrUri: String) {
         try {
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                if (savedPathOrUri.startsWith("content://")) {
-                    setDataAndType(Uri.parse(savedPathOrUri), "video/mp4")
-                } else {
-                    val file = File(savedPathOrUri)
-                    if (file.exists()) {
-                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                        setDataAndType(uri, "video/mp4")
+            val intent =
+                Intent(Intent.ACTION_VIEW).apply {
+                    if (savedPathOrUri.startsWith("content://")) {
+                        setDataAndType(Uri.parse(savedPathOrUri), "video/mp4")
                     } else {
-                        // Might be a public path stored via MediaStore; query MediaStore or Downloads
-                        val uri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                        setDataAndType(uri, "video/mp4")
+                        val file = File(savedPathOrUri)
+                        if (file.exists()) {
+                            val uri =
+                                FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    file,
+                                )
+                            setDataAndType(uri, "video/mp4")
+                        } else {
+                            // Might be a public path stored via MediaStore; query MediaStore or
+                            // Downloads
+                            throw java.io.FileNotFoundException("Video file no longer exists")
+                        }
                     }
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(Intent.createChooser(intent, context.getString(R.string.open_file)).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
+            context.startActivity(
+                Intent.createChooser(intent, context.getString(R.string.open_file)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
         } catch (e: Exception) {
             Toast.makeText(context, "Could not open video: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
     fun shareFile(context: Context, savedPathOrUri: String) {
+        com.shawniks.kodikdown.data.MediaFiles.withAvailable(context, savedPathOrUri) {
+            shareFileUnchecked(context, savedPathOrUri)
+        }
+    }
+
+    private fun shareFileUnchecked(context: Context, savedPathOrUri: String) {
         try {
-            val uri = if (savedPathOrUri.startsWith("content://")) {
-                Uri.parse(savedPathOrUri)
-            } else {
-                val file = File(savedPathOrUri)
-                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            }
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "video/mp4"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(Intent.createChooser(intent, context.getString(R.string.share_file)).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
+            val uri =
+                if (savedPathOrUri.startsWith("content://")) {
+                    Uri.parse(savedPathOrUri)
+                } else {
+                    val file = File(savedPathOrUri)
+                    FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                }
+            val intent =
+                Intent(Intent.ACTION_SEND).apply {
+                    type = "video/mp4"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            context.startActivity(
+                Intent.createChooser(intent, context.getString(R.string.share_file)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
         } catch (e: Exception) {
-            Toast.makeText(context, "Could not share video: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Could not share video: ${e.message}", Toast.LENGTH_SHORT)
+                .show()
         }
     }
 
     fun formatFileSize(bytes: Long): String {
         if (bytes <= 0) return "0 Б"
         val units = arrayOf("Б", "КБ", "МБ", "ГБ", "ТБ")
-        val digitGroups = (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt().coerceIn(0, units.size - 1)
+        val digitGroups =
+            (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt().coerceIn(0, units.size - 1)
         val value = bytes / Math.pow(1024.0, digitGroups.toDouble())
         return String.format(java.util.Locale.US, "%.1f %s", value, units[digitGroups])
     }
 
     fun deleteFile(context: Context, pathOrUri: String): Boolean {
+        if (MediaFiles.isPending(pathOrUri)) return false
         return try {
             if (pathOrUri.startsWith("content://")) {
                 val uri = Uri.parse(pathOrUri)
-                val rows = context.contentResolver.delete(uri, null, null)
-                rows > 0
+                if (DocumentsContract.isDocumentUri(context, uri)) {
+                    DocumentsContract.deleteDocument(context.contentResolver, uri)
+                } else context.contentResolver.delete(uri, null, null) > 0
             } else {
                 val file = File(pathOrUri)
                 if (file.exists()) file.delete() else false

@@ -21,14 +21,14 @@
             android:layout_height="44dp"
             android:background="@drawable/bg_button_secondary">
 
-            <ImageView
+            <ImageView android:contentDescription="@null"
                 android:id="@+id/ivThumbnail"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:scaleType="centerCrop"
                 android:visibility="gone" />
 
-            <ImageView
+            <ImageView android:contentDescription="@null"
                 android:id="@+id/ivPlaceholder"
                 android:layout_width="22dp"
                 android:layout_height="22dp"
@@ -47,7 +47,7 @@
                 android:paddingEnd="4dp"
                 android:paddingBottom="1dp"
                 android:textColor="?attr/app_text"
-                android:textSize="9sp"
+                android:textSize="11sp"
                 tools:text="720p" />
         </FrameLayout>
 
@@ -79,10 +79,20 @@
                 android:textSize="11sp"
                 tools:text="142.5 МБ • 18 окт., 20:45" />
         </LinearLayout>
+
+        <!-- Selection Checkbox -->
+        <ImageView
+            android:id="@+id/ivSelectCheck"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_marginStart="8dp"
+            android:contentDescription="@null"
+            android:src="@drawable/ic_checkbox_unchecked"
+            android:visibility="gone" />
     </LinearLayout>
 
     <!-- Action Buttons Row -->
-    <LinearLayout
+    <com.shawniks.kodikdown.ui.AdaptiveRow
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
@@ -93,7 +103,8 @@
         <LinearLayout
             android:id="@+id/btnPlay"
             android:layout_width="0dp"
-            android:layout_height="34dp"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
             android:layout_weight="1"
             android:background="@drawable/bg_button_primary"
             android:gravity="center"
@@ -101,7 +112,7 @@
             android:paddingStart="10dp"
             android:paddingEnd="10dp">
 
-            <ImageView
+            <ImageView android:contentDescription="@null"
                 android:layout_width="14dp"
                 android:layout_height="14dp"
                 android:src="@drawable/ic_play"
@@ -121,7 +132,8 @@
         <LinearLayout
             android:id="@+id/btnShare"
             android:layout_width="wrap_content"
-            android:layout_height="34dp"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
             android:layout_marginStart="8dp"
             android:background="@drawable/bg_button_secondary"
             android:gravity="center"
@@ -129,7 +141,7 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp">
 
-            <ImageView
+            <ImageView android:contentDescription="@null"
                 android:layout_width="14dp"
                 android:layout_height="14dp"
                 android:src="@drawable/ic_share"
@@ -155,6 +167,6 @@
             android:padding="8dp"
             android:src="@drawable/ic_trash"
             app:tint="?attr/app_danger" />
-    </LinearLayout>
+    </com.shawniks.kodikdown.ui.AdaptiveRow>
 
 </LinearLayout>

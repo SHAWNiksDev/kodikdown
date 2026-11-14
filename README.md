@@ -1,207 +1,159 @@
-# KodikDown 🇬🇧
+<div align="center">
+
+# KodikDown
+
+**Скачать видео из плеера Kodik и посмотреть позже — на телефоне или компьютере.**
+
+[Скачать 4.0.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.0.0) · [Сообщить об ошибке](https://github.com/SHAWNiksDev/kodikdown/issues/new) · [Что изменилось](CHANGELOG.md) · [English](README.en.md)
 
 [![CI](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml/badge.svg)](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/SHAWNiksDev/kodikdown)](https://github.com/SHAWNiksDev/kodikdown/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-A lightweight cross-platform downloader for videos and series hosted on Kodik players. Available as a native Android app, a desktop application for Windows and Linux, and a standalone CLI.
+<img src="docs/main-dark.png" width="940" alt="KodikDown 4.0.0 на Linux: выбор качества и озвучки, ход загрузки и готовое видео" />
 
-<p align="center">
-  <img src="docs/main-dark.png" width="800" alt="KodikDown Desktop" />
-</p>
+</div>
 
-### Android App
+KodikDown принимает ссылку на плеер или целиком его `<iframe>`, находит доступные озвучки и качества и сохраняет выбранное видео. На ПК есть графический интерфейс и консольная версия, на Android — отдельное нативное приложение.
 
-<p align="center">
-  <img src="docs/screenshots/android-main.png" width="220" alt="Downloader Screen" />
-  &nbsp;&nbsp;
-  <img src="docs/screenshots/android-download.png" width="220" alt="Active Download" />
-  &nbsp;&nbsp;
-  <img src="docs/screenshots/android-library.png" width="220" alt="Video Library" />
-  &nbsp;&nbsp;
-  <img src="docs/screenshots/android-history.png" width="220" alt="Download History" />
-</p>
+## Скачать и запустить
 
-## Highlights
+Готовые файлы находятся в [релизе 4.0.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.0.0):
 
-- **Mobile & Desktop**: Native Android app (Material 3) alongside desktop builds for Windows and Linux.
-- **Android Background Downloads**: Uses an Android Foreground Service with WakeLock — downloads keep running when the screen is turned off or while using other apps.
-- **Video Library & History**: Dedicated tabs on Android to browse, play offline, share, or delete saved videos, plus a log of all transfers and duplicate download warnings.
-- **Direct API Resolution**: Resolves player tokens and decrypts HLS streams on the fly without running a browser instance.
-- **Quality Auto-Fallback**: Automatically requests 720p streams, and smoothly steps down to 480p or 360p if CDN nodes restrict high-definition chunks.
-- **High-Speed Downloads**: Parallel chunk streaming with an expanded 1 MB socket buffer.
-- **Flexible Input**: Paste direct URLs, protocol-relative links, raw `<iframe>` embed codes, or text copied with markdown formatting.
-- **Voice-over Selection**: Pick any available translation or dub track offered by the player.
-- **Modern Desktop UI**: Dark and light themes matching system preferences, keyboard shortcuts (`Ctrl+S`, `Ctrl+Q`), and live download progress with speed and ETA.
-- **Scriptable CLI**: Standalone `kodikdown-cli` binary for automation and headless environments.
-
-## Download & Install
-
-Prebuilt binaries are available on the [Releases](https://github.com/SHAWNiksDev/kodikdown/releases) page:
-
-| Platform | Download | Description |
+| Платформа | Файл | Как запустить |
 | --- | --- | --- |
-| **Android** | `kodikdown-android.apk` | Native Android app (Android 7.0+) |
-| **Windows** | `kodikdown-windows-x86_64.exe` | Desktop GUI for Windows 10/11 |
-| **Windows** | `kodikdown-windows-x86_64-cli.exe` | Command-line tool for Windows |
-| **Linux** | `kodikdown-linux-x86_64` | Desktop GUI for Linux |
-| **Linux** | `kodikdown-linux-x86_64-cli` | Command-line tool for Linux |
-
-### From Source (Python 3.11+)
+| Android 7.0 и новее | `kodikdown-android.apk` | Откройте APK и разрешите установку из выбранного источника |
+| Linux x64 | `kodikdown-linux-x86_64` | Разрешите выполнение файла и откройте его |
+| Linux x64, консоль | `kodikdown-linux-x86_64-cli` | Запустите из терминала |
 
 ```bash
-pip install .
-
-kodikdown                          # launch the desktop window
-kodikdown "<link>"                 # launch window and resolve link immediately
-kodikdown-cli download "<url>"     # download directly from terminal
+chmod +x kodikdown-linux-x86_64
+./kodikdown-linux-x86_64
 ```
 
-## CLI Usage
+Для готовых сборок Python не нужен. На Linux нужен графический сеанс; для сборки HLS-видео установите **FFmpeg** и проверьте, что `ffmpeg -version` работает в терминале. FFmpeg не включён в исполняемый файл.
 
-```bash
-# Basic download (default best quality)
-kodikdown-cli download "https://kodikplayer.com/seria/1304528/<hash>/720p" -o ~/Videos
+В этом выпуске проверены Android и Linux. Код интерфейса ПК общий с Windows, но готовая Windows-сборка 4.0.0 пока не выпускается. Запуск из исходников описан ниже.
 
-# Choose quality and output file name
-kodikdown-cli download "<url>" -q 720 -n "Episode_01.mp4"
+Если новый APK не устанавливается поверх старой тестовой версии, удалите её и установите новый APK: подпись релиза изменилась. При удалении приложения сбросятся настройки и история; видео в общей папке загрузок останутся. Следующие релизы будут использовать тот же ключ подписи.
 
-# Inspect available streams and voice-overs without downloading
-kodikdown-cli download "<url>" --list-qualities
-kodikdown-cli download "<url>" --list-translations
+## Как пользоваться
 
-# Select a specific voice-over by name or number
-kodikdown-cli download "<url>" -t AniLibria -q 720
+1. Скопируйте ссылку **на сам плеер Kodik** или его код `<iframe>`.
+2. Вставьте её в приложение и нажмите «Найти видео».
+3. Выберите озвучку, качество и, если нужно, имя файла.
+4. Нажмите «Скачать». Готовое видео появится в библиотеке.
 
-# Output direct decrypted stream URL
-kodikdown-cli download "<url>" --print-url -q 720
-```
+Можно вставлять ссылку с `https://`, без протокола (`//…`), внутри текста или Markdown. Ссылка на страницу кинотеатра не всегда ведёт прямо на плеер.
 
-## Building
+## Что умеет приложение
 
-### Desktop Builds
+- Выбирать качество и озвучку из вариантов, которые отдаёт плеер.
+- Скачивать несколько видео и показывать прогресс, скорость и оставшееся время, когда сервер передаёт нужные данные.
+- Повторять запросы после сетевых ошибок; при недоступности качества пробовать доступный вариант ниже.
+- Проверять наличие готовых файлов, предупреждать перед повторной загрузкой и сохранять исходную ссылку в истории.
+- Применять настройки сразу. Успешное сохранение обозначается маленьким значком в углу, без всплывающей очереди сообщений.
+- Работать на русском и английском, в светлой и тёмной теме.
 
-```bash
-pip install -e '.[dev]'
-pytest
-pyinstaller packaging/kodikdown.spec --noconfirm
-pyinstaller packaging/kodikdown-cli.spec --noconfirm
-```
+### На компьютере
 
-### Android APK
+Четыре вкладки — «Загрузки», «Библиотека», «История» и «Настройки» — находятся в одном окне. Крестик сворачивает приложение в трей, загрузки продолжаются. Для полного выхода выберите «Выйти» в меню трея или нажмите `Ctrl+Q`. Если рабочий стол не предоставляет трей, окно сворачивается на панель задач.
 
-```bash
-bash android/build.sh
-# or via Gradle:
-cd android && ./gradlew assembleDebug
-```
-The APK is saved to `packaging/kodikdown-android.apk`.
+`Ctrl+S` открывает настройки, `Esc` возвращает назад или отменяет поиск. Для выбора нескольких завершённых загрузок используйте `Ctrl` + щелчок. Активные задачи нельзя удалить из списка; отмена выполняется отдельным крестиком с подтверждением. Папка и параметры загрузки блокируются, пока идёт поиск или скачивание.
 
-## License
+<details>
+<summary>Светлая тема и настройки</summary>
 
-MIT License. See [LICENSE](LICENSE) for details.
+<img src="docs/main-light.png" width="940" alt="Светлая тема KodikDown на ПК" />
+<img src="docs/screenshots/desktop-settings.png" width="940" alt="Настройки KodikDown внутри главного окна" />
 
----
+</details>
 
-# KodikDown 🇷🇺
-
-[![CI](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml/badge.svg)](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/SHAWNiksDev/kodikdown)](https://github.com/SHAWNiksDev/kodikdown/releases)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-
-Удобный и быстрый загрузчик видео и сериалов с плеера Kodik. Доступен в виде нативного Android-приложения, десктопной программы для Windows и Linux, а также отдельной консольной утилиты.
+### На Android
 
 <p align="center">
-  <img src="docs/main-dark.png" width="800" alt="KodikDown для ПК" />
+  <img src="docs/screenshots/android-download.png" width="245" alt="Прогресс загрузки на Android" />
+  <img src="docs/screenshots/android-library.png" width="245" alt="Библиотека видео на Android" />
+  <img src="docs/screenshots/android-settings.png" width="245" alt="Настройки Android-приложения" />
 </p>
 
-### Android-приложение
+Загрузки работают в фоне с уведомлением. Видео можно открыть или отправить через установленные приложения. Папка выбирается через системный диалог; доступны свайпы и выделение завершённых задач, подтверждения отмены и удаления, тактильный отклик.
 
-<p align="center">
-  <img src="docs/screenshots/android-main.png" width="220" alt="Экран загрузчика" />
-  &nbsp;&nbsp;
-  <img src="docs/screenshots/android-download.png" width="220" alt="Активная загрузка" />
-  &nbsp;&nbsp;
-  <img src="docs/screenshots/android-library.png" width="220" alt="Библиотека видео" />
-  &nbsp;&nbsp;
-  <img src="docs/screenshots/android-history.png" width="220" alt="История загрузок" />
-</p>
+На Android 7–9 может потребоваться разрешение на хранилище. Для папки, выбранной через системный диалог, используется выданный ей доступ. После принудительной остановки приложения или перезагрузки телефона незавершённую загрузку нужно запустить заново; история сохраняется. Ограничения батареи производителя могут влиять на работу в фоне.
 
-## Главные возможности
+Скриншоты сделаны на демонстрационных данных. Названия, ссылки и пути на них — примеры.
 
-- **Кроссплатформенность**: Нативное приложение под Android (Material 3) и десктопные сборки для Windows и Linux.
-- **Фоновая загрузка на телефоне**: Android Foreground Service с WakeLock — загрузка не обрывается при выключенном экране или переключении между приложениями.
-- **Библиотека и история**: Вкладки «Библиотека» (просмотр, отправка в другие приложения, удаление) и «История» всех серий с предупреждением, если файл уже скачивался.
-- **Прямая работа с API**: Получение ссылок и расшифровка HLS-потоков на лету напрямую с серверов плеера.
-- **Автоматический фоллбэк**: Запрашивает 720p, а если CDN временно отдаёт 404/403 — плавно переключается на рабочие 480p или 360p.
-- **Высокая скорость**: Параллельная загрузка фрагментов потока с увеличенным 1 МБ буфером сокетов.
-- **Любые ссылки**: Принимает обычные URL, ссылки без протокола, готовый код `<iframe>` и ссылки с Markdown-разметкой.
-- **Выбор озвучки**: Поддерживает все доступные в плеере варианты озвучки и перевода.
-- **Удобный десктопный интерфейс**: Светлая и тёмная темы, горячие клавиши (`Ctrl+S`, `Ctrl+Q`), параллельные загрузки и открытие папки с готовым видео в один клик.
-- **Консольный режим (CLI)**: Быстрая работа через терминал и поддержка скриптов автоматизации.
+## Консоль
 
-## Скачивание и установка
-
-Готовые файлы можно скачать в разделе [Releases](https://github.com/SHAWNiksDev/kodikdown/releases):
-
-| Платформа | Файл | Описание |
-| --- | --- | --- |
-| **Android** | `kodikdown-android.apk` | Нативное приложение (Android 7.0+) |
-| **Windows** | `kodikdown-windows-x86_64.exe` | Графический интерфейс для Windows 10/11 |
-| **Windows** | `kodikdown-windows-x86_64-cli.exe` | Консольная утилита для Windows |
-| **Linux** | `kodikdown-linux-x86_64` | Графический интерфейс для Linux |
-| **Linux** | `kodikdown-linux-x86_64-cli` | Консольная утилита для Linux |
-
-### Установка из исходников (Python 3.11+)
+В примерах `kodikdown-cli` — установленная команда. Для готовой Linux-сборки используйте `./kodikdown-linux-x86_64-cli`.
 
 ```bash
-pip install .
+# Скачать видео в выбранную папку
+kodikdown-cli download "<ссылка-на-плеер>" -o "./Videos"
 
-kodikdown                          # запуск графического интерфейса
-kodikdown "<ссылка>"               # запуск с автопоиском по ссылке
-kodikdown-cli download "<ссылка>"  # скачивание через консоль
-```
+# Указать озвучку, качество и имя файла
+kodikdown-cli download "<ссылка>" -t "Озвучка" -q 720 -n "Серия 01"
 
-## Примеры команд в терминале
-
-```bash
-# Простое скачивание видео
-kodikdown-cli download "https://kodikplayer.com/seria/1304528/<hash>/720p" -o ~/Видео
-
-# Задать качество и свое имя файла
-kodikdown-cli download "<ссылка>" -q 720 -n "Серия_01.mp4"
-
-# Посмотреть доступные качества и озвучки без скачивания
+# Посмотреть доступные варианты
 kodikdown-cli download "<ссылка>" --list-qualities
 kodikdown-cli download "<ссылка>" --list-translations
 
-# Выбрать нужную озвучку по названию или номеру
-kodikdown-cli download "<ссылка>" -t AniLibria -q 720
+# Получить ссылку потока без скачивания
+kodikdown-cli download "<ссылка>" --print-url -q 480
 
-# Получить прямую ссылку на расшифрованный манифест
-kodikdown-cli download "<ссылка>" --print-url -q 720
+kodikdown-cli download --help
 ```
 
-## Сборка
+Если выбранного качества нет, используется ближайшее доступное меньшее, а при его отсутствии — минимальное. Ссылки потока могут истекать: для новой попытки лучше снова использовать исходную ссылку на плеер.
 
-### Десктопная версия
+## Запуск из исходников
+
+Нужны Python 3.11+, FFmpeg и графическое окружение для интерфейса ПК.
 
 ```bash
-pip install -e '.[dev]'
-pytest
+git clone https://github.com/SHAWNiksDev/kodikdown.git
+cd kodikdown
+python -m venv .venv
+```
+
+Активируйте окружение: `source .venv/bin/activate` в Linux или `.venv\Scripts\Activate.ps1` в Windows PowerShell. Затем:
+
+```bash
+python -m pip install .
+kodikdown
+# Или:
+kodikdown-cli download "<ссылка-на-плеер>"
+```
+
+## Разработка
+
+```bash
+python -m pip install -e ".[dev]"
+ruff check src tests
+ruff format --check src tests
+mypy
+QT_QPA_PLATFORM=offscreen pytest
+
 pyinstaller packaging/kodikdown.spec --noconfirm
 pyinstaller packaging/kodikdown-cli.spec --noconfirm
 ```
 
-### Сборка Android APK
+Файлы сборки появятся в `dist/`. В PowerShell задайте `QT_QPA_PLATFORM` через `$env:QT_QPA_PLATFORM="offscreen"`. Интеграционным тестам нужен локальный HTTP-сервер.
+
+Для Android нужны JDK 17 и Android SDK 35 с Build Tools 35.0.0. Укажите SDK через `ANDROID_HOME` или локальный `android/local.properties`.
 
 ```bash
-bash android/build.sh
-# или через Gradle:
-cd android && ./gradlew assembleDebug
+bash android/build.sh            # тесты, lint и debug APK
+bash android/build.sh --release  # подписанный release APK
 ```
-Собранный файл будет находиться в `packaging/kodikdown-android.apk`.
+
+Для релиза настройте `android/keystore.properties` по параметрам из `android/app/build.gradle.kts`. Ключ и пароли хранятся локально и исключены из Git. Сохраните резервную копию ключа: он нужен для последующих обновлений. GitHub Actions проверяет готовый подписанный APK; закрытый ключ туда передавать не требуется.
+
+## Если что-то не работает
+
+При ошибках 403/404 повторите поиск или выберите качество ниже. Для ошибки сборки файла проверьте FFmpeg и свободное место. Если проблема остаётся, [создайте issue](https://github.com/SHAWNiksDev/kodikdown/issues/new): версия приложения, ОС, ссылка на плеер, если её можно публиковать, и шаги воспроизведения помогут разобраться.
+
+Android поддерживает прямой MP4 и завершённые незашифрованные HLS-потоки с MPEG-TS или fMP4, включая диапазоны байтов. Отдельные аудиодорожки, шифрование, смена инициализационных сегментов и разрывы HLS пока не поддерживаются. На ПК обработкой потоков занимается `yt-dlp`. Доступность зеркал и набор качеств зависят от Kodik.
 
 ## Лицензия
 
-Распространяется под лицензией MIT. Подробнее — в файле [LICENSE](LICENSE).
+[MIT](LICENSE). KodikDown — независимый проект. Сохраняйте только материалы, на скачивание которых у вас есть право.

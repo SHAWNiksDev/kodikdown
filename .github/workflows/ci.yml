@@ -62,8 +62,75 @@ jobs:
           python-version: "3.12"
       - run: pip install -e '.[dev]'
       - run: pyinstaller packaging/kodikdown.spec --noconfirm
+      - run: pyinstaller packaging/kodikdown-cli.spec --noconfirm
       - run: test -x dist/kodikdown
+      - run: dist/kodikdown-cli --version
       - uses: actions/upload-artifact@v4
         with:
           name: kodikdown-linux-preview
           path: dist/kodikdown
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - run: ./gradlew testDebugUnitTest lintDebug assembleDebug
+        working-directory: android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kodikdown-android-preview
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+  android-device:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 24
+            profile: Nexus 5
+          - api: 34
+            profile: Nexus 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Enable KVM for emulator tests
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          profile: ${{ matrix.profile }}
+          disable-animations: true
+          script: |
+            cd android && ./gradlew installDebug installDebugAndroidTest
+            adb shell pm grant com.shawniks.kodikdown android.permission.READ_EXTERNAL_STORAGE || true
+            adb shell pm grant com.shawniks.kodikdown android.permission.WRITE_EXTERNAL_STORAGE || true
+            adb shell pm grant com.shawniks.kodikdown android.permission.POST_NOTIFICATIONS || true
+            adb shell am instrument -r -w -e class com.shawniks.kodikdown.HistoryDeviceTest,com.shawniks.kodikdown.SettingsDeviceTest,com.shawniks.kodikdown.RemuxDeviceTest,com.shawniks.kodikdown.ReliabilityDeviceTest,com.shawniks.kodikdown.ResponsiveDeviceTest com.shawniks.kodikdown.test/android.test.InstrumentationTestRunner | tee android-device-results.txt
+            ! grep -E 'FAILURES!!!|INSTRUMENTATION_FAILED|INSTRUMENTATION_ABORTED|shortMsg=|Process crashed' android-device-results.txt
+            grep -E 'OK \([0-9]+ tests?\)' android-device-results.txt
+      - name: Save emulator logs
+        if: always()
+        run: adb logcat -b all -d > android-device-logcat.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-device-api-${{ matrix.api }}
+          path: |
+            **/android-device-results.txt
+            android-device-logcat.txt

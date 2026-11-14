@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import re
 from typing import Any
 
 import httpx
@@ -63,6 +62,8 @@ def build_variants(data: dict[str, Any]) -> tuple[StreamVariant, ...]:
         if not isinstance(key, str) or not key.isdigit() or not isinstance(entries, list):
             continue
         quality = int(key)
+        if quality <= 0:
+            continue
 
         best: StreamVariant | None = None
         best_rank = 4
@@ -77,12 +78,6 @@ def build_variants(data: dict[str, Any]) -> tuple[StreamVariant, ...]:
                 continue
             url, _shift = decoded
             url = normalise_url(url)
-
-            # If the decoded stream URL carries a lower resolution filename
-            # (e.g. /480.mp4 under quality 720), promote the path to match the quality
-            file_match = re.search(r"/(\d{3,4})\.mp4", url)
-            if file_match and quality > int(file_match.group(1)):
-                url = re.sub(r"/(\d{3,4})\.mp4(?=(:hls|\?|$))", f"/{quality}.mp4", url, count=1)
 
             kind, direct_mp4 = stream_kind(url)
             best = StreamVariant(
@@ -118,7 +113,7 @@ class KodikClient:
         self._http = http or build_client(timeout=timeout or DEFAULT_TIMEOUT)
         self._owns_http = http is None
         self._hosts = hosts
-        self._endpoint_cache: dict[str, str] = {}
+        self._endpoint_cache: dict[tuple[str, str], str] = {}
         self._preferred_host: str | None = None
 
     async def __aenter__(self) -> KodikClient:
@@ -143,7 +138,7 @@ class KodikClient:
             try:
                 async with asyncio.timeout(_TOTAL_TIMEOUT):
                     resolved = await self._resolve_on(host, embed, translation)
-            except (RequestFailedError, NoStreamsError, TimeoutError) as exc:
+            except (RequestFailedError, NoStreamsError, PageStructureError, TimeoutError) as exc:
                 last_error = (
                     exc
                     if not isinstance(exc, TimeoutError)
@@ -260,17 +255,17 @@ class KodikClient:
         return _parse_reply(response, "GET")
 
     async def _endpoint_for(self, host: str, page: PlayerPage) -> str:
-        cached = self._endpoint_cache.get(host)
+        cached = self._endpoint_cache.get((host, page.player_js_path))
+        if cached:
+            return cached
         if not page.player_js_path:
-            if cached:
-                return cached
             raise PageStructureError("page does not link the player script")
 
         player_js = await self._get_text(
             f"https://{host}/{page.player_js_path}", referer=f"https://{host}/"
         )
         endpoint = extract_endpoint(player_js)
-        self._endpoint_cache[host] = endpoint
+        self._endpoint_cache[host, page.player_js_path] = endpoint
         return endpoint
 
     # -- transport ---------------------------------------------------------

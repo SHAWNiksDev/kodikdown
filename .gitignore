@@ -25,5 +25,20 @@ android/.gradle/
 android/.tooling/
 android/app/build/
 android/local.properties
+android/.signing/
+android/keystore.properties
+*.jks
+*.keystore
 *.apk
 !packaging/kodikdown-android.apk
+
+# Local tooling, credentials and device QA evidence stay on the developer machine.
+/.agents/
+/.codex/
+/.aws/
+.env
+.env.*
+*.pem
+*.key
+/docs/*-validation.md
+/docs/*-validation/

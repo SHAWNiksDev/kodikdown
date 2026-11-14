@@ -1,6 +1,3 @@
-from importlib.metadata import PackageNotFoundError, version
+"""KodikDown package version, also used by Hatch when building distributions."""
 
-try:
-    __version__ = version("kodikdown")
-except PackageNotFoundError:
-    __version__ = "0.0.dev0"
+__version__ = "4.0.0"

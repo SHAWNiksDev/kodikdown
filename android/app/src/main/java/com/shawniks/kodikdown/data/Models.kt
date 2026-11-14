@@ -9,7 +9,7 @@ data class EmbedInfo(
     val videoId: String,
     val contentHash: String,
     val quality: Int? = null,
-    val query: String = ""
+    val query: String = "",
 ) {
     val path: String
         get() {
@@ -26,18 +26,14 @@ data class EmbedInfo(
         get() = "kodik-$videoId"
 }
 
-data class PlayerPayload(
-    val mediaType: String,
-    val videoId: String,
-    val contentHash: String
-) {
+data class PlayerPayload(val mediaType: String, val videoId: String, val contentHash: String) {
     fun asForm(): Map<String, String> {
         return mapOf(
             "type" to mediaType,
             "id" to videoId,
             "hash" to contentHash,
             "bad_user" to "true",
-            "cdn_is_working" to "true"
+            "cdn_is_working" to "true",
         )
     }
 }
@@ -49,9 +45,10 @@ data class Translation(
     val contentHash: String,
     val translationId: String = "",
     val kind: String = "voice",
-    val selected: Boolean = false
+    val selected: Boolean = false,
 ) {
-    val isSubtitles: Boolean get() = kind == "subtitles"
+    val isSubtitles: Boolean
+        get() = kind == "subtitles"
 
     fun asPayload(): PlayerPayload {
         return PlayerPayload(mediaType, mediaId, contentHash)
@@ -64,7 +61,7 @@ data class PlayerPage(
     val title: String? = null,
     val urlParams: Map<String, String> = emptyMap(),
     val translations: List<Translation> = emptyList(),
-    val currentTranslation: Translation? = null
+    val currentTranslation: Translation? = null,
 ) {
     fun signedForm(targetPayload: PlayerPayload): Map<String, String> {
         val fields = targetPayload.asForm().toMutableMap()
@@ -75,11 +72,12 @@ data class PlayerPage(
             }
         }
         val rawRef = urlParams["ref"].orEmpty()
-        val ref = try {
-            URLDecoder.decode(rawRef, StandardCharsets.UTF_8.name()).trim()
-        } catch (_: Exception) {
-            rawRef.trim()
-        }
+        val ref =
+            try {
+                URLDecoder.decode(rawRef.replace("+", "%2B"), StandardCharsets.UTF_8.name()).trim()
+            } catch (_: Exception) {
+                rawRef.trim()
+            }
         if (ref.isNotEmpty()) {
             fields["ref"] = ref
             val refSign = urlParams["ref_sign"]
@@ -95,9 +93,10 @@ data class StreamVariant(
     val quality: Int,
     val url: String,
     val kind: String = "hls",
-    val directMp4: String? = null
+    val directMp4: String? = null,
 ) {
-    val label: String get() = "${quality}p"
+    val label: String
+        get() = "${quality}p"
 }
 
 data class ResolvedVideo(
@@ -106,7 +105,7 @@ data class ResolvedVideo(
     val translations: List<Translation> = emptyList(),
     val translation: Translation? = null,
     val defaultQuality: Int? = null,
-    val warnings: List<String> = emptyList()
+    val warnings: List<String> = emptyList(),
 ) {
     val best: StreamVariant
         get() = variants.firstOrNull() ?: throw NoSuchElementException("no variants available")
@@ -128,7 +127,7 @@ enum class DownloadStatus {
     ASSEMBLING,
     FINISHED,
     FAILED,
-    CANCELLED
+    CANCELLED,
 }
 
 data class DownloadItem(
@@ -138,18 +137,28 @@ data class DownloadItem(
     val url: String,
     val quality: Int,
     val isMp4: Boolean,
-    var status: DownloadStatus = DownloadStatus.QUEUED,
-    var progress: Float = 0f,
-    var downloadedBytes: Long = 0L,
-    var totalBytes: Long? = null,
-    var speedBytesPerSec: Long = 0L,
-    var etaSeconds: Long? = null,
-    var savedPath: String? = null,
-    var contentUri: String? = null,
-    var errorMessage: String? = null
+    val status: DownloadStatus = DownloadStatus.QUEUED,
+    val progress: Float = 0f,
+    val downloadedFragments: Int = 0,
+    val fragmentCount: Int = 0,
+    val waitingForNetwork: Boolean = false,
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long? = null,
+    val speedBytesPerSec: Long = 0L,
+    val etaSeconds: Long? = null,
+    val savedPath: String? = null,
+    val contentUri: String? = null,
+    val errorMessage: String? = null,
+    val sourceInput: String? = null,
 ) {
-    val isFinished: Boolean get() = status == DownloadStatus.FINISHED
-    val isTerminal: Boolean get() = status == DownloadStatus.FINISHED || status == DownloadStatus.FAILED || status == DownloadStatus.CANCELLED
+    val isFinished: Boolean
+        get() = status == DownloadStatus.FINISHED
+
+    val isTerminal: Boolean
+        get() =
+            status == DownloadStatus.FINISHED ||
+                status == DownloadStatus.FAILED ||
+                status == DownloadStatus.CANCELLED
 }
 
 data class AppSettings(
@@ -157,7 +166,14 @@ data class AppSettings(
     val language: String = "auto",
     val theme: String = "auto",
     val concurrentDownloads: Int = 3,
-    val preferMp4: Boolean = false
+    val preferMp4: Boolean = false,
+    val defaultQuality: String = "ask",
+    val wifiOnly: Boolean = false,
+    val autoPaste: Boolean = false,
+    val hapticFeedback: Boolean = true,
+    val swipeToDelete: Boolean = true,
+    val confirmSwipeDelete: Boolean = false,
+    val confirmCancelDownload: Boolean = true,
 )
 
 data class HistoryItem(
@@ -168,12 +184,13 @@ data class HistoryItem(
     val quality: Int,
     val translation: String? = null,
     val isMp4: Boolean = false,
-    var status: DownloadStatus = DownloadStatus.FINISHED,
-    var savedPath: String? = null,
-    var contentUri: String? = null,
-    var fileSize: Long = 0L,
+    val status: DownloadStatus = DownloadStatus.FINISHED,
+    val savedPath: String? = null,
+    val contentUri: String? = null,
+    val fileSize: Long = 0L,
     val timestamp: Long = System.currentTimeMillis(),
-    var errorMessage: String? = null
+    val errorMessage: String? = null,
+    val sourceInput: String? = null,
 )
 
 data class LibraryItem(
@@ -185,5 +202,5 @@ data class LibraryItem(
     val fileSizeBytes: Long,
     val dateModified: Long,
     val quality: Int? = null,
-    val isMp4: Boolean = true
+    val isMp4: Boolean = true,
 )

@@ -1,0 +1,236 @@
+"""Persistent download history and background storage checks for the desktop UI."""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import math
+import os
+import tempfile
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
+from typing import TypedDict, Unpack
+
+from PySide6.QtCore import QObject, QRunnable, Signal
+
+from kodikdown.downloader import is_pending_output
+
+
+@dataclass(frozen=True)
+class HistoryEntry:
+    id: str
+    title: str
+    file_name: str
+    source_input: str
+    quality: int
+    created: float
+    status: str = "queued"
+    translation: str = ""
+    prefer_mp4: bool = False
+    path: str = ""
+    error: str = ""
+    file_size: int = 0
+
+    @classmethod
+    def from_json(cls, raw: object) -> HistoryEntry | None:
+        if not isinstance(raw, dict):
+            return None
+        required = ("id", "title", "file_name", "source_input")
+        if any(not isinstance(raw.get(key), str) for key in required):
+            return None
+        if type(raw.get("quality")) is not int or type(raw.get("created")) not in (int, float):
+            return None
+        allowed = {name: value for name, value in raw.items() if name in cls.__dataclass_fields__}
+        if any(
+            not isinstance(allowed.get(key, ""), str)
+            for key in ("status", "translation", "path", "error")
+        ):
+            return None
+        if not 0 <= raw["created"] <= 253402300799 or not math.isfinite(raw["created"]):
+            return None
+        if type(allowed.get("prefer_mp4", False)) is not bool:
+            allowed["prefer_mp4"] = False
+        if type(allowed.get("file_size", 0)) is not int or allowed.get("file_size", 0) < 0:
+            allowed["file_size"] = 0
+        entry = cls(**allowed)
+        if entry.status in ("queued", "downloading", "assembling"):
+            entry = replace(entry, status="interrupted", error="")
+        return entry
+
+
+class HistoryChanges(TypedDict, total=False):
+    status: str
+    path: str
+    quality: int
+    error: str
+    file_size: int
+
+
+class HistoryStore:
+    def __init__(self, path: Path, on_error: Callable[[str], None] | None = None) -> None:
+        self.path = path
+        self._on_error = on_error
+        self._entries: dict[str, HistoryEntry] = {}
+        self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kodikdown-history")
+        self._pending: Future[None] | None = None
+        self._closed = False
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, list):
+                for item in raw:
+                    entry = HistoryEntry.from_json(item)
+                    if entry is not None:
+                        self._entries[entry.id] = entry
+        except (OSError, ValueError):
+            pass
+
+    @property
+    def entries(self) -> tuple[HistoryEntry, ...]:
+        return tuple(sorted(self._entries.values(), key=lambda entry: entry.created, reverse=True))
+
+    def get(self, identifier: str) -> HistoryEntry | None:
+        return self._entries.get(identifier)
+
+    def put(self, entry: HistoryEntry) -> None:
+        self._entries[entry.id] = entry
+        self._save()
+
+    def update(self, identifier: str, **changes: Unpack[HistoryChanges]) -> None:
+        old = self.get(identifier)
+        if old is not None:
+            updated = replace(old, **changes)
+            if updated != old:
+                self.put(updated)
+
+    def remove(self, identifiers: set[str], protected: set[str]) -> None:
+        for identifier in identifiers - protected:
+            self._entries.pop(identifier, None)
+        self._save()
+
+    def clear(self, protected: set[str]) -> None:
+        self.remove(set(self._entries), protected)
+
+    def _save(self) -> None:
+        if self._closed:
+            return
+        payload = json.dumps([asdict(entry) for entry in self.entries], ensure_ascii=False)
+        self._pending = self._writer.submit(self._write, payload)
+        self._pending.add_done_callback(self._written)
+
+    def _write(self, payload: str) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(
+            dir=self.path.parent, prefix=".history-", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(payload)
+            os.replace(temporary, self.path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(temporary)
+            raise
+
+    def _written(self, future: Future[None]) -> None:
+        error = future.exception()
+        if error is not None and self._on_error is not None and not self._closed:
+            with contextlib.suppress(RuntimeError):
+                self._on_error(str(error))
+
+    def flush(self) -> None:
+        if self._pending is not None:
+            self._pending.result(timeout=10)
+
+    def close(self) -> None:
+        if not self._closed:
+            self._closed = True
+            self._writer.shutdown(wait=True)
+
+
+@dataclass(frozen=True)
+class MediaFile:
+    path: str
+    title: str
+    size: int
+    modified: float
+
+
+def readable_file(raw: str) -> bool:
+    if not raw:
+        return False
+    try:
+        path = Path(raw)
+        return (
+            path.is_file()
+            and path.stat().st_size > 0
+            and os.access(path, os.R_OK)
+            and not is_pending_output(path)
+        )
+    except (OSError, ValueError):
+        return False
+
+
+class ScanSignals(QObject):
+    ready = Signal(int, object, object, str)
+
+
+class DeleteSignals(QObject):
+    done = Signal(object, str)
+
+
+class DeleteFiles(QRunnable):
+    def __init__(self, paths: set[str]) -> None:
+        super().__init__()
+        self.paths = paths
+        self.signals = DeleteSignals()
+
+    def run(self) -> None:
+        deleted: set[str] = set()
+        errors: list[str] = []
+        for raw in self.paths:
+            try:
+                path = Path(raw)
+                if is_pending_output(path):
+                    continue
+                path.unlink(missing_ok=True)
+                deleted.add(raw)
+            except OSError as exc:
+                errors.append(str(exc))
+        with contextlib.suppress(RuntimeError):
+            self.signals.done.emit(deleted, "; ".join(errors))
+
+
+class MediaScan(QRunnable):
+    def __init__(self, generation: int, directory: Path, paths: tuple[str, ...]) -> None:
+        super().__init__()
+        self.generation = generation
+        self.directory = directory
+        self.paths = paths
+        self.signals = ScanSignals()
+
+    def run(self) -> None:
+        files: list[MediaFile] = []
+        error = ""
+        extensions = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv", ".wmv", ".ts"}
+        try:
+            if self.directory.is_dir():
+                for path in self.directory.iterdir():
+                    if path.suffix.lower() not in extensions or not readable_file(str(path)):
+                        continue
+                    try:
+                        stat = path.stat()
+                        files.append(MediaFile(str(path), path.stem, stat.st_size, stat.st_mtime))
+                    except OSError:
+                        continue
+        except (OSError, ValueError) as exc:
+            error = str(exc)
+        availability = {path: readable_file(path) for path in self.paths if path}
+        with contextlib.suppress(RuntimeError):
+            self.signals.ready.emit(
+                self.generation,
+                tuple(sorted(files, key=lambda item: item.modified, reverse=True)),
+                availability,
+                error,
+            )

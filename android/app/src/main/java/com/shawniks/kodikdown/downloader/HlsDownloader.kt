@@ -1,427 +1,375 @@
 package com.shawniks.kodikdown.downloader
 
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import com.shawniks.kodikdown.kodik.KodikClient
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
-import java.io.ByteArrayOutputStream
+import com.shawniks.kodikdown.net.readResponse
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.net.URI
-import java.util.concurrent.atomic.AtomicInteger
+import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
-class HlsDownloader(
-    private val client: OkHttpClient = KodikClient.defaultHttpClient()
-) {
+class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpClient().newBuilder()
+    .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+    .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build()) {
     companion object {
-        private const val CONCURRENT_FRAGMENTS = 16
-        private const val MAX_IN_FLIGHT_FRAGMENTS = 32
-        private const val MAX_FRAGMENT_RETRIES = 4
+        private const val CONCURRENT_FRAGMENTS = 8
         private const val BUFFER_SIZE = 128 * 1024
-        private const val DISK_BUFFER_SIZE = 256 * 1024
+        // Shared by every transfer: memory/socket use does not multiply by queue size.
+        private val fragmentSlots = Semaphore(CONCURRENT_FRAGMENTS)
     }
 
-    fun refererFor(streamUrl: String): String {
-        return try {
-            val uri = URI(if (streamUrl.contains("://")) streamUrl else "https://${streamUrl.trimStart('/')}")
-            val host = uri.host
-            if (!host.isNullOrEmpty()) "https://$host/" else "https://kodikplayer.com/"
+    fun refererFor(streamUrl: String): String =
+        try {
+            val host = URI(if (streamUrl.startsWith("//")) "https:$streamUrl" else streamUrl).host
+            if (host.isNullOrEmpty()) "https://kodikplayer.com/" else "https://$host/"
         } catch (_: Exception) {
             "https://kodikplayer.com/"
         }
-    }
+
+    private fun request(url: String): Request.Builder =
+        Request.Builder()
+            .url(url)
+            .header("User-Agent", KodikClient.USER_AGENT)
+            .header("Referer", refererFor(url))
 
     suspend fun downloadDirectMp4(
         url: String,
         targetFile: File,
         isCancelled: () -> Boolean,
-        onProgress: (downloaded: Long, total: Long?, speed: Long, eta: Long?) -> Unit
-    ) = withContext(Dispatchers.IO) {
-        val partFile = File("${targetFile.absolutePath}.part")
-        if (partFile.exists()) partFile.delete()
-
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", KodikClient.USER_AGENT)
-            .header("Referer", refererFor(url))
-            .build()
-
-        var downloadedBytes = 0L
-        var lastTime = System.currentTimeMillis()
-        var bytesSinceLast = 0L
-        var smoothedSpeed = 0L
-
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("Direct download failed: HTTP ${response.code}")
-            }
-            val body = response.body ?: throw IOException("Empty response body")
-            val totalBytes = body.contentLength().takeIf { it > 0 }
-
-            BufferedInputStream(body.byteStream(), DISK_BUFFER_SIZE).use { input ->
-                BufferedOutputStream(FileOutputStream(partFile), DISK_BUFFER_SIZE).use { output ->
-                    val buffer = ByteArray(DISK_BUFFER_SIZE)
-                    var read: Int
-                    while (input.read(buffer).also { read = it } != -1) {
-                        if (isCancelled()) {
-                            partFile.delete()
-                            throw InterruptedException("Download cancelled by user")
+        onProgress: (Long, Long?, Long, Long?) -> Unit,
+        onNetworkWait: (Boolean) -> Unit = {},
+        onProcessing: () -> Unit = {},
+    ) =
+        withContext(Dispatchers.IO) {
+            val part = File("${targetFile.absolutePath}.part")
+            val progress = Progress(onProgress)
+            try {
+                var validator: String? = null
+                retryNetwork(onNetworkWait) {
+                    val offset = part.takeIf { it.exists() }?.length() ?: 0L
+                    val builder = request(url)
+                    if (offset > 0) {
+                        builder.header("Range", "bytes=$offset-")
+                        validator?.let { builder.header("If-Range", it) }
+                    }
+                    client.readResponse(builder.build()) { response ->
+                        if (response.code == 416 && offset > 0 &&
+                            response.header("Content-Range") == "bytes */$offset") return@readResponse
+                        if (!response.isSuccessful) throw IOException("Direct download HTTP ${response.code}")
+                        val append = response.code == 206 && offset > 0
+                        if (append && response.header("Content-Range")?.startsWith("bytes $offset-") != true)
+                            throw IOException("Invalid resume byte range")
+                        validator = response.header("ETag") ?: response.header("Last-Modified")
+                        val body = response.body ?: throw IOException("Empty response body")
+                        var written = if (append) offset else 0L
+                        val total = if (response.code == 206)
+                            response.header("Content-Range")?.substringAfter('/')?.toLongOrNull()
+                                ?: throw IOException("Invalid resume resource length")
+                            else body.contentLength().takeIf { it >= 0 }
+                        body.byteStream().buffered(BUFFER_SIZE).use { input ->
+                            java.io.FileOutputStream(part, append).buffered(BUFFER_SIZE).use { output ->
+                                val buffer = ByteArray(BUFFER_SIZE)
+                                while (true) {
+                                    checkCancelled(isCancelled)
+                                    val count = input.read(buffer)
+                                    if (count == -1) break
+                                    output.write(buffer, 0, count)
+                                    written += count
+                                    onNetworkWait(false)
+                                    progress.report(written, total)
+                                }
+                            }
                         }
-                        output.write(buffer, 0, read)
-                        downloadedBytes += read
-                        bytesSinceLast += read
-
-                        val now = System.currentTimeMillis()
-                        val diff = now - lastTime
-                        if (diff >= 200) {
-                            val instantSpeed = (bytesSinceLast * 1000) / diff
-                            smoothedSpeed = if (smoothedSpeed == 0L) instantSpeed else (smoothedSpeed * 7 + instantSpeed * 3) / 10
-                            val eta = if (totalBytes != null && smoothedSpeed > 0) {
-                                (totalBytes - downloadedBytes).coerceAtLeast(0) / smoothedSpeed
-                            } else null
-                            onProgress(downloadedBytes, totalBytes, smoothedSpeed, eta)
-                            lastTime = now
-                            bytesSinceLast = 0L
-                        }
+                        if (written == 0L || (total != null && written != total))
+                            throw IOException("Incomplete MP4 response")
                     }
                 }
+                currentCoroutineContext().ensureActive()
+                checkCancelled(isCancelled)
+                // Reject HTML/error bodies and malformed video before exposing a completed file.
+                onProcessing()
+                validateVideo(part)
+                publish(part, targetFile)
+                onProgress(targetFile.length(), targetFile.length(), 0, 0)
+            } finally {
+                part.delete()
             }
         }
-
-        if (targetFile.exists()) targetFile.delete()
-        if (!partFile.renameTo(targetFile)) {
-            partFile.copyTo(targetFile, overwrite = true)
-            partFile.delete()
-        }
-        onProgress(downloadedBytes, downloadedBytes, 0L, 0L)
-    }
 
     suspend fun downloadHls(
         manifestUrl: String,
         targetFile: File,
         isCancelled: () -> Boolean,
-        onProgress: (downloaded: Long, total: Long?, speed: Long, eta: Long?) -> Unit
-    ) = withContext(Dispatchers.IO) {
-        val referer = refererFor(manifestUrl)
-
-        // 1. Fetch manifest
-        val manifestRequest = Request.Builder()
-            .url(manifestUrl)
-            .header("User-Agent", KodikClient.USER_AGENT)
-            .header("Referer", referer)
-            .build()
-
-        var activeManifestUrl = manifestUrl
-        var manifestResponse = client.newCall(manifestRequest).execute()
-        if (!manifestResponse.isSuccessful && manifestUrl.contains("/720.mp4")) {
-            manifestResponse.close()
-            val fallbackUrl = manifestUrl.replace("/720.mp4", "/480.mp4")
-            val fallbackReq = Request.Builder()
-                .url(fallbackUrl)
-                .header("User-Agent", KodikClient.USER_AGENT)
-                .header("Referer", referer)
-                .build()
-            val fbRes = client.newCall(fallbackReq).execute()
-            if (fbRes.isSuccessful) {
-                activeManifestUrl = fallbackUrl
-                manifestResponse = fbRes
-            } else {
-                fbRes.close()
-                throw IOException("Failed to load HLS manifest: HTTP ${manifestResponse.code}")
-            }
-        }
-
-        val manifestText = manifestResponse.use { response ->
-            if (!response.isSuccessful) throw IOException("Failed to load HLS manifest: HTTP ${response.code}")
-            response.body?.string().orEmpty()
-        }
-
-        // Check if master playlist
-        val mediaPlaylistUrl = resolveMediaPlaylist(activeManifestUrl, manifestText)
-        val finalManifestText = if (mediaPlaylistUrl != activeManifestUrl) {
-            val req = Request.Builder()
-                .url(mediaPlaylistUrl)
-                .header("User-Agent", KodikClient.USER_AGENT)
-                .header("Referer", referer)
-                .build()
-            client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) throw IOException("Failed to load sub-manifest: HTTP ${response.code}")
-                response.body?.string().orEmpty()
-            }
-        } else {
-            manifestText
-        }
-
-        // 2. Parse segments and init segment
-        val (initSegmentUrl, segmentUrls) = parseSegments(mediaPlaylistUrl, finalManifestText)
-        if (segmentUrls.isEmpty()) {
-            throw IOException("No media segments found in HLS playlist")
-        }
-
-        val partFile = File("${targetFile.absolutePath}.part")
-        if (partFile.exists()) partFile.delete()
-
-        val totalSegments = segmentUrls.size
-        val downloadedBytes = AtomicLong(0L)
-        val bytesSinceLastTick = AtomicLong(0L)
-        val completedSegments = AtomicInteger(0)
-        val failureRef = AtomicReference<Throwable?>(null)
-
-        var lastTickTime = System.currentTimeMillis()
-        var smoothedSpeed = 0L
-
-        fun reportProgress(force: Boolean = false) {
-            val now = System.currentTimeMillis()
-            val diff = now - lastTickTime
-            if (diff >= 200 || force) {
-                val bytes = bytesSinceLastTick.getAndSet(0L)
-                val instantSpeed = if (diff > 0) (bytes * 1000L) / diff else 0L
-                smoothedSpeed = if (smoothedSpeed == 0L) instantSpeed else (smoothedSpeed * 7 + instantSpeed * 3) / 10
-                val doneCount = completedSegments.get()
-                val currentDownloaded = downloadedBytes.get()
-                val avgBytesPerSeg = if (doneCount > 0) currentDownloaded.toDouble() / doneCount else 0.0
-                val estimatedTotal = if (avgBytesPerSeg > 0) (avgBytesPerSeg * totalSegments).toLong() else null
-                val remainingBytes = if (estimatedTotal != null) (estimatedTotal - currentDownloaded).coerceAtLeast(0) else null
-                val eta = if (smoothedSpeed > 0 && remainingBytes != null) remainingBytes / smoothedSpeed else null
-
-                onProgress(currentDownloaded, estimatedTotal, smoothedSpeed, eta)
-                lastTickTime = now
-            }
-        }
-
-        try {
-            BufferedOutputStream(FileOutputStream(partFile), DISK_BUFFER_SIZE).use { output ->
-                // Write init segment if present (fMP4)
-                if (initSegmentUrl != null) {
-                    if (isCancelled()) throw InterruptedException("Download cancelled by user")
-                    val initBytes = downloadInitSegmentBytes(initSegmentUrl, referer)
-                    output.write(initBytes)
-                    downloadedBytes.addAndGet(initBytes.size.toLong())
-                    bytesSinceLastTick.addAndGet(initBytes.size.toLong())
-                    reportProgress()
-                }
-
-                // High-speed in-memory concurrent pipeline using CompletableDeferred array with immediate GC release
-                val segmentDeferreds = Array<CompletableDeferred<ByteArray>?>(totalSegments) { CompletableDeferred() }
-                val inFlightSemaphore = Semaphore(MAX_IN_FLIGHT_FRAGMENTS)
-                val workerSemaphore = Semaphore(CONCURRENT_FRAGMENTS)
-
-                coroutineScope {
-                    // Producer: download up to 16 fragments concurrently into RAM
-                    val downloadJob = launch(Dispatchers.IO) {
-                        for ((index, segmentUrl) in segmentUrls.withIndex()) {
-                            if (isCancelled() || failureRef.get() != null) break
-
-                            inFlightSemaphore.acquire()
-
-                            launch(Dispatchers.IO) {
-                                workerSemaphore.withPermit {
-                                    if (isCancelled() || failureRef.get() != null) {
-                                        inFlightSemaphore.release()
-                                        return@withPermit
-                                    }
-
-                                    var attempts = 0
-                                    var success = false
-                                    var lastEx: Exception? = null
-
-                                    while (attempts < MAX_FRAGMENT_RETRIES && !success && !isCancelled() && failureRef.get() == null) {
-                                        attempts++
-                                        try {
-                                            val bytes = downloadSegmentBytes(segmentUrl, referer, isCancelled) { bytesRead ->
-                                                downloadedBytes.addAndGet(bytesRead.toLong())
-                                                bytesSinceLastTick.addAndGet(bytesRead.toLong())
-                                                reportProgress()
-                                            }
-                                            segmentDeferreds[index]?.complete(bytes)
-                                            completedSegments.incrementAndGet()
-                                            success = true
-                                        } catch (e: Exception) {
-                                            lastEx = e
-                                            if (attempts < MAX_FRAGMENT_RETRIES && !isCancelled() && failureRef.get() == null) {
-                                                delay(120L * attempts)
-                                            }
-                                        }
-                                    }
-
-                                    if (!success && !isCancelled()) {
-                                        val ex = lastEx ?: IOException("Failed to download fragment $index after $MAX_FRAGMENT_RETRIES attempts")
-                                        failureRef.compareAndSet(null, ex)
-                                        segmentDeferreds[index]?.completeExceptionally(ex)
-                                    }
-                                }
+        quality: Int? = null,
+        onFragmentProgress: (Int, Int) -> Unit = { _, _ -> },
+        onProgress: (Long, Long?, Long, Long?) -> Unit,
+        onNetworkWait: (Boolean) -> Unit = {},
+        onProcessing: () -> Unit = {},
+    ) =
+        withContext(Dispatchers.IO) {
+            val part = File("${targetFile.absolutePath}.part")
+            val muxed = File("${targetFile.absolutePath}.mux.part")
+            val fragments = File("${targetFile.absolutePath}.fragments")
+            try {
+                if (!fragments.mkdirs()) throw IOException("Could not create fragment cache")
+                val master = loadText(manifestUrl, onNetworkWait)
+                val mediaUrl =
+                    HlsPlaylist.selectVariant(manifestUrl, master, quality) ?: manifestUrl
+                val text = if (mediaUrl == manifestUrl) master else loadText(mediaUrl, onNetworkWait)
+                val playlist = HlsPlaylist.parse(mediaUrl, text)
+                val bytesWritten = AtomicLong(0)
+                val progress = Progress(onProgress)
+                var completedFragments = 0
+                onFragmentProgress(0, playlist.segments.size)
+                part.outputStream().buffered(BUFFER_SIZE).use { output ->
+                    playlist.init?.let {
+                        val init = loadSegment(it, File(fragments, "init"), isCancelled, onNetworkWait)
+                        init.inputStream().use { input -> input.copyTo(output, BUFFER_SIZE) }
+                        init.delete()
+                    }
+                    // Stream fragments to disk, then concatenate in playlist order.
+                    // Structured cancellation joins sibling calls before cache cleanup.
+                    for ((batchIndex, batch) in playlist.segments.chunked(CONCURRENT_FRAGMENTS).withIndex()) {
+                        currentCoroutineContext().ensureActive()
+                        checkCancelled(isCancelled)
+                        coroutineScope {
+                            val downloads =
+                                batch.mapIndexed { index, segment -> async {
+                                    loadSegment(segment, File(fragments, "$batchIndex-$index"), isCancelled, onNetworkWait)
+                                } }
+                            for (download in downloads) {
+                                val fragment = download.await()
+                                val size = fragment.length()
+                                fragment.inputStream().use { input -> input.copyTo(output, BUFFER_SIZE) }
+                                fragment.delete()
+                                onFragmentProgress(++completedFragments, playlist.segments.size)
+                                progress.report(bytesWritten.addAndGet(size), null)
                             }
                         }
                     }
-
-                    // Consumer: write fragments sequentially with ZERO polling delays and immediate memory freeing
-                    val writeJob = launch(Dispatchers.IO) {
-                        for (i in 0 until totalSegments) {
-                            if (isCancelled()) throw InterruptedException("Download cancelled by user")
-                            val deferred = segmentDeferreds[i] ?: throw IOException("Fragment $i was already cleared")
-                            val bytes = try {
-                                deferred.await()
-                            } catch (e: Exception) {
-                                failureRef.set(e)
-                                throw e
-                            }
-                            output.write(bytes)
-                            segmentDeferreds[i] = null // Crucial: clear reference so GC immediately reclaims RAM
-                            inFlightSemaphore.release()
-                        }
-                    }
-
-                    writeJob.join()
-                    downloadJob.cancel()
                 }
-
-                output.flush()
-            }
-
-            failureRef.get()?.let { throw it }
-
-            if (isCancelled()) {
-                partFile.delete()
-                throw InterruptedException("Download cancelled by user")
-            }
-
-            if (targetFile.exists()) targetFile.delete()
-            if (!partFile.renameTo(targetFile)) {
-                partFile.copyTo(targetFile, overwrite = true)
-                partFile.delete()
-            }
-
-            val finalSize = targetFile.length()
-            onProgress(finalSize, finalSize, 0L, 0L)
-        } finally {
-            if (isCancelled() && partFile.exists()) {
-                partFile.delete()
+                currentCoroutineContext().ensureActive()
+                checkCancelled(isCancelled)
+                onProcessing()
+                remuxToMp4(part, muxed, isCancelled = isCancelled)
+                currentCoroutineContext().ensureActive()
+                checkCancelled(isCancelled)
+                publish(muxed, targetFile)
+                onProgress(targetFile.length(), targetFile.length(), 0, 0)
+            } finally {
+                part.delete()
+                muxed.delete()
+                fragments.deleteRecursively()
             }
         }
-    }
 
-    private fun downloadSegmentBytes(
-        url: String,
-        referer: String,
+    private suspend fun loadText(url: String, onNetworkWait: (Boolean) -> Unit): String =
+        retryNetwork(onNetworkWait) { client.readResponse(request(url).build()) { response ->
+            if (!response.isSuccessful) throw IOException("HLS manifest HTTP ${response.code}")
+            response.body?.string() ?: throw IOException("Empty HLS manifest")
+        } }
+
+    private suspend fun loadSegment(
+        segment: HlsPlaylist.Segment,
+        file: File,
         isCancelled: () -> Boolean,
-        onBytes: (Int) -> Unit
-    ): ByteArray {
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", KodikClient.USER_AGENT)
-            .header("Referer", referer)
-            .build()
-
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("Segment HTTP ${response.code} for $url")
+        onNetworkWait: (Boolean) -> Unit,
+    ): File = fragmentSlots.withPermit {
+        retryNetwork(onNetworkWait) {
+            currentCoroutineContext().ensureActive()
+            checkCancelled(isCancelled)
+            val builder = request(segment.url)
+            segment.range?.let {
+                builder.header("Range", "bytes=${it.offset}-${it.offset + it.length - 1}")
             }
-            val body = response.body ?: throw IOException("Empty body for $url")
-            val estSize = body.contentLength().takeIf { it > 0 }?.toInt() ?: (512 * 1024)
-            val baos = ByteArrayOutputStream(estSize)
-
-            BufferedInputStream(body.byteStream(), BUFFER_SIZE).use { input ->
-                val buf = ByteArray(BUFFER_SIZE)
-                var r: Int
-                while (input.read(buf).also { r = it } != -1) {
-                    if (isCancelled()) throw InterruptedException("Download cancelled by user")
-                    baos.write(buf, 0, r)
-                    onBytes(r)
+            client.readResponse(builder.build()) { response ->
+                if (!response.isSuccessful) throw IOException("Segment HTTP ${response.code}")
+                if (segment.range != null && response.code != 206)
+                    throw IOException("Server ignored the HLS byte range")
+                segment.range?.let { range ->
+                    if (response.header("Content-Range")?.startsWith("bytes ${range.offset}-${range.offset + range.length - 1}/") != true)
+                        throw IOException("Invalid HLS byte range response")
                 }
-            }
-            return baos.toByteArray()
-        }
-    }
-
-    private fun downloadInitSegmentBytes(url: String, referer: String): ByteArray {
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", KodikClient.USER_AGENT)
-            .header("Referer", referer)
-            .build()
-
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("Init segment HTTP ${response.code}")
-            return response.body?.bytes() ?: throw IOException("Empty init segment")
-        }
-    }
-
-    private fun resolveMediaPlaylist(manifestUrl: String, content: String): String {
-        val lines = content.lines().map { it.trim() }
-        var highestBandwidth = -1
-        var bestUrl: String? = null
-
-        var i = 0
-        while (i < lines.size) {
-            val line = lines[i]
-            if (line.startsWith("#EXT-X-STREAM-INF:")) {
-                val bandwidth = extractBandwidth(line)
-                var nextLine = ""
-                var j = i + 1
-                while (j < lines.size) {
-                    if (lines[j].isNotEmpty() && !lines[j].startsWith("#")) {
-                        nextLine = lines[j]
-                        break
+                val body = response.body ?: throw IOException("Empty HLS segment")
+                val expected = segment.range?.length ?: body.contentLength().takeIf { it >= 0 }
+                var written = 0L
+                body.byteStream().use { input ->
+                    file.outputStream().buffered(BUFFER_SIZE).use { output ->
+                        val buffer = ByteArray(BUFFER_SIZE)
+                        while (true) {
+                            checkCancelled(isCancelled)
+                            val count = input.read(buffer)
+                            if (count == -1) break
+                            output.write(buffer, 0, count)
+                            written += count
+                        }
                     }
-                    j++
                 }
-                if (nextLine.isNotEmpty() && bandwidth > highestBandwidth) {
-                    highestBandwidth = bandwidth
-                    bestUrl = resolveUrl(manifestUrl, nextLine)
-                }
+                if (written == 0L || (expected != null && written != expected))
+                    throw IOException("Incomplete HLS fragment")
+                file
             }
-            i++
-        }
-        return bestUrl ?: manifestUrl
-    }
-
-    private fun parseSegments(playlistUrl: String, content: String): Pair<String?, List<String>> {
-        var initSegmentUrl: String? = null
-        val segments = mutableListOf<String>()
-
-        val lines = content.lines().map { it.trim() }
-        for (line in lines) {
-            if (line.startsWith("#EXT-X-MAP:")) {
-                val uriMatch = Regex("""URI=["']([^"']+)["']""").find(line)
-                if (uriMatch != null) {
-                    initSegmentUrl = resolveUrl(playlistUrl, uriMatch.groupValues[1])
-                }
-            } else if (line.isNotEmpty() && !line.startsWith("#")) {
-                segments.add(resolveUrl(playlistUrl, line))
-            }
-        }
-        return Pair(initSegmentUrl, segments)
-    }
-
-    private fun resolveUrl(baseUrl: String, relative: String): String {
-        return try {
-            if (relative.startsWith("http://") || relative.startsWith("https://")) {
-                relative
-            } else if (relative.startsWith("//")) {
-                "https:$relative"
-            } else {
-                val base = URI(baseUrl)
-                base.resolve(relative).toString()
-            }
-        } catch (_: Exception) {
-            relative
         }
     }
 
-    private fun extractBandwidth(line: String): Int {
-        val match = Regex("""BANDWIDTH=(\d+)""").find(line)
-        return match?.groupValues?.get(1)?.toIntOrNull() ?: 0
+    private suspend fun <T> retryNetwork(onNetworkWait: (Boolean) -> Unit,
+        block: suspend () -> T): T {
+        for (attempt in 0 until 6) {
+            currentCoroutineContext().ensureActive()
+            try {
+                val result = block()
+                onNetworkWait(false)
+                return result
+            } catch (e: IOException) {
+                // Missing/denied streams belong to quality fallback, not reconnect retries.
+                if (attempt == 5 || Regex("HTTP (?:400|401|403|404|410)\\b").containsMatchIn(e.message.orEmpty())) throw e
+                onNetworkWait(true)
+                delay(minOf(1000L * (attempt + 1), 4000L))
+            }
+        }
+        throw IOException("Network retries exhausted")
+    }
+
+    private fun validateVideo(file: File) {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(file.absolutePath)
+            if (
+                (0 until extractor.trackCount).none {
+                    extractor
+                        .getTrackFormat(it)
+                        .getString(MediaFormat.KEY_MIME)
+                        ?.startsWith("video/") == true
+                }
+            )
+                throw IOException("The response does not contain a supported video track")
+        } finally {
+            extractor.release()
+        }
+    }
+
+    internal suspend fun remuxToMp4(input: File, output: File,
+        compatibility: Boolean = android.os.Build.VERSION.SDK_INT < 25, isCancelled: () -> Boolean) {
+        val extractor = MediaExtractor()
+        var muxer: Mp4Writer? = null
+        try {
+            extractor.setDataSource(input.absolutePath)
+            val writer =
+                Mp4Writer(output, compatibility)
+            muxer = writer
+            val tracks = mutableMapOf<Int, Int>()
+            val audioTracks = mutableSetOf<Int>()
+            val audioStart = mutableMapOf<Int, Long>()
+            val audioFrames = mutableMapOf<Int, Long>()
+            var hasVideo = false
+            var bufferSize = 2 * 1024 * 1024
+            for (index in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(index)
+                val mime = format.getString(MediaFormat.KEY_MIME).orEmpty()
+                if (!mime.startsWith("video/") && !mime.startsWith("audio/")) continue
+                hasVideo = hasVideo || mime.startsWith("video/")
+                if (mime == "audio/mp4a-latm") {
+                    audioTracks.add(index)
+                    format.setInteger(MediaFormat.KEY_IS_ADTS, 0)
+                }
+                tracks[index] = writer.addTrack(format)
+                extractor.selectTrack(index)
+                if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+                    bufferSize =
+                        maxOf(bufferSize, format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE))
+                }
+            }
+            if (!hasVideo) throw IOException("HLS contains no supported video track")
+            writer.start()
+            val buffer = ByteBuffer.allocate(bufferSize)
+            val info = MediaCodec.BufferInfo()
+            var samples = 0
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                checkCancelled(isCancelled)
+                buffer.clear()
+                val size = extractor.readSampleData(buffer, 0)
+                if (size < 0) break
+                val flags =
+                    if ((extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0)
+                        MediaCodec.BUFFER_FLAG_KEY_FRAME
+                    else 0
+                info.set(0, size, extractor.sampleTime, flags)
+                val trackIndex = tracks[extractor.sampleTrackIndex]
+                if (trackIndex == null) {
+                    extractor.advance()
+                    continue
+                }
+                if (extractor.sampleTrackIndex in audioTracks && AdtsFrames.isAdts(buffer, size)) {
+                    val inputTrack = extractor.sampleTrackIndex
+                    val start = audioStart.getOrPut(inputTrack) { extractor.sampleTime }
+                    var frameCount = audioFrames[inputTrack] ?: 0L
+                    for (frame in AdtsFrames.split(buffer, size)) {
+                        info.set(frame.offset, frame.size,
+                            start + frameCount * 1024L * 1_000_000L / frame.sampleRate,
+                            MediaCodec.BUFFER_FLAG_KEY_FRAME)
+                        buffer.position(frame.offset)
+                        buffer.limit(frame.offset + frame.size)
+                        writer.writeSampleData(trackIndex, buffer, info)
+                        buffer.limit(buffer.capacity())
+                        frameCount++
+                    }
+                    audioFrames[inputTrack] = frameCount
+                } else {
+                    writer.writeSampleData(trackIndex, buffer, info)
+                }
+                samples++
+                extractor.advance()
+            }
+            if (samples == 0) throw IOException("HLS contains no video samples")
+            writer.stop()
+        } finally {
+            extractor.release()
+            muxer?.release()
+        }
+    }
+
+    private fun publish(part: File, target: File) {
+        if (target.exists()) throw IOException("Target already exists: ${target.name}")
+        if (!part.renameTo(target)) throw IOException("Could not finalize downloaded video")
+    }
+
+    private fun checkCancelled(isCancelled: () -> Boolean) {
+        if (isCancelled()) throw CancellationException("Download cancelled")
+    }
+
+    private class Progress(private val listener: (Long, Long?, Long, Long?) -> Unit) {
+        private var lastTime = System.nanoTime()
+        private var lastBytes = 0L
+
+        fun report(bytes: Long, total: Long?) {
+            val now = System.nanoTime()
+            val elapsed = now - lastTime
+            if (elapsed < 200_000_000L) return
+            val speed = ((bytes - lastBytes) * 1_000_000_000L / elapsed).coerceAtLeast(0)
+            listener(
+                bytes,
+                total,
+                speed,
+                if (total != null && speed > 0) (total - bytes).coerceAtLeast(0) / speed else null,
+            )
+            lastTime = now
+            lastBytes = bytes
+        }
     }
 }

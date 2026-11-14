@@ -5,6 +5,36 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] - 2026-11-14
+
+### Русский
+
+- На ПК появились вкладки «Библиотека», «История» и «Настройки» в одном окне. Приложение сворачивается в трей и продолжает скачивание.
+- Настройки на Android и ПК применяются сразу. Вместо повторяющихся сообщений — небольшой значок сохранения. Смена темы и языка стала плавнее, частые нажатия защищены от повторной обработки.
+- Добавлены подтверждения отмены и удаления. Активные загрузки и сборка файла защищены от удаления свайпом или выделением.
+- История хранит исходную ссылку. Повторная загрузка заново получает поток, сохраняет озвучку и качество и спрашивает подтверждение, если файл уже существует.
+- Библиотека и кнопки открытия учитывают удаление файлов. Исправлены статусы и прогресс, уведомления Android и индикация небольших MP4 на ПК.
+- Исправлена сборка HLS в MP4 на Android: звук AAC, временные метки видео и обработка больших фрагментов. Загрузчик повторяет запросы после обрывов, не выдаёт неполный файл за готовый и ограничивает использование памяти.
+- Исправлены поле ссылки, переключатели в тёмной теме, значки, выделение задач и разметка для планшетов и крупного шрифта.
+- Обновлены README и скриншоты. Добавлены проверки загрузок, интерфейса и восстановления после ошибок.
+
+**Android:** из-за новой подписи удалите старую тестовую версию и установите этот APK. Настройки и история сбросятся; скачанные в общую папку видео останутся. Следующие релизы обновляются поверх.
+
+Готовые сборки этого выпуска — Android и Linux. Windows-бинарник 4.0.0 пока не выпускается.
+
+### English
+
+- Desktop Downloads, Library, History and Settings now share one window, with background downloading in the system tray.
+- Settings save immediately on both platforms. A small corner indicator replaces repeated success messages; theme and language changes are smoother and repeated actions are guarded.
+- Added cancellation and deletion confirmations, protection for active/assembling tasks, original-link history and fresh stream resolution for retries.
+- Fixed missing-file detection, download statuses and progress, Android notifications and delayed progress on small desktop MP4 downloads.
+- Fixed Android HLS remuxing, raw AAC audio, video timestamps and large-fragment memory use, plus retry and incomplete-file handling.
+- Improved narrow/tablet layouts, URL fields, dark-theme controls, icons and task selection. Updated documentation, screenshots and regression tests.
+
+**Android:** uninstall the previous test build once before installing this APK because the signing certificate changed. Settings and history reset; shared downloaded videos remain. Future releases keep the same release key.
+
+This release includes Android and Linux binaries. A Windows 4.0.0 binary is not included.
+
 ## [3.5.0] - 2026-10-18
 
 ### English

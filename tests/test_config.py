@@ -113,6 +113,25 @@ def test_load_falls_back_on_bad_type(tmp_path: Path) -> None:
     assert ConfigStore(path).load().download_dir == default_download_dir()
 
 
+@pytest.mark.parametrize(
+    "directory",
+    [
+        pytest.param(
+            "~kodikdown_no_such_user_qa/videos",
+            marks=pytest.mark.skipif(os.name == "nt", reason="POSIX named-home expansion"),
+        ),
+        "bad\x00path",
+    ],
+)
+def test_unusable_saved_directory_keeps_other_preferences(tmp_path, directory):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"download_dir": directory, "language": "ru", "theme": "dark"}))
+    loaded = ConfigStore(path).load()
+    assert loaded.download_dir == default_download_dir()
+    assert loaded.language == "ru"
+    assert loaded.theme == "dark"
+
+
 def test_save_leaves_no_temp_files_behind(tmp_path: Path) -> None:
     store = ConfigStore(tmp_path / "settings.json")
     store.save(Settings(download_dir=tmp_path / "videos"))
@@ -135,3 +154,40 @@ def test_failed_replace_keeps_previous_settings(
 
     assert store.load().download_dir == tmp_path / "first"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["settings.json"]
+
+
+def test_non_utf8_settings_use_defaults(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_bytes(b"\xff\xfe")
+    assert ConfigStore(path).load() == Settings()
+
+
+def test_desktop_preferences_roundtrip_and_partial_updates(tmp_path: Path) -> None:
+    store = ConfigStore(tmp_path / "settings.json")
+    settings = Settings(
+        download_dir=tmp_path,
+        default_quality="480",
+        auto_paste=True,
+        confirm_cancel_download=False,
+        confirm_delete=False,
+        animations=False,
+    )
+    store.save(settings)
+    assert store.load() == settings
+    changed = settings.updated(theme="dark", language="ru")
+    assert changed.default_quality == "480"
+    assert changed.auto_paste is True
+    assert changed.animations is False
+    assert changed.confirm_cancel_download is False
+    assert changed.confirm_delete is False
+
+
+def test_old_settings_gain_safe_desktop_defaults(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text('{"theme":"dark","default_quality":"broken"}', encoding="utf-8")
+    settings = ConfigStore(path).load()
+    assert settings.theme == "dark"
+    assert settings.default_quality == "ask"
+    assert settings.confirm_cancel_download is True
+    assert settings.confirm_delete is True
+    assert settings.animations is True

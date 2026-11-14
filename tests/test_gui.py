@@ -211,9 +211,27 @@ def window(qtbot, tmp_path: Path):
     store = ConfigStore(tmp_path / "settings.json")
     settings = Settings(download_dir=tmp_path / "downloads")
     window = MainWindow(store, settings)
-    qtbot.addWidget(window)
+
+    def cleanup(widget):
+        widget._quit_requested = True
+        for job in widget._jobs.values():
+            if not job.finished:
+                job.task.cancel()
+                job.finished = True
+        if widget._confirmation is not None:
+            widget._confirmation.reject()
+
+    qtbot.addWidget(window, before_close_func=cleanup)
     yield window
+    for job in window._jobs.values():
+        if not job.finished:
+            job.task.cancel()
+            job.finished = True
     window.resolver.shutdown()
+    window.pool.waitForDone(5000)
+    if window._confirmation is not None:
+        window._confirmation.reject()
+    window.request_quit()
 
 
 def _sample_video() -> ResolvedVideo:
@@ -235,13 +253,13 @@ def test_window_starts_with_an_empty_state(window: MainWindow) -> None:
     assert window.resolve_bar.isHidden()
 
 
-def test_theme_toggle_switches_modes(window: MainWindow) -> None:
-    start = window._palette.mode
-    window._toggle_theme()
-
-    assert window._palette.mode != start
-    assert window.store.load().theme == window._palette.mode
-    assert not window.theme_button.icon().isNull()
+def test_theme_selection_switches_modes(window: MainWindow) -> None:
+    target = "light" if window._palette.is_dark else "dark"
+    window.open_settings()
+    window.settings_page.theme_buttons[target].click()
+    assert window._palette.mode == target
+    assert window.store.load().theme == target
+    assert not window.navigation_buttons[3].icon().isNull()
 
 
 def test_paste_reads_the_clipboard(window: MainWindow) -> None:
@@ -253,7 +271,8 @@ def test_paste_reads_the_clipboard(window: MainWindow) -> None:
     assert window.url_edit.text().startswith("https://kodikplayer.com")
 
 
-def test_resolve_button_becomes_cancel_while_busy(window: MainWindow) -> None:
+def test_resolve_button_becomes_cancel_while_busy(window: MainWindow, monkeypatch) -> None:
+    monkeypatch.setattr(window.resolver, "resolve", lambda *args: None)
     window._start_resolve(PAGE_URL, None)
 
     assert window._resolving is True
@@ -262,7 +281,8 @@ def test_resolve_button_becomes_cancel_while_busy(window: MainWindow) -> None:
     assert window.resolve_bar.isHidden()
 
 
-def test_failed_lookup_shows_the_reason(window: MainWindow) -> None:
+def test_failed_lookup_shows_the_reason(window: MainWindow, monkeypatch) -> None:
+    monkeypatch.setattr(window.resolver, "resolve", lambda *args: None)
     window._start_resolve(PAGE_URL, None)
     window._on_resolve_failed(window._request_id, "invalid_url", "")
 
@@ -271,7 +291,8 @@ def test_failed_lookup_shows_the_reason(window: MainWindow) -> None:
     assert window.status_label.property("state") == "error"
 
 
-def test_stale_lookup_reply_is_ignored(window: MainWindow) -> None:
+def test_stale_lookup_reply_is_ignored(window: MainWindow, monkeypatch) -> None:
+    monkeypatch.setattr(window.resolver, "resolve", lambda *args: None)
     window._start_resolve(PAGE_URL, None)
     window._on_resolved(window._request_id - 1, _sample_video())
 
@@ -343,7 +364,10 @@ def test_download_row_follows_its_signals(window: MainWindow, monkeypatch) -> No
     window._on_download()
     assert len(window._jobs) == 1  # the same stream is not queued twice
 
-    window._on_job_finished(job_id, "/tmp/Test video.mp4")
+    path = window.settings.download_dir / "Test video.mp4"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"finished test video")
+    window._on_job_finished(job_id, str(path))
     assert job.finished is True
     assert job.row.property("state") == "done"
     assert window._active_urls == set()
@@ -447,20 +471,13 @@ def test_cancelling_a_queued_download_is_immediate(qtbot, window: MainWindow) ->
     release.set()
 
 
-def test_settings_dialog_returns_updated_values(window: MainWindow, tmp_path: Path) -> None:
-    from kodikdown.gui.settings_dialog import SettingsDialog
-
-    dialog = SettingsDialog(window.settings, window.store, window)
-    dialog.folder_edit.setText(str(tmp_path / "other"))
-    dialog.concurrent_spin.setValue(4)
-    dialog.mp4_check.setChecked(True)
-    dialog._save()
-
-    updated = dialog.settings()
-    assert updated.download_dir == tmp_path / "other"
-    assert updated.concurrent_downloads == 4
-    assert updated.prefer_mp4 is True
-    assert updated.language == window.settings.language
+def test_settings_folder_is_applied_and_created(window: MainWindow, tmp_path: Path) -> None:
+    window.open_settings()
+    window.settings_page.folder_edit.setText(str(tmp_path / "other"))
+    window.settings_page._folder_edited()
+    assert window.settings.download_dir == tmp_path / "other"
+    assert window.settings.download_dir.is_dir()
+    assert window.store.load().download_dir == window.settings.download_dir
 
 
 def test_retranslate_switches_the_interface_language(window: MainWindow) -> None:
@@ -502,15 +519,24 @@ def test_name_edit_resets_on_new_video(window: MainWindow) -> None:
     assert window.name_edit.text() == "Second Anime"
 
 
-def test_progress_bar_stops_busy_on_hide(window: MainWindow) -> None:
+def test_progress_bar_pauses_when_hidden_and_resumes_when_shown(window: MainWindow) -> None:
     from kodikdown.gui.widgets import ProgressBar
 
     bar = ProgressBar(window)
+    window.show()
+    bar.show()
     bar.set_busy()
     assert bar._busy is True
     assert bar._busy_timer.isActive() is True
 
     bar.hide()
+    assert bar._busy is True
+    assert bar._busy_timer.isActive() is False
+    bar.show()
+    assert bar._busy_timer.isActive() is True
+    bar.set_value(50)
+    bar.hide()
+    bar.show()
     assert bar._busy is False
     assert bar._busy_timer.isActive() is False
 
@@ -523,24 +549,13 @@ def test_shortcuts_configured_on_main_window(window: MainWindow) -> None:
     assert "Ctrl+Q" in shortcuts
 
 
-def test_settings_syncs_prefer_mp4_to_main_window(
-    window: MainWindow, tmp_path: Path, monkeypatch
-) -> None:
-    from kodikdown.gui.settings_dialog import SettingsDialog
-
+def test_settings_syncs_prefer_mp4_to_main_window(window: MainWindow) -> None:
     assert window.mp4_check.isChecked() is False
-
-    # Simulate SettingsDialog accepting prefer_mp4 = True
-    def mock_exec(self):
-        self.mp4_check.setChecked(True)
-        self._save()
-        return SettingsDialog.DialogCode.Accepted
-
-    monkeypatch.setattr(SettingsDialog, "exec", mock_exec)
     window.open_settings()
-
+    window.settings_page.prefer_mp4_check.click()
     assert window.mp4_check.isChecked() is True
     assert window.settings.prefer_mp4 is True
+    assert window.store.load().prefer_mp4 is True
 
 
 def test_url_argument_skips_gui_subcommand() -> None:
@@ -549,3 +564,63 @@ def test_url_argument_skips_gui_subcommand() -> None:
     assert _url_argument(["kodikdown", "gui", PAGE_URL]) == PAGE_URL
     assert _url_argument(["kodikdown", PAGE_URL]) == PAGE_URL
     assert _url_argument(["kodikdown", "--help"]) == ""
+
+
+def test_cancelled_lookup_ignores_late_result(window: MainWindow, monkeypatch) -> None:
+    monkeypatch.setattr(window.resolver, "resolve", lambda *args: None)
+    window.url_edit.setText(PAGE_URL)
+    window._on_find()
+    request = window._request_id
+    window._on_find()
+    window._on_resolved(request, _sample_video())
+    assert window._resolved is None
+    assert not window._resolving
+
+
+@pytest.mark.parametrize("escape", [False, True])
+def test_cancelled_translation_restores_the_playable_selection(
+    window: MainWindow, monkeypatch, qtbot, escape: bool
+) -> None:
+    from PySide6.QtCore import Qt
+
+    from kodikdown.kodik.models import Translation
+
+    monkeypatch.setattr(window.resolver, "resolve", lambda *args: None)
+    original = Translation("Original", "video", "1", "a" * 32)
+    other = Translation("Other", "video", "2", "b" * 32)
+    video = ResolvedVideo(
+        "Clip",
+        (StreamVariant(720, "https://cdn/original.m3u8"),),
+        translations=(original, other),
+        translation=original,
+    )
+    window._url_in_use = PAGE_URL
+    window._on_resolved(window._request_id, video)
+    window.translation_combo.setCurrentIndex(1)
+    request = window._request_id
+    assert window._resolving
+    assert not window.download_button.isEnabled()
+    window._on_download()
+    assert not window._jobs
+
+    if escape:
+        qtbot.keyClick(window, Qt.Key.Key_Escape)
+    else:
+        window._on_find()
+
+    assert not window._resolving
+    assert window.download_button.isEnabled()
+    assert window.translation_combo.currentData() == original.key
+    assert window._translation_for(PAGE_URL) == original
+    assert window._selected_variant().url == "https://cdn/original.m3u8"
+    # The cancelled reply must not replace the restored result.
+    window._on_resolved(request, _sample_video())
+    assert window._resolved is video
+
+
+def test_download_row_shows_fallback_quality(window: MainWindow) -> None:
+    from kodikdown.gui.widgets import DownloadRow
+
+    row = DownloadRow("test", "Clip", 720, window._palette, parent=window)
+    row.update_progress(ProgressSnapshot(quality=360))
+    assert row.badge.text() == "360p"
