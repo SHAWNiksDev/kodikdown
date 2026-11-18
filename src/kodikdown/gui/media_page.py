@@ -130,7 +130,7 @@ class MediaPage(QWidget):
         expanded = {
             item.data(0, group_role)
             for index in range(self.table.topLevelItemCount())
-            if (item := self.table.topLevelItem(index)).isExpanded()
+            if (item := self.table.topLevelItem(index)) is not None and item.isExpanded()
         }
         scroll = self.table.verticalScrollBar().value()
         self.table.blockSignals(True)
