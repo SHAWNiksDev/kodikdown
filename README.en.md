@@ -4,7 +4,7 @@
 
 [Download 4.5.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.5.0) · [Report a bug](https://github.com/SHAWNiksDev/kodikdown/issues/new) · [Changelog](CHANGELOG.md) · [Русский](README.md)
 
-<img src="docs/screenshots/guide/desktop-yosuga.png" width="920" alt="Episode, voice-over and player selection in KodikDown 4.5.0" />
+<img src="docs/screenshots/guide/desktop-series.png" width="920" alt="Episode, voice-over and player selection in KodikDown 4.5.0" />
 
 Paste a player link or its entire `<iframe>`, choose a voice-over and quality, and download the video. There is a desktop app and CLI, plus a native Android app.
 

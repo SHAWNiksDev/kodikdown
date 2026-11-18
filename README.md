@@ -9,7 +9,7 @@
 [![CI](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml/badge.svg)](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-<img src="docs/screenshots/guide/desktop-yosuga.png" width="920" alt="Выбор серий, озвучки и плеера в KodikDown 4.5.0" />
+<img src="docs/screenshots/guide/desktop-series.png" width="920" alt="Выбор серий, озвучки и плеера в KodikDown 4.5.0" />
 
 </div>
 
