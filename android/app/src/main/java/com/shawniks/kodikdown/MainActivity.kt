@@ -1762,10 +1762,11 @@ class MainActivity : AppCompatActivity() {
             val pill =
                 TextView(this).apply {
                     val isBest = variant == variants.first()
-                    val label =
-                        if (isBest) "${variant.quality}p • ${getString(R.string.best_badge)}"
-                        else "${variant.quality}p"
-                    text = label
+                    text = when {
+                        variant.quality <= 0 -> getString(R.string.quality_original)
+                        isBest -> "${variant.quality}p • ${getString(R.string.best_badge)}"
+                        else -> "${variant.quality}p"
+                    }
                     textSize = 12f
                     gravity = Gravity.CENTER
                     setPadding(dpToPx(12), dpToPx(6), dpToPx(12), dpToPx(6))

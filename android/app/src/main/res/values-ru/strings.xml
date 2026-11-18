@@ -15,6 +15,7 @@
     <string name="title_unknown">Без названия</string>
     <string name="file_name">Имя файла</string>
     <string name="quality">Качество</string>
+    <string name="quality_original">Исходное</string>
     <string name="best_badge">лучшее</string>
     <string name="translation">Озвучка</string>
     <string name="download">Скачать</string>

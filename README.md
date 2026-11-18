@@ -2,125 +2,65 @@
 
 # KodikDown
 
-**Скачивайте серии с поддерживаемых сайтов и плееров для просмотра офлайн.**
+**Скачивайте аниме по ссылке на страницу или плеер и смотрите офлайн.**
 
-[Скачать 4.5.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.5.0) · [Сообщить об ошибке](https://github.com/SHAWNiksDev/kodikdown/issues/new) · [Что изменилось](CHANGELOG.md) · [English](README.en.md)
+[Скачать](#скачать) · [Инструкция для ПК и Android](docs/guide-ru.md) · [Что нового в 4.5.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.5.0) · [English](README.en.md)
 
+[![Релиз](https://img.shields.io/github/v/release/SHAWNiksDev/kodikdown)](https://github.com/SHAWNiksDev/kodikdown/releases/latest)
 [![CI](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml/badge.svg)](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-<img src="docs/screenshots/guide/desktop-series.png" width="920" alt="Выбор серий, озвучки и плеера в KodikDown 4.5.0" />
+<img src="docs/screenshots/desktop-ru.png" width="880" alt="KodikDown 4.5.0 на ПК с тремя выбранными сериями" />
 
 </div>
 
-KodikDown принимает ссылку на плеер или целиком его `<iframe>`, находит доступные озвучки и качества и сохраняет выбранное видео. На ПК есть графический интерфейс и консольная версия, на Android — отдельное нативное приложение.
+## Скачать
 
-## Скачать и запустить
-
-Сборки для Windows и Linux доступны в [релизе 4.5.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.5.0).
-
-| Платформа | Файл | Как запустить |
+| Платформа | Файл | Установка |
 | --- | --- | --- |
-| Android 7.0 и новее | [Подписанный APK 4.0.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.0.0) | Откройте APK и разрешите установку из выбранного источника |
-| Windows 10/11 x64 | `kodikdown-windows-x86_64.exe` | Скачайте и откройте EXE |
-| Windows x64, консоль | `kodikdown-windows-x86_64-cli.exe` | Запустите из PowerShell или терминала |
-| Linux x64 | `kodikdown-linux-x86_64` | Разрешите выполнение файла и откройте его |
-| Linux x64, консоль | `kodikdown-linux-x86_64-cli` | Запустите из терминала |
+| **Windows 10/11 x64** | [Скачать EXE](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-windows-x86_64.exe) | Откройте файл |
+| **Linux x64** | [Скачать для Linux](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64) | Дайте файлу право на запуск |
+| **Android 7.0+** | [Скачать APK](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-android.apk) | Откройте APK на телефоне |
 
-```bash
-chmod +x kodikdown-linux-x86_64
-./kodikdown-linux-x86_64
-```
+> **Переход на Android 4.5.0.** У APK новая подпись. Перед установкой удалите прежнюю версию. История и настройки сбросятся, видео в общей папке останутся.
 
-Для готовых сборок Python не нужен. На Linux нужен графический сеанс. На Windows и Linux для сборки HLS-видео установите **FFmpeg** и проверьте, что `ffmpeg -version` работает в терминале. FFmpeg не включён в исполняемый файл. В Windows можно установить его командой `winget install --id Gyan.FFmpeg -e`, затем открыть приложение заново.
+На Linux запустите `chmod +x kodikdown-linux-x86_64`, затем `./kodikdown-linux-x86_64`. Для обработки HLS на ПК установите **FFmpeg** и проверьте командой `ffmpeg -version`, что программа доступна. В PowerShell можно установить FFmpeg командой `winget install --id Gyan.FFmpeg -e`.
 
-Исходники Android 4.5.0 входят в этот выпуск. Обновление поверх публичного APK требует подписи тем же ключом, которым подписан APK 4.0.0.
+Консольные сборки и контрольные суммы доступны в [релизе](https://github.com/SHAWNiksDev/kodikdown/releases/latest).
 
-## Как пользоваться
+## Как скачать серии
 
-Подробные шаги со скриншотами для ПК и Android и подсказки по ссылкам на каждый плеер собраны в [инструкции](docs/guide-ru.md).
+1. Скопируйте адрес страницы аниме и вставьте в KodikDown. На Android можно открыть страницу через **Поделиться → KodikDown**.
+2. Нажмите **Найти видео**. Выберите плеер, озвучку, качество и нужные серии.
+3. Нажмите **Скачать**. Готовые серии будут в **Библиотеке**. Включите **В папку сериала**, если хотите сохранить их вместе.
 
-### Загрузка серий на ПК
+Есть ссылка на плеер или код `<iframe>`? Вставьте его в то же поле. В гайде показано, как скопировать адрес плеера и где найти результат на ПК и телефоне. [Инструкция со скриншотами](docs/guide-ru.md)
 
-1. Скопируйте адрес страницы аниме с YummyAnime (включая старую версию), AnimeGO, AniLiberty или AniDUB.
-2. Вставьте ссылку в KodikDown и нажмите «Найти видео».
-3. Выберите плеер, озвучку, качество и отметьте серии. Кнопка «Выбрать все» отмечает весь список.
-4. Нажмите «Скачать». У каждой серии будет свой прогресс и запись в истории.
+## Поддерживаемые источники
 
-На YummyAnime доступны Kodik и CVH. Плееры, из которых программа пока не скачивает, показаны под списком серий. На AnimeGO плееры и озвучки берутся из первой серии, а доступность выбранного варианта для остальных проверяется при загрузке.
+| Что можно вставить | Поддержка |
+| --- | --- |
+| Страница аниме | YummyAnime (включая старую версию), AnimeGO, AniLiberty, AniDUB |
+| Ссылка или iframe плеера | Kodik, CVH, AniBoom. На ПК также Sibnet, Animedia и VK Видео |
+| Прямая ссылка | MP4, HLS (`.m3u8`). На ПК также DASH (`.mpd`) |
 
-### Загрузка по ссылке на плеер
+Список озвучек, серий и качеств зависит от источника. Загрузка с Alloha пока недоступна. Android поддерживает незашифрованные завершённые HLS-потоки без отдельной аудиодорожки. [Подробнее о ссылках](docs/guide-ru.md#как-скопировать-ссылку-на-плеер)
 
-1. Скопируйте ссылку **на сам плеер Kodik** или его код `<iframe>`.
-2. Вставьте её в приложение и нажмите «Найти видео».
-3. Выберите озвучку, качество и, если нужно, имя файла.
-4. Нажмите «Скачать». Готовое видео появится в библиотеке.
+## Загрузки, библиотека и история
 
-Можно вставлять ссылку с `https://`, без протокола (`//…`), внутри текста или Markdown. На ПК также поддерживаются ссылки на CVH, AniBoom, Sibnet, Animedia, VK Video и прямые ссылки на MP4, HLS и DASH.
-
-## Что умеет приложение
-
-- Выбирать качество и озвучку из вариантов, которые отдаёт плеер.
-- Скачивать несколько видео и показывать прогресс, скорость и оставшееся время, когда сервер передаёт нужные данные.
-- Повторять запросы после сетевых ошибок; при недоступности качества пробовать доступный вариант ниже.
-- Проверять наличие готовых файлов, предупреждать перед повторной загрузкой и сохранять исходную ссылку в истории.
-- Применять настройки сразу. Успешное сохранение обозначается маленьким значком в углу, без всплывающей очереди сообщений.
-- Работать на русском и английском, в светлой и тёмной теме.
-
-### На компьютере
-
-Четыре вкладки — «Загрузки», «Библиотека», «История» и «Настройки» — находятся в одном окне. Крестик сворачивает приложение в трей, загрузки продолжаются. Для полного выхода выберите «Выйти» в меню трея или нажмите `Ctrl+Q`. Если рабочий стол не предоставляет трей, окно сворачивается на панель задач.
-
-`Ctrl+S` открывает настройки, `Esc` возвращает назад или отменяет поиск. Для выбора нескольких завершённых загрузок используйте `Ctrl` + щелчок. Активные задачи нельзя удалить из списка; отмена выполняется отдельным крестиком с подтверждением. Папка и параметры загрузки блокируются, пока идёт поиск или скачивание.
-
-<details>
-<summary>Светлая тема и настройки</summary>
-
-<img src="docs/main-light.png" width="940" alt="Светлая тема KodikDown на ПК" />
-<img src="docs/screenshots/desktop-settings.png" width="940" alt="Настройки KodikDown внутри главного окна" />
-
-</details>
-
-### На Android
+- Загружайте несколько серий, следите за прогрессом и скоростью. На ПК прогресс виден в трее, на Android — в тихом уведомлении.
+- Открывайте скачанные файлы из библиотеки и находите нужную серию по папке. Из истории можно скопировать исходную ссылку или запустить загрузку снова.
+- Переключайте светлую и тёмную темы, язык, папку загрузок и качество по умолчанию в настройках.
 
 <p align="center">
-  <img src="docs/screenshots/android-download.png" width="245" alt="Прогресс загрузки на Android" />
-  <img src="docs/screenshots/android-library.png" width="245" alt="Библиотека видео на Android" />
-  <img src="docs/screenshots/android-settings.png" width="245" alt="Настройки Android-приложения" />
+  <img src="docs/screenshots/guide/android-series.png" width="215" alt="Описание сериала на Android" />
+  <img src="docs/screenshots/guide/android-episodes.png" width="215" alt="Выбор серий на Android" />
 </p>
 
-Загрузки работают в фоне с уведомлением. Видео можно открыть или отправить через установленные приложения. Папка выбирается через системный диалог; доступны свайпы и выделение завершённых задач, подтверждения отмены и удаления, тактильный отклик.
+<details>
+<summary>Консоль и запуск из исходников</summary>
 
-На Android 7–9 может потребоваться разрешение на хранилище. Для папки, выбранной через системный диалог, используется выданный ей доступ. После принудительной остановки приложения или перезагрузки телефона незавершённую загрузку нужно запустить заново; история сохраняется. Ограничения батареи производителя могут влиять на работу в фоне.
-
-Скриншоты сделаны на демонстрационных данных. Названия, ссылки и пути на них — примеры.
-
-## Консоль
-
-В примерах `kodikdown-cli` — установленная команда. Для готовой Linux-сборки используйте `./kodikdown-linux-x86_64-cli`.
-
-```bash
-# Скачать видео в выбранную папку
-kodikdown-cli download "<ссылка-на-плеер>" -o "./Videos"
-
-# Указать озвучку, качество и имя файла
-kodikdown-cli download "<ссылка>" -t "Озвучка" -q 720 -n "Серия 01"
-
-# Посмотреть доступные варианты
-kodikdown-cli download "<ссылка>" --list-qualities
-kodikdown-cli download "<ссылка>" --list-translations
-
-# Получить ссылку потока без скачивания
-kodikdown-cli download "<ссылка>" --print-url -q 480
-
-kodikdown-cli download --help
-```
-
-Если выбранного качества нет, используется ближайшее доступное меньшее, а при его отсутствии — минимальное. Ссылки потока могут истекать: для новой попытки лучше снова использовать исходную ссылку на плеер.
-
-## Запуск из исходников
-
-Нужны Python 3.11+, FFmpeg и графическое окружение для интерфейса ПК.
+Для запуска из исходников нужны Python 3.11+ и FFmpeg.
 
 ```bash
 git clone https://github.com/SHAWNiksDev/kodikdown.git
@@ -128,16 +68,22 @@ cd kodikdown
 python -m venv .venv
 ```
 
-Активируйте окружение: `source .venv/bin/activate` в Linux или `.venv\Scripts\Activate.ps1` в Windows PowerShell. Затем:
+Активируйте окружение командой `source .venv/bin/activate` в Linux или `.venv\Scripts\Activate.ps1` в PowerShell.
 
 ```bash
 python -m pip install .
 kodikdown
-# Или:
-kodikdown-cli download "<ссылка-на-плеер>"
+kodikdown-cli download "<ссылка-на-плеер>" -q 720 -o "./Videos"
+kodikdown-cli download "<ссылка-на-плеер>" --list-qualities
+kodikdown-cli download --help
 ```
 
-## Разработка
+У готовых консольных сборок имя файла начинается с `kodikdown-` и содержит `-cli`.
+
+</details>
+
+<details>
+<summary>Сборка и тесты</summary>
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -145,28 +91,25 @@ ruff check src tests
 ruff format --check src tests
 mypy
 QT_QPA_PLATFORM=offscreen pytest
-
 pyinstaller packaging/kodikdown.spec --noconfirm
 pyinstaller packaging/kodikdown-cli.spec --noconfirm
 ```
 
-Файлы сборки появятся в `dist/`. В PowerShell задайте `QT_QPA_PLATFORM` через `$env:QT_QPA_PLATFORM="offscreen"`. Интеграционным тестам нужен локальный HTTP-сервер.
+В PowerShell задайте переменную для тестов через `$env:QT_QPA_PLATFORM="offscreen"`. Готовые сборки PyInstaller появятся в `dist/`.
 
-Для Android нужны JDK 17 и Android SDK 35 с Build Tools 35.0.0. Укажите SDK через `ANDROID_HOME` или локальный `android/local.properties`.
+Для Android нужны JDK 17, Android SDK 35 и Build Tools 35.0.0. Укажите путь к SDK через `ANDROID_HOME` или `android/local.properties`.
 
 ```bash
-bash android/build.sh            # тесты, lint и debug APK
-bash android/build.sh --release  # подписанный release APK
+bash android/build.sh
+bash android/build.sh --release
 ```
 
-Для релиза настройте `android/keystore.properties` по параметрам из `android/app/build.gradle.kts`. Ключ и пароли хранятся локально и исключены из Git. Сохраните резервную копию ключа: он нужен для последующих обновлений. GitHub Actions проверяет готовый подписанный APK; закрытый ключ туда передавать не требуется.
+Для релиза задайте параметры подписи в `android/keystore.properties` по [настройкам Gradle](android/app/build.gradle.kts). Сохраните ключ и пароль вне Git, чтобы подписывать будущие обновления тем же ключом.
 
-## Если что-то не работает
+</details>
 
-При ошибках 403/404 повторите поиск или выберите качество ниже. Для ошибки сборки файла проверьте FFmpeg и свободное место. Если проблема остаётся, [создайте issue](https://github.com/SHAWNiksDev/kodikdown/issues/new): версия приложения, ОС, ссылка на плеер, если её можно публиковать, и шаги воспроизведения помогут разобраться.
+## Помощь
 
-Android поддерживает прямой MP4 и завершённые незашифрованные HLS-потоки с MPEG-TS или fMP4, включая диапазоны байтов. Отдельные аудиодорожки, шифрование, смена инициализационных сегментов и разрывы HLS пока не поддерживаются. На ПК обработкой потоков занимается `yt-dlp`. Доступность серий, озвучек и качеств зависит от выбранного сайта и плеера.
+При ошибках 403 или 404 заново нажмите **Найти видео** или попробуйте другой плеер либо качество. Если на ПК не собирается файл, проверьте FFmpeg и свободное место. В отчёте о проблеме укажите ОС, версию KodikDown и шаги, по которым можно повторить ошибку. [Сообщить о проблеме](https://github.com/SHAWNiksDev/kodikdown/issues/new)
 
-## Лицензия
-
-[MIT](LICENSE). KodikDown — независимый проект. Сохраняйте только материалы, на скачивание которых у вас есть право.
+[Лицензия MIT](LICENSE) · [История версий](CHANGELOG.md)

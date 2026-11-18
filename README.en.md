@@ -1,111 +1,66 @@
+<div align="center">
+
 # KodikDown
 
-**Download episodes from supported sites and players for offline viewing.**
+**Download anime from a page or player link and watch offline.**
 
-[Download 4.5.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.5.0) · [Report a bug](https://github.com/SHAWNiksDev/kodikdown/issues/new) · [Changelog](CHANGELOG.md) · [Русский](README.md)
+[Download](#download) · [Desktop and Android guide](docs/guide-en.md) · [What's new in 4.5.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.5.0) · [Русский](README.md)
 
-<img src="docs/screenshots/guide/desktop-series.png" width="920" alt="Episode, voice-over and player selection in KodikDown 4.5.0" />
+[![Release](https://img.shields.io/github/v/release/SHAWNiksDev/kodikdown)](https://github.com/SHAWNiksDev/kodikdown/releases/latest)
+[![CI](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml/badge.svg)](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml)
+[![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Paste a player link or its entire `<iframe>`, choose a voice-over and quality, and download the video. There is a desktop app and CLI, plus a native Android app.
+<img src="docs/screenshots/desktop-en.png" width="880" alt="KodikDown 4.5.0 on desktop with three episodes selected" />
+
+</div>
 
 ## Download
 
-Get the Windows and Linux builds from [release 4.5.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.5.0).
+| Platform | File | Installation |
+| --- | --- | --- |
+| **Windows 10/11 x64** | [Download EXE](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-windows-x86_64.exe) | Open the file |
+| **Linux x64** | [Download for Linux](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64) | Make the file executable |
+| **Android 7.0+** | [Download APK](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-android.apk) | Open the APK on your phone |
 
-| Platform | File |
+> **Upgrading to Android 4.5.0.** This APK has a new signing key. Uninstall the previous version before installing it. This clears app settings and history. Videos saved to shared storage stay on the device.
+
+On Linux, run `chmod +x kodikdown-linux-x86_64` followed by `./kodikdown-linux-x86_64`. To process HLS on desktop, install **FFmpeg** and check that `ffmpeg -version` runs. On Windows, you can install it with `winget install --id Gyan.FFmpeg -e`.
+
+Get command-line builds and checksums from the [release page](https://github.com/SHAWNiksDev/kodikdown/releases/latest).
+
+## Download episodes
+
+1. Copy the anime page URL and paste it into KodikDown. On Android, you can use **Share → KodikDown** from your browser.
+2. Click **Find video**. Choose a player, voice-over, quality and the episodes you want.
+3. Click **Download**. Finished episodes appear in **Library**. Use **Save in a series folder** to keep them together on disk.
+
+Already have a player link or `<iframe>` embed code? Paste it into the same field. The guide shows where to find player links and finished downloads on desktop and Android. [Illustrated guide](docs/guide-en.md)
+
+## Supported sources
+
+| What to paste | Support |
 | --- | --- |
-| Android 7.0+ | [Signed APK 4.0.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.0.0) |
-| Windows 10/11 x64 | `kodikdown-windows-x86_64.exe` |
-| Windows x64, CLI | `kodikdown-windows-x86_64-cli.exe` |
-| Linux x64 | `kodikdown-linux-x86_64` |
-| Linux x64, CLI | `kodikdown-linux-x86_64-cli` |
+| Anime page | YummyAnime (including the old site), AnimeGO, AniLiberty, AniDUB |
+| Player link or iframe | Kodik, CVH, AniBoom. Desktop also supports Sibnet, Animedia and VK Video |
+| Direct link | MP4, HLS (`.m3u8`). Desktop also supports DASH (`.mpd`) |
 
-```bash
-chmod +x kodikdown-linux-x86_64
-./kodikdown-linux-x86_64
-```
+Episodes, voice-overs and resolutions vary by source. Alloha downloads are currently unavailable. Android supports completed, unencrypted HLS streams with no separate audio track. [Player links and stream formats](docs/guide-en.md#copy-a-player-link)
 
-The packaged apps do not require Python. On Windows, download and open the EXE. Linux needs a graphical desktop. On Windows and Linux, install **FFmpeg** for HLS processing and check `ffmpeg -version` in a terminal. FFmpeg is not bundled. On Windows, you can use `winget install --id Gyan.FFmpeg -e`, then reopen the app.
+## Downloads, library and history
 
-The Android 4.5.0 source is included. Updating the public APK in place requires the same signing key used for version 4.0.0.
-
-## Use
-
-See the [illustrated desktop and Android guide](docs/guide-ru.md) for setup and instructions on copying player links.
-
-### Download episodes from an anime page on desktop
-
-1. Copy the anime page URL from YummyAnime (including the old site), AnimeGO, AniLiberty, or AniDUB.
-2. Paste the URL into KodikDown and choose Find video.
-3. Choose a player, voice-over, and quality, then check the episodes you want.
-4. Choose Download. Each episode has its own progress and history entry.
-
-YummyAnime supports Kodik and CVH. Players without download support appear below the episode list. AnimeGO shows the player and voice-over options from the first episode and checks availability for the remaining episodes as they download.
-
-### Download from a player link
-
-1. Copy a link to the **Kodik player itself**, or its `<iframe>` code.
-2. Paste it and choose Find video.
-3. Select a voice-over, quality and optional filename.
-4. Download. Finished videos appear in Library.
-
-Links can include `https://`, start with `//`, or be embedded in copied text or Markdown. The desktop app also accepts CVH, AniBoom, Sibnet, Animedia and VK Video links, as well as direct MP4, HLS and DASH URLs.
-
-## Features
-
-- Quality and voice-over selection from the variants the player provides.
-- Concurrent downloads with progress, speed and remaining time when available.
-- Retries after network errors and fallback to available lower-quality streams.
-- Library, history, original-link copying and confirmation before downloading an existing file again.
-- Settings that save immediately, with one small corner indicator.
-- English and Russian, light and dark themes.
-
-### Desktop
-
-Downloads, Library, History and Settings share one window. Closing it keeps downloads running in the tray. Choose Quit from the tray menu or press `Ctrl+Q` to exit. Desktops without a tray host minimize the window to the taskbar.
-
-`Ctrl+S` opens settings; `Esc` returns or cancels a lookup. Select completed downloads with `Ctrl` + click. Active tasks are protected from list removal; cancelling uses a separate button and asks for confirmation by default. Transfer settings are locked during lookup and downloads.
-
-<details>
-<summary>Light theme and settings</summary>
-
-<img src="docs/main-light.png" width="940" alt="Light desktop theme" />
-<img src="docs/screenshots/desktop-settings.png" width="940" alt="Settings inside the desktop window" />
-
-</details>
-
-### Android
+- Queue multiple episodes and see progress and speed. Check background downloads in the desktop tray or a silent Android notification.
+- Find episodes by series folder and play downloaded files from the library. Copy the original link or retry a download from history.
+- Change the theme, language, download folder and default quality in settings.
 
 <p align="center">
-  <img src="docs/screenshots/android-download.png" width="245" alt="Android download progress" />
-  <img src="docs/screenshots/android-library.png" width="245" alt="Android video library" />
-  <img src="docs/screenshots/android-settings.png" width="245" alt="Android settings" />
+  <img src="docs/screenshots/guide/android-series.png" width="215" alt="Series description on Android" />
+  <img src="docs/screenshots/guide/android-episodes.png" width="215" alt="Selecting episodes on Android" />
 </p>
 
-Background downloads show a notification. Play or share files through installed apps, choose a folder using the system picker, and select or swipe away completed tasks. Cancellation and deletion confirmations and haptic feedback are available.
+<details>
+<summary>CLI and running from source</summary>
 
-Android 7–9 may need storage permission. System-picked folders use their granted access. Force-stopping the app or restarting the device interrupts unfinished transfers; history remains. Manufacturer battery restrictions can affect background downloads.
-
-Screenshots use demonstration data. Their titles, links and paths are examples.
-
-## CLI
-
-Use the installed `kodikdown-cli` command, or `./kodikdown-linux-x86_64-cli` for the packaged Linux binary.
-
-```bash
-kodikdown-cli download "<player-link>" -o "./Videos"
-kodikdown-cli download "<player-link>" -t "Voice-over" -q 720 -n "Episode 01"
-kodikdown-cli download "<player-link>" --list-qualities
-kodikdown-cli download "<player-link>" --list-translations
-kodikdown-cli download "<player-link>" --print-url -q 480
-kodikdown-cli download --help
-```
-
-If the requested quality is unavailable, the nearest lower quality is used, or the lowest available variant. Stream links can expire; retry using the original player link.
-
-## Run from source
-
-Requires Python 3.11+, FFmpeg and a graphical desktop for the GUI.
+Running from source requires Python 3.11+ and FFmpeg.
 
 ```bash
 git clone https://github.com/SHAWNiksDev/kodikdown.git
@@ -113,14 +68,22 @@ cd kodikdown
 python -m venv .venv
 ```
 
-Activate with `source .venv/bin/activate` on Linux or `.venv\Scripts\Activate.ps1` in Windows PowerShell. Then:
+Activate the environment with `source .venv/bin/activate` on Linux or `.venv\Scripts\Activate.ps1` in PowerShell.
 
 ```bash
 python -m pip install .
 kodikdown
+kodikdown-cli download "<player-link>" -q 720 -o "./Videos"
+kodikdown-cli download "<player-link>" --list-qualities
+kodikdown-cli download --help
 ```
 
-## Development
+Packaged command-line builds have a filename that starts with `kodikdown-` and includes `-cli`.
+
+</details>
+
+<details>
+<summary>Build and test</summary>
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -132,23 +95,21 @@ pyinstaller packaging/kodikdown.spec --noconfirm
 pyinstaller packaging/kodikdown-cli.spec --noconfirm
 ```
 
-Build output goes to `dist/`. In PowerShell use `$env:QT_QPA_PLATFORM="offscreen"`. Integration tests need a local HTTP server.
+In PowerShell, set the test environment variable with `$env:QT_QPA_PLATFORM="offscreen"`. PyInstaller puts the binaries in `dist/`.
 
-Android builds require JDK 17, SDK 35 and Build Tools 35.0.0. Set `ANDROID_HOME` or a local `android/local.properties`.
+Android builds require JDK 17, Android SDK 35 and Build Tools 35.0.0. Set `ANDROID_HOME` or use `android/local.properties` to point Gradle at the SDK.
 
 ```bash
 bash android/build.sh
 bash android/build.sh --release
 ```
 
-Configure release signing in `android/keystore.properties` using the names in `android/app/build.gradle.kts`. Keys and passwords stay local and are ignored by Git. Back up the key for future updates. GitHub Actions verifies the checked-in signed APK; uploading a private signing key is not required.
+For release signing, set up `android/keystore.properties` as shown in the [Gradle configuration](android/app/build.gradle.kts). Keep the key and password outside Git and use the same key for future updates.
 
-## Troubleshooting
+</details>
 
-For 403/404 errors, resolve the player again or choose a lower quality. For processing errors, check FFmpeg and free disk space. [Open an issue](https://github.com/SHAWNiksDev/kodikdown/issues/new) with the app version, OS and reproduction steps. Include a player link only if it is safe to make public.
+## Help
 
-Android supports direct MP4 and completed, unencrypted HLS with MPEG-TS or fMP4, including byte ranges. Separate audio tracks, encryption, changing init segments and discontinuities are not supported yet. Desktop processing uses `yt-dlp`. Mirror availability and offered qualities depend on Kodik.
+For a 403 or 404 error, click **Find video** again or try a different player or quality. If a desktop download fails during processing, check FFmpeg and available disk space. Include your OS, KodikDown version and steps to reproduce when reporting a problem. [Report an issue](https://github.com/SHAWNiksDev/kodikdown/issues/new)
 
-## License
-
-[MIT](LICENSE). This is an independent project. Download only materials you have the right to save.
+[MIT License](LICENSE) · [Changelog](CHANGELOG.md)

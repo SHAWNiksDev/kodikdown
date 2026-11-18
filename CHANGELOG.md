@@ -7,11 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.5.0] - 2026-11-19
 
-- Страницы аниме на ПК и Android открывают выбор плеера, озвучки, разрешения и серий. Для доступных источников отображаются постер и описание.
-- Серии можно складывать в папку тайтла. Библиотека показывает загрузки KodikDown, а история копирует адрес страницы или плеера.
-- Добавлены прогресс в трее ПК, тихий канал загрузок Android и чтение ID из статистики CVH.
-- Добавлена [инструкция для ПК и Android](https://github.com/SHAWNiksDev/kodikdown/blob/main/docs/guide-ru.md).
-- Экран настроек Android показывает версию установленной сборки.
+### Скачивание по ссылке на аниме
+
+- Вставьте страницу **YummyAnime** (включая старый сайт), **AnimeGO**, **AniLiberty** или **AniDUB**. KodikDown покажет доступные плееры, озвучки и серии. Для источников, которые отдают постер и описание, их можно открыть или свернуть.
+- Кроме **Kodik**, можно вставлять ссылки на **CVH** и **AniBoom**. На Windows и Linux добавлены **Sibnet**, **Animedia** и **VK Видео**. Статистику CVH можно вставить целиком, если она содержит ID видео.
+- Выбирайте одну серию, несколько или весь список. Настройка **В папку сериала** сохраняет их вместе.
+
+### Библиотека, история и фоновые загрузки
+
+- Библиотека показывает файлы, скачанные через KodikDown. В библиотеке и истории удобно искать серии по папке.
+- **Скопировать исходную ссылку** возвращает адрес страницы или плеера. Для вставленного iframe копируется адрес из `src`.
+- На ПК прогресс виден в меню трея. На Android фоновые загрузки идут с тихим уведомлением, а в настройках отображается версия установленного приложения.
+- Если источник не сообщает разрешение, Android показывает качество **Исходное**.
+
+### Установка и инструкции
+
+В выпуск входят **Android 7.0+**, **Windows x64** и **Linux x64**. Для Windows и Linux доступны приложение с интерфейсом и консольная сборка.
+
+> **Android.** У APK новая подпись. Перед установкой 4.5.0 удалите прежнюю версию. История и настройки сбросятся, видео в общей папке останутся.
+
+[Инструкция со скриншотами](https://github.com/SHAWNiksDev/kodikdown/blob/main/docs/guide-ru.md) · [English guide](https://github.com/SHAWNiksDev/kodikdown/blob/main/docs/guide-en.md)
+
+<details>
+<summary>English release notes</summary>
+
+- Paste a page from YummyAnime (including the old site), AnimeGO, AniLiberty or AniDUB to pick a player, voice-over, quality and episodes. Posters and descriptions appear when the source provides them.
+- Alongside Kodik, KodikDown accepts CVH and AniBoom player links. Desktop also supports Sibnet, Animedia and VK Video. You can paste CVH statistics containing the video ID.
+- Queue individual episodes or a full series and save them in a single folder. The library lists KodikDown downloads. History copies the original page or player URL, including the `src` of a pasted iframe.
+- Monitor downloads in the desktop tray or a silent Android notification. Android Settings shows the installed version.
+- Android shows **Original** when the source doesn't report a resolution.
+- Builds are available for Android 7.0+, Windows x64 and Linux x64. Windows and Linux include GUI and CLI builds.
+
+**Android.** This APK has a new signing key. Uninstall the previous version before installing 4.5.0. This clears app settings and history. Videos in shared storage stay on your device.
+
+</details>
 
 ## [4.0.0] - 2026-11-14
 

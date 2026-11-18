@@ -16,6 +16,7 @@
     <string name="title_unknown">Untitled</string>
     <string name="file_name">File name</string>
     <string name="quality">Quality</string>
+    <string name="quality_original">Original</string>
     <string name="best_badge">best</string>
     <string name="translation">Voice-over</string>
     <string name="download">Download</string>

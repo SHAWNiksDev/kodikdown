@@ -71,8 +71,9 @@ class DownloadAdapter(
             val protected = !item.isTerminal
 
             binding.tvTitle.text = item.title
+            val quality = if (item.quality > 0) "${item.quality}p" else context.getString(R.string.quality_original)
             val qualitySuffix = if (item.isMp4) " • MP4" else ""
-            binding.tvQualityBadge.text = "${item.quality}p$qualitySuffix"
+            binding.tvQualityBadge.text = "$quality$qualitySuffix"
 
             binding.btnCancel.applyPressEffect()
             binding.btnOpen.applyPressEffect()
