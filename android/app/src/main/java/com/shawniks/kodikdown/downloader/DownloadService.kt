@@ -9,7 +9,6 @@ import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import com.shawniks.kodikdown.KodikApp
 import com.shawniks.kodikdown.MainActivity
 import com.shawniks.kodikdown.R
 import com.shawniks.kodikdown.data.DownloadItem
@@ -23,16 +22,17 @@ class DownloadService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastNotification: String? = null
     private var lastStage: String? = null
+    private var startId = 0
+    private var stopJob: Job? = null
 
     companion object {
-        const val CHANNEL_ID = "kodikdown_downloads"
+        const val CHANNEL_ID = "kodikdown_download_progress"
         const val NOTIFICATION_ID = 1001
         fun start(context: Context) {
             val intent = Intent(context, DownloadService::class.java)
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
             else context.startService(intent)
         }
-        fun stop(context: Context) { context.stopService(Intent(context, DownloadService::class.java)) }
     }
 
     private fun localizedContext(): Context {
@@ -49,6 +49,8 @@ class DownloadService : Service() {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(CHANNEL_ID, getString(R.string.notification_channel_name), NotificationManager.IMPORTANCE_LOW).apply {
                     setShowBadge(false)
+                    setSound(null, null)
+                    enableVibration(false)
                 })
         }
         ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(emptyList()),
@@ -78,10 +80,15 @@ class DownloadService : Service() {
     private fun render(items: List<DownloadItem>) {
         val active = items.filter { !it.isTerminal }
         if (active.isEmpty()) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            if (stopJob?.isActive != true) {
+                stopJob = scope.launch {
+                    delay(750)
+                    if (DownloadManager.items.value.none { !it.isTerminal }) stopSelfResult(startId)
+                }
+            }
             return
         }
+        stopJob?.cancel()
         val signature = active.joinToString { "${it.id}:${it.status}:${it.waitingForNetwork}:${(it.progress * 100).toInt()}:${it.speedBytesPerSec / 1024}" } + PreferencesManager(this).language
         if (signature == lastNotification) return
         lastNotification = signature
@@ -123,6 +130,8 @@ class DownloadService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        this.startId = startId
+        render(DownloadManager.items.value)
         return START_NOT_STICKY
     }
     override fun onDestroy() {

@@ -41,11 +41,11 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
             "https://kodikplayer.com/"
         }
 
-    private fun request(url: String): Request.Builder =
+    private fun request(url: String, referer: String? = null): Request.Builder =
         Request.Builder()
             .url(url)
             .header("User-Agent", KodikClient.USER_AGENT)
-            .header("Referer", refererFor(url))
+            .header("Referer", referer ?: refererFor(url))
 
     suspend fun downloadDirectMp4(
         url: String,
@@ -120,6 +120,7 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
         onProgress: (Long, Long?, Long, Long?) -> Unit,
         onNetworkWait: (Boolean) -> Unit = {},
         onProcessing: () -> Unit = {},
+        referer: String? = null,
     ) =
         withContext(Dispatchers.IO) {
             val part = File("${targetFile.absolutePath}.part")
@@ -127,10 +128,10 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
             val fragments = File("${targetFile.absolutePath}.fragments")
             try {
                 if (!fragments.mkdirs()) throw IOException("Could not create fragment cache")
-                val master = loadText(manifestUrl, onNetworkWait)
+                val master = loadText(manifestUrl, onNetworkWait, referer)
                 val mediaUrl =
                     HlsPlaylist.selectVariant(manifestUrl, master, quality) ?: manifestUrl
-                val text = if (mediaUrl == manifestUrl) master else loadText(mediaUrl, onNetworkWait)
+                val text = if (mediaUrl == manifestUrl) master else loadText(mediaUrl, onNetworkWait, referer)
                 val playlist = HlsPlaylist.parse(mediaUrl, text)
                 val bytesWritten = AtomicLong(0)
                 val progress = Progress(onProgress)
@@ -138,7 +139,7 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
                 onFragmentProgress(0, playlist.segments.size)
                 part.outputStream().buffered(BUFFER_SIZE).use { output ->
                     playlist.init?.let {
-                        val init = loadSegment(it, File(fragments, "init"), isCancelled, onNetworkWait)
+                        val init = loadSegment(it, File(fragments, "init"), isCancelled, onNetworkWait, referer)
                         init.inputStream().use { input -> input.copyTo(output, BUFFER_SIZE) }
                         init.delete()
                     }
@@ -150,7 +151,7 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
                         coroutineScope {
                             val downloads =
                                 batch.mapIndexed { index, segment -> async {
-                                    loadSegment(segment, File(fragments, "$batchIndex-$index"), isCancelled, onNetworkWait)
+                                    loadSegment(segment, File(fragments, "$batchIndex-$index"), isCancelled, onNetworkWait, referer)
                                 } }
                             for (download in downloads) {
                                 val fragment = download.await()
@@ -178,8 +179,8 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
             }
         }
 
-    private suspend fun loadText(url: String, onNetworkWait: (Boolean) -> Unit): String =
-        retryNetwork(onNetworkWait) { client.readResponse(request(url).build()) { response ->
+    private suspend fun loadText(url: String, onNetworkWait: (Boolean) -> Unit, referer: String?): String =
+        retryNetwork(onNetworkWait) { client.readResponse(request(url, referer).build()) { response ->
             if (!response.isSuccessful) throw IOException("HLS manifest HTTP ${response.code}")
             response.body?.string() ?: throw IOException("Empty HLS manifest")
         } }
@@ -189,11 +190,12 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
         file: File,
         isCancelled: () -> Boolean,
         onNetworkWait: (Boolean) -> Unit,
+        referer: String?,
     ): File = fragmentSlots.withPermit {
         retryNetwork(onNetworkWait) {
             currentCoroutineContext().ensureActive()
             checkCancelled(isCancelled)
-            val builder = request(segment.url)
+            val builder = request(segment.url, referer)
             segment.range?.let {
                 builder.header("Range", "bytes=${it.offset}-${it.offset + it.length - 1}")
             }

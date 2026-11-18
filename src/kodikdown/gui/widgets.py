@@ -394,7 +394,7 @@ class DownloadRow(QFrame):
         self.title_label.setObjectName("row-title")
         self.status_icon = QLabel()
         self.status_icon.hide()
-        self.badge = QLabel(f"{quality}p")
+        self.badge = QLabel(f"{quality}p" if quality else t("quality_auto"))
         self.badge.setObjectName("badge")
         self.cancel_button = QPushButton()
         self.cancel_button.setObjectName("icon")
@@ -496,7 +496,7 @@ class DownloadRow(QFrame):
             self._restyle()
             return
         if snapshot.quality is not None:
-            self.badge.setText(f"{snapshot.quality}p")
+            self.badge.setText(f"{snapshot.quality}p" if snapshot.quality else t("quality_auto"))
             self.bar.reset()
         if snapshot.source == "monitor":
             # Only the byte counter is known; keep whatever the bar shows.

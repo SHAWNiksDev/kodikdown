@@ -106,6 +106,7 @@ object FileUtils {
         sourceTempFile: File,
         baseFileName: String,
         targetFolder: String,
+        series: String? = null,
         isCancelled: () -> Boolean = { false },
     ): Pair<String, Uri> {
         val fileName = "${safeFileName(baseFileName)}.mp4"
@@ -124,11 +125,12 @@ object FileUtils {
         if (isCancelled()) throw CancellationException("Download cancelled")
         if (targetFolder.startsWith("content://")) {
             val tree = Uri.parse(targetFolder)
-            val parent =
+            val root =
                 DocumentsContract.buildDocumentUriUsingTree(
                     tree,
                     DocumentsContract.getTreeDocumentId(tree),
                 )
+            val parent = series?.let { seriesFolder(context, tree, root, safeFileName(it)) } ?: root
             val document =
                 DocumentsContract.createDocument(
                     context.contentResolver,
@@ -147,7 +149,7 @@ object FileUtils {
                 throw e
             } finally { MediaFiles.setPending(document.toString(), false) }
         }
-        val relativeSubDir = publicDirectory(targetFolder)
+        val relativeSubDir = publicDirectory(targetFolder) + (series?.let { "/${safeFileName(it)}" } ?: "")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values =
                 ContentValues().apply {
@@ -321,6 +323,26 @@ object FileUtils {
                 Toast.LENGTH_LONG,
             )
             .show()
+    }
+
+    @Synchronized
+    private fun seriesFolder(context: Context, tree: Uri, parent: Uri, name: String): Uri {
+        val resolver = context.contentResolver
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getDocumentId(parent))
+        val fields = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+        )
+        resolver.query(children, fields, null, null, null)?.use { cursor ->
+            while (cursor.moveToNext()) {
+                if (cursor.getString(1) == name && cursor.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    return DocumentsContract.buildDocumentUriUsingTree(tree, cursor.getString(0))
+                }
+            }
+        }
+        return DocumentsContract.createDocument(resolver, parent, DocumentsContract.Document.MIME_TYPE_DIR, name)
+            ?: throw java.io.IOException("Could not create series folder")
     }
 
     fun openFile(context: Context, savedPathOrUri: String) {

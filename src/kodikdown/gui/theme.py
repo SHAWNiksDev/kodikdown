@@ -200,6 +200,24 @@ def stylesheet(palette: Palette) -> str:
         selection-color: {palette.text};
     }}
     QTreeWidget::item {{ padding: 10px 6px; }}
+    QListWidget#episode-list {{
+        background: {palette.surface};
+        border: none;
+    }}
+    QListWidget#episode-list::item {{
+        border: 1px solid {palette.border};
+        border-radius: 6px;
+        color: {palette.text};
+        background: {palette.surface_alt};
+    }}
+    QListWidget#episode-list::item:hover {{
+        border-color: {palette.border_strong};
+    }}
+    QListWidget#episode-list::item:selected {{
+        color: {palette.text};
+        background: {palette.accent_soft};
+        border-color: {palette.accent};
+    }}
     QHeaderView::section {{
         background: {palette.surface};
         color: {palette.text_muted};

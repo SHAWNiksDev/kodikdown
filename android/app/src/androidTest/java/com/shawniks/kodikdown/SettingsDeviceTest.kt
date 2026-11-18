@@ -18,6 +18,22 @@ import kotlin.concurrent.thread
 
 @Suppress("DEPRECATION")
 class SettingsDeviceTest : InstrumentationTestCase() {
+    fun testSettingsShowsInstalledVersion() {
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        try {
+            main {
+                activity.findViewById<View>(R.id.tabSettings).performClick()
+                val installedVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                val label = activity.findViewById<TextView>(R.id.tvSettingsAppVersion)
+                assertEquals("KodikDown v$installedVersion", label.text.toString())
+            }
+        } finally {
+            main { activity.finish() }
+        }
+    }
+
     fun testSettingsSaveIndicatorIsSingleAndStopsAfterSaving() {
         val context = instrumentation.targetContext
         val prefs = PreferencesManager(context)

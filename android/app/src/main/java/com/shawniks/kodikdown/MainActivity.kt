@@ -50,6 +50,9 @@ import com.shawniks.kodikdown.data.Translation
 import com.shawniks.kodikdown.databinding.ActivityMainBinding
 import com.shawniks.kodikdown.downloader.DownloadManager
 import com.shawniks.kodikdown.kodik.KodikClient
+import com.shawniks.kodikdown.kodik.CatalogClient
+import com.shawniks.kodikdown.ui.CatalogDialog
+import com.shawniks.kodikdown.ui.SeriesFilter
 import com.shawniks.kodikdown.ui.AnimationExtensions.applyPressEffect
 import com.shawniks.kodikdown.ui.AnimationExtensions.popBounce
 import com.shawniks.kodikdown.ui.DownloadAdapter
@@ -72,6 +75,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var prefs: PreferencesManager
     private val client = KodikClient()
+    private val catalogClient = CatalogClient(client)
 
     private var resolveJob: Job? = null
     private var isResolving = false
@@ -797,9 +801,10 @@ class MainActivity : AppCompatActivity() {
             FileUtils.openFolder(this, prefs.downloadDir)
         }
 
+        val filter = SeriesFilter<LibraryItem>(binding.filterLibrary, { it.series }, libraryAdapter::submitList)
         uiCollectors += lifecycleScope.launch {
             LibraryManager.items.collect { list ->
-                libraryAdapter.submitList(list)
+                filter.submit(list)
                 if (list.isEmpty()) {
                     binding.llLibraryEmpty.visibility = View.VISIBLE
                     binding.rvLibrary.visibility = View.GONE
@@ -934,9 +939,10 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
 
+        val filter = SeriesFilter<HistoryItem>(binding.filterHistory, { it.series }, historyAdapter::submitList)
         uiCollectors += lifecycleScope.launch {
             HistoryManager.items.collect { list ->
-                historyAdapter.submitList(list)
+                filter.submit(list)
                 if (list.isEmpty()) {
                     binding.llHistoryEmpty.visibility = View.VISIBLE
                     binding.rvHistory.visibility = View.GONE
@@ -1189,6 +1195,12 @@ class MainActivity : AppCompatActivity() {
             settingsApplied()
         }
 
+        binding.switchGroupSeries.setOnCheckedChangeListener { _, checked ->
+            if (bindingSettings) return@setOnCheckedChangeListener
+            prefs.groupSeries = checked
+            settingsApplied()
+        }
+
         binding.switchAutoPaste.setOnCheckedChangeListener { _, isChecked ->
             if (bindingSettings) return@setOnCheckedChangeListener
             if (!acceptSettingsClick()) { bindSettingsUi(); return@setOnCheckedChangeListener }
@@ -1301,6 +1313,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun bindSettingsUi() {
         bindingSettings = true
+        binding.tvSettingsAppVersion.text = getString(R.string.settings_app_version, BuildConfig.VERSION_NAME)
         val accentColor = getColorFromAttr(R.attr.app_accent)
         val normalColor = getColorFromAttr(R.attr.app_text_muted)
 
@@ -1321,6 +1334,7 @@ class MainActivity : AppCompatActivity() {
         binding.tvSettingsConcurrentCount.text = prefs.concurrentDownloads.toString()
 
         binding.switchPreferMp4.isChecked = prefs.preferMp4
+        binding.switchGroupSeries.isChecked = prefs.groupSeries
         binding.switchWifiOnly.isChecked = prefs.wifiOnly
         binding.switchAutoPaste.isChecked = prefs.autoPaste
 
@@ -1383,7 +1397,9 @@ class MainActivity : AppCompatActivity() {
         switchTab(0)
         resolveJob = lifecycleScope.launch {
             try {
-                val retry = com.shawniks.kodikdown.data.HistoryRetry.resolve(item, client::resolve)
+                val retry = com.shawniks.kodikdown.data.HistoryRetry.resolve(item) { url, translation ->
+                    if (translation != null) client.resolve(url, translation) else catalogClient.resolve(url)
+                }
                 if (generation != resolveGeneration) return@launch
                 val variant = retry.variant
                 val direct = if (item.isMp4) variant.directMp4 else null
@@ -1398,6 +1414,8 @@ class MainActivity : AppCompatActivity() {
                             isMp4 = direct != null || variant.kind == "mp4", downloadDir = directory,
                             translationTitle = retry.translation, hlsUrl = if (direct != null && variant.kind == "hls") variant.url else null,
                             fallbackVariants = retry.variants, sourceInput = retry.source,
+                            retryInput = item.retryInput, series = item.series,
+                            referer = variant.referer,
                         )
                         ToastManager.show(binding.toastContainer, getString(R.string.starting))
                     }
@@ -1439,6 +1457,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun extractUrlFromText(raw: String): String {
+        val normalized = CatalogClient.normalize(raw)
+        if (normalized != raw.trim()) return normalized
         var text = raw.trim()
 
         // 1. If it's an iframe tag, extract src
@@ -1559,7 +1579,45 @@ class MainActivity : AppCompatActivity() {
         resolveJob =
             lifecycleScope.launch {
                 try {
-                    val resolved = client.resolve(rawUrl, translation)
+                    val catalog = if (translation == null) catalogClient.lookup(rawUrl) else null
+                    if (catalog != null) {
+                        if (catalog.choices.none { it.episodes.isNotEmpty() }) {
+                            throw java.io.IOException(getString(R.string.catalog_empty))
+                        }
+                        val cover = try {
+                            catalogClient.poster(catalog.poster)
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: java.io.IOException) {
+                            null
+                        }
+                        if (generation != resolveGeneration) return@launch
+                        hideResultCard()
+                        binding.tvStatus.text = catalog.title
+                        CatalogDialog(this@MainActivity, catalog, cover, prefs.defaultQuality.toIntOrNull(), prefs.groupSeries) {
+                            choice, episodes, quality, grouped ->
+                            if (prefs.wifiOnly && !isWifiConnected()) {
+                                ToastManager.show(binding.toastContainer, getString(R.string.wifi_only_warning), isError = true)
+                            } else withStoragePermission {
+                                episodes.forEach { episode ->
+                                    val number = episode.number.padStart(2, '0')
+                                    val label = getString(R.string.episode_number, number)
+                                    val title = if (grouped) label else "$label · ${catalog.title.take(65)}"
+                                    val name = listOf(title, choice.voice).filter { it.isNotBlank() }.joinToString(" · ")
+                                    DownloadManager.enqueueDownload(
+                                        context = this@MainActivity, title = name, fileName = name,
+                                        url = episode.url, quality = quality, isMp4 = prefs.preferMp4,
+                                        downloadDir = prefs.downloadDir, translationTitle = choice.voice,
+                                        sourceInput = CatalogClient.normalize(catalog.url),
+                                        retryInput = episode.url, series = catalog.title.takeIf { grouped },
+                                        prepare = { catalogClient.resolve(episode.url) },
+                                    )
+                                }
+                            }
+                        }.show()
+                        return@launch
+                    }
+                    val resolved = if (translation != null) client.resolve(rawUrl, translation) else catalogClient.resolve(rawUrl)
                     if (generation == resolveGeneration) {
                         if (resolvedUrl != rawUrl) nameManuallyEdited = false
                         resolvedUrl = rawUrl
@@ -1849,7 +1907,7 @@ class MainActivity : AppCompatActivity() {
         if (variant !in video.variants) return
         val translationTitle = selectedTranslation?.title
         val downloadDir = prefs.downloadDir
-        val sourceInput = resolvedUrl
+        val sourceInput = CatalogClient.normalize(resolvedUrl.orEmpty())
         withStoragePermission {
             DownloadManager.enqueueDownload(
                 context = this,
@@ -1863,6 +1921,7 @@ class MainActivity : AppCompatActivity() {
                 hlsUrl = variant.url,
                 fallbackVariants = video.variants,
                 sourceInput = sourceInput,
+                referer = variant.referer,
             )
         }
 

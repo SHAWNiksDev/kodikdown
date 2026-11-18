@@ -701,3 +701,9 @@ def test_fallback_uses_360p_and_clears_previous_fragments(tmp_path: Path, monkey
     )
     assert len(attempts) == 3
     assert [s.quality for s in snapshots] == [480, 360]
+
+
+def test_safe_filename_limits_multibyte_names() -> None:
+    name = safe_filename("動画" * 100)
+    assert name
+    assert len(name.encode("utf-8")) <= 200

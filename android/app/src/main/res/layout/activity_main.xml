@@ -690,6 +690,13 @@
                     android:textSize="12sp" />
             </LinearLayout>
 
+            <Spinner
+                android:id="@+id/filterLibrary"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:contentDescription="@string/all_series_folders"
+                android:visibility="gone" />
+
             <!-- Library RecyclerView -->
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/rvLibrary"
@@ -792,6 +799,13 @@
                     android:textColor="?attr/app_text_muted"
                     android:textSize="12sp" />
             </LinearLayout>
+
+            <Spinner
+                android:id="@+id/filterHistory"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:contentDescription="@string/all_series_folders"
+                android:visibility="gone" />
 
             <!-- History RecyclerView -->
             <androidx.recyclerview.widget.RecyclerView
@@ -1204,6 +1218,16 @@
                         android:layout_marginTop="12dp"
                         android:layout_marginBottom="12dp"
                         android:background="?attr/app_border" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switchGroupSeries"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="@string/group_series"
+                        android:textColor="?attr/app_text"
+                        app:trackTint="@color/settings_switch_track"
+                        app:thumbTint="@color/settings_switch_thumb" />
 
                     <!-- Wi-Fi Only -->
                     <LinearLayout
@@ -1658,7 +1682,8 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="KodikDown v4.0.0"
+                                android:id="@+id/tvSettingsAppVersion"
+                                tools:text="@string/app_name"
                                 android:textColor="?attr/app_text"
                                 android:textSize="13sp"
                                 android:textStyle="bold" />

@@ -148,10 +148,19 @@ class StreamVariant:
     url: str
     kind: str = "hls"
     direct_mp4: str | None = None
+    referer: str | None = None
+    mp4_referer: str | None = None
 
     @property
     def label(self) -> str:
-        return f"{self.quality}p"
+        return f"{self.quality}p" if self.quality else "Auto"
+
+    def download_url(self, prefer_mp4: bool) -> str:
+        return (self.direct_mp4 if prefer_mp4 else None) or self.url
+
+    def download_referer(self, prefer_mp4: bool) -> str:
+        header = self.mp4_referer if prefer_mp4 and self.direct_mp4 else self.referer
+        return header or referer_for(self.download_url(prefer_mp4))
 
 
 @dataclass(frozen=True)

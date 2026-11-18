@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">KodikDown</string>
-    <string name="app_version">v4.0.0</string>
-    <string name="url_placeholder">Вставьте ссылку на плеер Kodik или тег &lt;iframe&gt;</string>
+    <string name="url_placeholder">Вставьте ссылку на аниме или плеер</string>
     <string name="paste">Вставить</string>
     <string name="resolve">Найти видео</string>
     <string name="paste_empty">Буфер обмена пуст</string>
@@ -12,7 +11,7 @@
     <string name="network_error">Проблема с сетью или сервером: %1$s</string>
     <string name="page_changed">Страница плеера изменилась — не удалось её разобрать</string>
     <string name="no_streams">Плеер не отдал ссылки на видео</string>
-    <string name="hint">Подходит любое зеркало: kodikplayer.com, kodik.info, … Параметры ?episode= и ?season= сохраняются.</string>
+    <string name="hint">Вставьте ссылку с YummyAnime, AnimeGO, AniLiberty, AniDUB или ссылку на плеер.</string>
     <string name="title_unknown">Без названия</string>
     <string name="file_name">Имя файла</string>
     <string name="quality">Качество</string>
@@ -145,4 +144,15 @@
     <string name="confirm_cancel_message">Остановить скачивание «%1$s»? Временные файлы этой загрузки будут удалены.</string>
     <string name="stop_download">Остановить</string>
     <string name="keep_downloading">Продолжить загрузку</string>
+    <string name="catalog_player">Плеер</string>
+    <string name="group_series">В папку сериала</string>
+    <string name="show_details">Показать описание</string>
+    <string name="hide_details">Скрыть описание</string>
+    <string name="select_all_episodes">Выбрать все</string>
+    <string name="clear_selection">Снять выбор</string>
+    <string name="episode_number">Серия %1$s</string>
+    <string name="catalog_selected">Выбрано %1$d из %2$d</string>
+    <string name="catalog_empty">На этой странице нет серий для загрузки</string>
+    <string name="catalog_link_hint">Вставьте ссылку на аниме или плеер</string>
+    <string name="all_series_folders">Все папки сериалов</string>
 </resources>

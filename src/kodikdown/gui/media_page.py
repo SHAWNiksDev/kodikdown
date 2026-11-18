@@ -59,13 +59,13 @@ class MediaPage(QWidget):
         layout.addLayout(header)
         self.table = QTreeWidget()
         self.table.setObjectName("media-list")
-        self.table.setRootIsDecorated(False)
+        self.table.setRootIsDecorated(True)
         self.table.setUniformRowHeights(True)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.setFrameShape(QFrame.Shape.NoFrame)
         self.table.setColumnCount(4)
-        self.table.setIndentation(0)
+        self.table.setIndentation(18)
         self.table.header().setStretchLastSection(False)
         self.table.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column, width in ((1, 180 if history else 100), (2, 90), (3, 155)):
@@ -126,12 +126,34 @@ class MediaPage(QWidget):
             return
         self._signature = signature
         selected = self.selected_ids()
+        group_role = Qt.ItemDataRole.UserRole + 1
+        expanded = {
+            item.data(0, group_role)
+            for index in range(self.table.topLevelItemCount())
+            if (item := self.table.topLevelItem(index)).isExpanded()
+        }
         scroll = self.table.verticalScrollBar().value()
         self.table.blockSignals(True)
         self.table.clear()
         self._paths.clear()
         self._entries = {entry.id: entry for entry in self._history}
         locale = QLocale(current_language())
+        groups: dict[str, QTreeWidgetItem] = {}
+
+        def add(row: QTreeWidgetItem, series: str) -> None:
+            if not series:
+                self.table.addTopLevelItem(row)
+                return
+            group = groups.get(series)
+            if group is None:
+                group = QTreeWidgetItem([series])
+                group.setData(0, group_role, series)
+                group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                self.table.addTopLevelItem(group)
+                group.setExpanded(series in expanded)
+                groups[series] = group
+            group.addChild(row)
+
         if self.is_history:
             for entry in self._history:
                 available = self._available.get(entry.path, False)
@@ -140,10 +162,11 @@ class MediaPage(QWidget):
                     if entry.status == "finished" and not available
                     else t("history_" + entry.status)
                 )
+                quality = f"{entry.quality}p" if entry.quality else t("quality_auto")
                 row = QTreeWidgetItem(
                     [
                         entry.title,
-                        f"{entry.quality}p · {status}",
+                        f"{quality} · {status}",
                         _size(entry.file_size) if entry.file_size else "—",
                         locale.toString(
                             QDateTime.fromSecsSinceEpoch(int(entry.created)), "dd MMM HH:mm"
@@ -165,7 +188,7 @@ class MediaPage(QWidget):
                         else self._palette.text_muted
                     )
                     row.setForeground(1, QColor(colour))
-                self.table.addTopLevelItem(row)
+                add(row, entry.series)
                 row.setSelected(entry.id in selected)
         else:
             for file in self._files:
@@ -182,11 +205,11 @@ class MediaPage(QWidget):
                 row.setData(0, Qt.ItemDataRole.UserRole, file.path)
                 row.setToolTip(0, file.path)
                 self._paths[file.path] = file.path
-                self.table.addTopLevelItem(row)
+                add(row, file.series)
                 row.setSelected(file.path in selected)
         self.table.blockSignals(False)
         self.table.verticalScrollBar().setValue(scroll)
-        count = self.table.topLevelItemCount()
+        count = len(self._paths)
         self.count.setText(t("video_count", count=count))
         self.table.setVisible(count > 0)
         self.empty.setVisible(count == 0)

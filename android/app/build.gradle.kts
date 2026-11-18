@@ -28,8 +28,8 @@ android {
         applicationId = "com.shawniks.kodikdown"
         minSdk = 24
         targetSdk = 34
-        versionCode = 40000
-        versionName = "4.0.0"
+        versionCode = 40500
+        versionName = "4.5.0"
 
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
         vectorDrawables {
@@ -79,8 +79,10 @@ android {
     bundle { language { enableSplit = false } }
 
     buildFeatures {
+        buildConfig = true
         viewBinding = true
     }
+    sourceSets.getByName("main").res.srcDir(rootProject.file("../src/kodikdown/gui/brands"))
 }
 
 tasks.matching { it.name == "packageRelease" }.configureEach {

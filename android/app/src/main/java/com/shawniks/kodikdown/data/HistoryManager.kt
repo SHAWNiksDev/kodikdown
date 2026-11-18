@@ -35,6 +35,7 @@ object HistoryManager {
             for (command in commands) {
                 if (!initialized) {
                     loadFromDisk(command.context)
+                    LibraryManager.migrate(command.context, _items.value)
                     initialized = true
                 }
                 command.transform?.let { transform ->
@@ -77,6 +78,8 @@ object HistoryManager {
                 timestamp = System.currentTimeMillis(),
                 errorMessage = downloadItem.errorMessage,
                 sourceInput = downloadItem.sourceInput,
+                retryInput = downloadItem.retryInput,
+                series = downloadItem.series,
             )
         recordOrUpdate(context, entry)
     }
@@ -178,6 +181,8 @@ object HistoryManager {
                         url = obj.getString("url"),
                         quality = obj.getInt("quality"),
                         sourceInput = if (obj.has("sourceInput") && !obj.isNull("sourceInput")) obj.getString("sourceInput") else null,
+                        retryInput = obj.optString("retryInput").takeIf { it.isNotBlank() },
+                        series = obj.optString("series").takeIf { it.isNotBlank() },
                         translation = translation,
                         isMp4 = obj.optBoolean("isMp4", false),
                         status =
@@ -226,6 +231,8 @@ object HistoryManager {
                         put("fileName", item.fileName)
                         put("url", item.url)
                         put("sourceInput", item.sourceInput)
+                        put("retryInput", item.retryInput)
+                        put("series", item.series)
                         put("quality", item.quality)
                         if (item.translation != null) put("translation", item.translation)
                         put("isMp4", item.isMp4)

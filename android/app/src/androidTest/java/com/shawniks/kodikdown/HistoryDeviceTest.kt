@@ -39,7 +39,8 @@ class HistoryDeviceTest : InstrumentationTestCase() {
         val server = ServerSocket(0)
         val bytes = instrumentation.context.assets.open("resume.mp4").use { it.readBytes() }
         val file = File(context.cacheDir, "qa-history-existing.mp4").apply { writeBytes(bytes) }
-        val source = "<iframe src=\"https://kodikplayer.com/video/42/abcdef0123456789/720p?episode=2\"></iframe>"
+        val playerUrl = "https://kodikplayer.com/video/42/abcdef0123456789/720p?episode=2"
+        val source = "<iframe src=\"$playerUrl\"></iframe>"
         val title = "QA history ${java.util.UUID.randomUUID()}"
         val item = HistoryItem("qa-history-${java.util.UUID.randomUUID()}", title, "qa-history-${java.util.UUID.randomUUID()}",
             "http://127.0.0.1:${server.localPort}/video.mp4", 720, isMp4 = true,
@@ -71,7 +72,7 @@ class HistoryDeviceTest : InstrumentationTestCase() {
             main {
                 val row = activity.findViewById<RecyclerView>(R.id.rvHistory).getChildAt(0)
                 row.findViewById<View>(R.id.btnHistoryCopy).performClick()
-                assertEquals(source, clipboard.primaryClip!!.getItemAt(0).text.toString())
+                assertEquals(playerUrl, clipboard.primaryClip!!.getItemAt(0).text.toString())
                 val play = row.findViewById<View>(R.id.btnHistoryPlay)
                 val retry = row.findViewById<View>(R.id.btnHistoryRedownload)
                 assertTrue(retry.left - play.right >= (7 * activity.resources.displayMetrics.density).toInt())

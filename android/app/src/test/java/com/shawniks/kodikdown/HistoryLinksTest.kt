@@ -11,9 +11,9 @@ class HistoryLinksTest {
     private fun record(url: String, source: String? = null) = HistoryItem(
         "id", "Title", "filename", url, 720, sourceInput = source)
 
-    @Test fun exactOriginalIframeIsCopiedInsteadOfTheTemporaryStream() {
+    @Test fun iframeCopiesItsPlayerUrlInsteadOfTheTemporaryStream() {
         val input = "<iframe src=\"$player\"></iframe>"
-        assertEquals(input, HistoryLinks.copySource(record(cdn, input)))
+        assertEquals(player, HistoryLinks.copySource(record(cdn, input)))
     }
     @Test fun originalSurvivesQualityAndStatusCopies() {
         val entry = record(cdn, player).copy(quality = 360, url = "https://cdn/360.mp4")

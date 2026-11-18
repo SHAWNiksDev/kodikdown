@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.0] - 2026-11-19
+
+- Страницы аниме на ПК и Android открывают выбор плеера, озвучки, разрешения и серий. Для доступных источников отображаются постер и описание.
+- Серии можно складывать в папку тайтла. Библиотека показывает загрузки KodikDown, а история копирует адрес страницы или плеера.
+- Добавлены прогресс в трее ПК, тихий канал загрузок Android и чтение ID из статистики CVH.
+- Добавлена [инструкция на примере Yosuga no Sora](https://github.com/SHAWNiksDev/kodikdown/blob/v4.5.0/docs/guide-ru.md).
+- Экран настроек Android показывает версию установленной сборки.
+
 ## [4.0.0] - 2026-11-14
 
 ### Русский

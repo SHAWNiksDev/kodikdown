@@ -16,6 +16,10 @@ object HistoryRetry {
                 if (item.isMp4) item.url else null)
             return Selection(variant, listOf(variant), item.translation, null)
         }
+        if (!item.retryInput.isNullOrBlank()) {
+            val video = resolver(item.retryInput, null)
+            return Selection(video.pick(item.quality), video.variants, item.translation, source)
+        }
         var video = resolver(source, null)
         if (!item.translation.isNullOrBlank() && video.translation?.title != item.translation) {
             val translation = video.translations.firstOrNull { it.title == item.translation }

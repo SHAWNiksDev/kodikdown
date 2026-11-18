@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">KodikDown</string>
-    <string name="app_version">v4.0.0</string>
-    <string name="url_placeholder">Paste a Kodik player link or &lt;iframe&gt; tag</string>
+    <string name="settings_app_version" translatable="false">KodikDown v%1$s</string>
+    <string name="url_placeholder">Paste an anime page or player link</string>
     <string name="paste">Paste</string>
     <string name="resolve">Find video</string>
     <string name="paste_empty">Clipboard is empty</string>
@@ -12,7 +12,7 @@
     <string name="network_error">Network or server problem: %1$s</string>
     <string name="page_changed">The player page changed — could not read it</string>
     <string name="no_streams">The player returned no streams for this video</string>
-    <string name="hint">Any mirror works: kodikplayer.com, kodik.info, … Links with ?episode= and ?season= keep their episode.</string>
+    <string name="hint">Paste a YummyAnime, AnimeGO, AniLiberty or AniDUB page, or a player link.</string>
     <string name="title_unknown">Untitled</string>
     <string name="file_name">File name</string>
     <string name="quality">Quality</string>
@@ -145,4 +145,15 @@
     <string name="confirm_cancel_message">Stop downloading “%1$s”? Temporary files for this download will be removed.</string>
     <string name="stop_download">Stop download</string>
     <string name="keep_downloading">Keep downloading</string>
+    <string name="catalog_player">Player</string>
+    <string name="group_series">Save in a series folder</string>
+    <string name="show_details">Show description</string>
+    <string name="hide_details">Hide description</string>
+    <string name="select_all_episodes">Select all</string>
+    <string name="clear_selection">Clear selection</string>
+    <string name="episode_number">Episode %1$s</string>
+    <string name="catalog_selected">Selected %1$d of %2$d</string>
+    <string name="catalog_empty">No downloadable episodes on this page</string>
+    <string name="catalog_link_hint">Paste an anime page or player link</string>
+    <string name="all_series_folders">All series folders</string>
 </resources>

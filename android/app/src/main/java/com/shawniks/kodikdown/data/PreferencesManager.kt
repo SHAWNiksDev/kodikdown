@@ -50,6 +50,10 @@ class PreferencesManager(context: Context) {
         get() = prefs.getBoolean(KEY_PREFER_MP4, false)
         set(value) = prefs.edit().putBoolean(KEY_PREFER_MP4, value).apply()
 
+    var groupSeries: Boolean
+        get() = prefs.getBoolean("group_series", true)
+        set(value) = prefs.edit().putBoolean("group_series", value).apply()
+
     var defaultQuality: String
         get() = prefs.getString(KEY_DEFAULT_QUALITY, "ask") ?: "ask"
         set(value) = prefs.edit().putString(KEY_DEFAULT_QUALITY, value).apply()
@@ -91,7 +95,8 @@ class PreferencesManager(context: Context) {
             hapticFeedback = hapticFeedback,
             swipeToDelete = swipeToDelete,
             confirmCancelDownload = confirmCancelDownload,
-            confirmSwipeDelete = confirmSwipeDelete
+            confirmSwipeDelete = confirmSwipeDelete,
+            groupSeries = groupSeries,
         )
     }
 
@@ -109,6 +114,7 @@ class PreferencesManager(context: Context) {
             .putBoolean(KEY_SWIPE_TO_DELETE, settings.swipeToDelete)
             .putBoolean(KEY_CONFIRM_SWIPE_DELETE, settings.confirmSwipeDelete)
             .putBoolean(KEY_CONFIRM_CANCEL_DOWNLOAD, settings.confirmCancelDownload)
+            .putBoolean("group_series", settings.groupSeries)
             .apply()
     }
 
@@ -126,6 +132,7 @@ class PreferencesManager(context: Context) {
             .remove(KEY_SWIPE_TO_DELETE)
             .remove(KEY_CONFIRM_SWIPE_DELETE)
             .remove(KEY_CONFIRM_CANCEL_DOWNLOAD)
+            .remove("group_series")
             .apply()
     }
 }

@@ -133,6 +133,7 @@ class SettingsPage(QScrollArea):
         self._transfer_controls.append(self._check(downloads, "prefer_mp4", "prefer_mp4"))
         self._label(downloads, "prefer_mp4_hint", "muted")
         self._check(downloads, "auto_paste", "auto_paste")
+        self._check(downloads, "group_series", "group_series")
 
         self._label(root, "settings_controls", "section")
         controls = self._card(root)
@@ -253,6 +254,7 @@ class SettingsPage(QScrollArea):
             "confirm_cancel_download",
             "confirm_delete",
             "animations",
+            "group_series",
         ):
             check = getattr(self, field + "_check")
             with QSignalBlocker(check):

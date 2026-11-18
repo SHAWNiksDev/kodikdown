@@ -79,7 +79,7 @@ class HistoryAdapter(
             val available = com.shawniks.kodikdown.data.MediaFiles.isAvailable(item.savedPath, item.contentUri)
             val isSelected = selectedIds.contains(item.id)
             val context = binding.root.context
-            binding.tvHistoryTitle.text = item.title
+            binding.tvHistoryTitle.text = listOfNotNull(item.series, item.title).joinToString(" · ")
 
             // Status Badge
             when (item.status) {

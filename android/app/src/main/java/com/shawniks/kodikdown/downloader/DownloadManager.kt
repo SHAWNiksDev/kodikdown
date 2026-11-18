@@ -6,6 +6,7 @@ import com.shawniks.kodikdown.data.DownloadStatus
 import com.shawniks.kodikdown.data.HistoryManager
 import com.shawniks.kodikdown.data.LibraryManager
 import com.shawniks.kodikdown.data.StreamVariant
+import com.shawniks.kodikdown.data.ResolvedVideo
 import com.shawniks.kodikdown.util.FileUtils
 import java.io.File
 import java.io.IOException
@@ -45,10 +46,11 @@ object DownloadManager {
     fun isAssembling(id: String): Boolean =
         _items.value.any { it.id == id && it.status == DownloadStatus.ASSEMBLING }
 
-    fun isAlreadyActive(url: String, fileName: String): Boolean {
+    fun isAlreadyActive(url: String, fileName: String, series: String? = null): Boolean {
         val name = FileUtils.safeFileName(fileName)
         return _items.value.any {
-            !it.isTerminal && (it.url == url || it.fileName.equals(name, ignoreCase = true))
+            !it.isTerminal && (it.url == url || it.retryInput == url ||
+                it.series == series && it.fileName.equals(name, ignoreCase = true))
         }
     }
 
@@ -65,11 +67,16 @@ object DownloadManager {
         hlsUrl: String? = null,
         fallbackVariants: List<StreamVariant> = emptyList(),
         sourceInput: String? = null,
+        retryInput: String? = null,
+        series: String? = null,
+        prepare: (suspend () -> ResolvedVideo)? = null,
+        referer: String? = null,
     ): String {
         val app = context.applicationContext
         val name = FileUtils.safeFileName(fileName)
-        if (isAlreadyActive(url, name)) return ""
-        val item = DownloadItem(UUID.randomUUID().toString(), title, name, url, quality, isMp4, sourceInput = sourceInput)
+        if (isAlreadyActive(url, name, series)) return ""
+        val item = DownloadItem(UUID.randomUUID().toString(), title, name, url, quality, isMp4,
+            sourceInput = sourceInput, retryInput = retryInput, series = series)
         _items.update { listOf(item) + it }
         HistoryManager.recordFromDownload(app, item, translationTitle)
         try {
@@ -85,7 +92,17 @@ object DownloadManager {
             scope.launch(start = CoroutineStart.LAZY) {
                 try {
                     limiter.withSlot {
-                        executeDownload(app, item, downloadDir, hlsUrl, fallbackVariants)
+                        val resolved = prepare?.invoke()
+                        if (resolved == null) {
+                            executeDownload(app, item, downloadDir, hlsUrl, fallbackVariants, referer)
+                        } else {
+                            val variant = resolved.pick(quality)
+                            val direct = variant.directMp4.takeIf { isMp4 }
+                            executeDownload(app, item.copy(
+                                url = direct ?: variant.url, quality = variant.quality.takeIf { it > 0 } ?: quality,
+                                isMp4 = variant.kind == "mp4" || direct != null,
+                            ), downloadDir, variant.url, resolved.variants, variant.referer)
+                        }
                     }
                 } catch (e: CancellationException) {
                     updateItem(item.id) { it.copy(status = DownloadStatus.CANCELLED) }
@@ -120,7 +137,6 @@ object DownloadManager {
             }
             activeJobs.remove(item.id)
             cancelledItems.remove(item.id)
-            checkAllDone(app)
         }
         job.start()
         return item.id
@@ -132,6 +148,7 @@ object DownloadManager {
         downloadDir: String,
         hlsUrl: String?,
         fallbackVariants: List<StreamVariant>,
+        referer: String? = null,
     ) {
         val networkWait: (Boolean) -> Unit = { waiting ->
             if (_items.value.firstOrNull { it.id == item.id }?.waitingForNetwork != waiting) {
@@ -151,6 +168,7 @@ object DownloadManager {
                 hlsUrl ?: item.url,
                 primaryKind,
                 if (item.isMp4) item.url else null,
+                referer,
             )
         val sources =
             (listOf(primary) + fallbackVariants.filter { it.quality < item.quality }).distinctBy {
@@ -165,7 +183,7 @@ object DownloadManager {
                         status = DownloadStatus.DOWNLOADING,
                         quality = source.quality,
                         url = direct ?: source.url,
-                        isMp4 = direct != null,
+                        isMp4 = direct != null || source.kind == "mp4",
                         progress = 0f,
                         downloadedFragments = 0,
                         fragmentCount = 0,
@@ -253,6 +271,7 @@ object DownloadManager {
                             onProcessing = {
                                 updateItem(item.id) { it.copy(status = DownloadStatus.ASSEMBLING) }
                             },
+                            referer = source.referer,
                         )
                     }
                     break
@@ -271,7 +290,7 @@ object DownloadManager {
                 it.copy(status = DownloadStatus.ASSEMBLING, speedBytesPerSec = 0, etaSeconds = null)
             }
             val (path, uri) =
-                FileUtils.saveToPublicStorage(context, tempFile, item.fileName, downloadDir) {
+                FileUtils.saveToPublicStorage(context, tempFile, item.fileName, downloadDir, item.series) {
                     item.id in cancelledItems
                 }
             updateItem(item.id) {
@@ -284,7 +303,7 @@ object DownloadManager {
             }
             val finished = _items.value.firstOrNull { it.id == item.id } ?: item
             HistoryManager.recordFromDownload(context, finished)
-            LibraryManager.refresh(context, downloadDir)
+            LibraryManager.record(context, finished)
         } finally {
             tempFile.delete()
             File("${tempFile.absolutePath}.part").delete()
@@ -306,11 +325,6 @@ object DownloadManager {
 
     fun clearFinished() {
         _items.update { list -> list.filterNot { it.isTerminal } }
-    }
-
-    @Synchronized
-    private fun checkAllDone(context: Context) {
-        if (_items.value.none { !it.isTerminal }) DownloadService.stop(context)
     }
 
     @Synchronized

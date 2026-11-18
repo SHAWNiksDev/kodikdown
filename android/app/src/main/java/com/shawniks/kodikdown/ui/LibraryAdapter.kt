@@ -72,7 +72,7 @@ class LibraryAdapter(
         fun bind(item: LibraryItem) {
             val isSelected = selectedIds.contains(item.id)
 
-            binding.tvTitle.text = item.title
+            binding.tvTitle.text = listOfNotNull(item.series, item.title).joinToString(" · ")
 
             val sizeStr = FileUtils.formatFileSize(item.fileSizeBytes)
             val dateStr = if (item.dateModified > 0) dateFormat.format(Date(item.dateModified)) else ""

@@ -94,6 +94,7 @@ data class StreamVariant(
     val url: String,
     val kind: String = "hls",
     val directMp4: String? = null,
+    val referer: String? = null,
 ) {
     val label: String
         get() = "${quality}p"
@@ -150,6 +151,8 @@ data class DownloadItem(
     val contentUri: String? = null,
     val errorMessage: String? = null,
     val sourceInput: String? = null,
+    val retryInput: String? = null,
+    val series: String? = null,
 ) {
     val isFinished: Boolean
         get() = status == DownloadStatus.FINISHED
@@ -174,6 +177,7 @@ data class AppSettings(
     val swipeToDelete: Boolean = true,
     val confirmSwipeDelete: Boolean = false,
     val confirmCancelDownload: Boolean = true,
+    val groupSeries: Boolean = true,
 )
 
 data class HistoryItem(
@@ -191,6 +195,8 @@ data class HistoryItem(
     val timestamp: Long = System.currentTimeMillis(),
     val errorMessage: String? = null,
     val sourceInput: String? = null,
+    val retryInput: String? = null,
+    val series: String? = null,
 )
 
 data class LibraryItem(
@@ -203,4 +209,5 @@ data class LibraryItem(
     val dateModified: Long,
     val quality: Int? = null,
     val isMp4: Boolean = true,
+    val series: String? = null,
 )

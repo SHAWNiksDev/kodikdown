@@ -187,7 +187,7 @@ def test_history_retry_confirms_and_gets_fresh_source_and_voice(window, tmp_path
     )
     window.history.put(entry)
     window._copy_history_link(entry.id)
-    assert QApplication.clipboard().text() == SOURCE
+    assert QApplication.clipboard().text() == SOURCE.split('"')[1]
     calls = []
     monkeypatch.setattr(window.resolver, "resolve", lambda *args: calls.append(args))
     monkeypatch.setattr(window.pool, "start", lambda task: None)
@@ -214,7 +214,7 @@ def test_history_retry_confirms_and_gets_fresh_source_and_voice(window, tmp_path
     assert job.url == "https://cdn.example/fresh-480"
     assert job.title == "Episode"
     saved = window.history.get(identifier)
-    assert saved.source_input == SOURCE
+    assert saved.source_input == SOURCE.split('"')[1]
     assert saved.translation == "Voice B"
     assert saved.quality == 480
     assert existing.read_bytes() == b"finished video"
@@ -273,12 +273,15 @@ def test_active_and_intermediate_outputs_never_enter_library(tmp_path, qapp):
     for path in files:
         path.write_bytes(b"still being written")
     results = []
-    task = MediaScan(1, tmp_path, tuple(str(path) for path in files))
+    unrelated = tmp_path / "Unrelated.mp4"
+    unrelated.write_bytes(b"outside the library")
+    task = MediaScan(1, (), (*map(str, files), str(unrelated)))
     task.signals.ready.connect(lambda *args: results.append(args))
     try:
         task.run()
         assert results[0][1] == ()
-        assert not any(results[0][2].values())
+        assert results[0][2][str(unrelated)]
+        assert not any(results[0][2][str(file)] for file in files)
     finally:
         release_target(target)
 

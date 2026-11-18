@@ -624,3 +624,63 @@ def test_download_row_shows_fallback_quality(window: MainWindow) -> None:
     row = DownloadRow("test", "Clip", 720, window._palette, parent=window)
     row.update_progress(ProgressSnapshot(quality=360))
     assert row.badge.text() == "360p"
+
+
+@respx.mock
+def test_anime_page_queues_selected_episodes_and_keeps_going_on_error(
+    window: MainWindow, qtbot, media_server: object
+) -> None:
+    from kodikdown.sources import EpisodeRequest
+
+    page = "https://old.yummyani.me/catalog/item/test-series"
+    respx.get("https://api.yani.tv/anime/test-series").respond(
+        json={"response": {"anime_id": 42, "title": "Sample Series"}}
+    )
+
+    def record(number: int, url: str, player: str = "CVH") -> dict:
+        return {
+            "number": str(number),
+            "iframe_url": url,
+            "data": {"player": player, "dubbing": "Studio One"},
+        }
+
+    stream = str(media_server)
+    respx.get("https://api.yani.tv/anime/42/videos").respond(
+        json={
+            "response": [
+                record(1, stream),
+                record(2, stream.replace("stream.m3u8", "missing.m3u8")),
+                record(3, stream),
+                record(4, stream, "Other Player"),
+                record(5, "https://example.org/unknown", "Alloha"),
+            ]
+        }
+    )
+    window.show()
+    window.prefill(page)
+    picker = window.series_picker
+    qtbot.waitUntil(lambda: not picker.isHidden(), timeout=10_000)
+    assert picker.player.count() == 2
+    assert picker.episodes.count() == 3
+    assert "Alloha" in picker.unavailable.text()
+    picker.player.setCurrentText("Other Player")
+    assert picker.episodes.count() == 1
+    picker.player.setCurrentText("CVH")
+    picker.select_all.click()
+    picker.download.click()
+    picker.download.click()
+    assert len(window._jobs) == 3
+    qtbot.waitUntil(lambda: all(job.finished for job in window._jobs.values()), timeout=30_000)
+
+    entries = {
+        request.number: entry
+        for entry in window.history.entries
+        if (request := EpisodeRequest.from_url(entry.retry_input)) is not None
+    }
+    assert entries["2"].status == "failed"
+    assert all(Path(entries[number].path).is_file() for number in ("1", "3"))
+    assert all(entry.translation == "Studio One" for entry in entries.values())
+    assert all(entry.source_input == page for entry in entries.values())
+    assert len(list((window.settings.download_dir / "Sample Series").glob("*.mp4"))) == 2
+    window.url_edit.setText("https://example.org/")
+    assert not picker.download.isEnabled()

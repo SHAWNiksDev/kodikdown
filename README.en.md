@@ -1,20 +1,20 @@
 # KodikDown
 
-**Save videos from Kodik players and watch them later, on your phone or computer.**
+**Download episodes from supported sites and players for offline viewing.**
 
-[Download 4.0.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.0.0) · [Report a bug](https://github.com/SHAWNiksDev/kodikdown/issues/new) · [Changelog](CHANGELOG.md) · [Русский](README.md)
+[Download 4.5.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.5.0) · [Report a bug](https://github.com/SHAWNiksDev/kodikdown/issues/new) · [Changelog](CHANGELOG.md) · [Русский](README.md)
 
-<img src="docs/main-dark.png" width="940" alt="KodikDown 4.0.0: quality selection, download progress and completed video" />
+<img src="docs/screenshots/guide/desktop-yosuga.png" width="920" alt="Episode, voice-over and player selection in KodikDown 4.5.0" />
 
 Paste a player link or its entire `<iframe>`, choose a voice-over and quality, and download the video. There is a desktop app and CLI, plus a native Android app.
 
 ## Download
 
-Get the files from [release 4.0.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.0.0):
+Get the Windows and Linux builds from [release 4.5.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.5.0).
 
 | Platform | File |
 | --- | --- |
-| Android 7.0+ | `kodikdown-android.apk` |
+| Android 7.0+ | [Signed APK 4.0.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.0.0) |
 | Windows 10/11 x64 | `kodikdown-windows-x86_64.exe` |
 | Windows x64, CLI | `kodikdown-windows-x86_64-cli.exe` |
 | Linux x64 | `kodikdown-linux-x86_64` |
@@ -27,16 +27,29 @@ chmod +x kodikdown-linux-x86_64
 
 The packaged apps do not require Python. On Windows, download and open the EXE. Linux needs a graphical desktop. On Windows and Linux, install **FFmpeg** for HLS processing and check `ffmpeg -version` in a terminal. FFmpeg is not bundled. On Windows, you can use `winget install --id Gyan.FFmpeg -e`, then reopen the app.
 
-If the Android release will not install over an older test build, uninstall the old app first: the signing certificate has changed. Uninstalling resets settings and history; videos in the shared downloads folder remain. Future releases will keep the same release signing key.
+The Android 4.5.0 source is included. Updating the public APK in place requires the same signing key used for version 4.0.0.
 
 ## Use
+
+See the [illustrated desktop and Android guide](docs/guide-ru.md) for the Yosuga no Sora walkthrough and instructions for copying player links.
+
+### Download episodes from an anime page on desktop
+
+1. Copy the anime page URL from YummyAnime (including the old site), AnimeGO, AniLiberty, or AniDUB.
+2. Paste the URL into KodikDown and choose Find video.
+3. Choose a player, voice-over, and quality, then check the episodes you want.
+4. Choose Download. Each episode has its own progress and history entry.
+
+YummyAnime supports Kodik and CVH. Players without download support appear below the episode list. AnimeGO shows the player and voice-over options from the first episode and checks availability for the remaining episodes as they download.
+
+### Download from a player link
 
 1. Copy a link to the **Kodik player itself**, or its `<iframe>` code.
 2. Paste it and choose Find video.
 3. Select a voice-over, quality and optional filename.
 4. Download. Finished videos appear in Library.
 
-Links can include `https://`, start with `//`, or be embedded in copied text or Markdown. A cinema page URL is not necessarily a player URL.
+Links can include `https://`, start with `//`, or be embedded in copied text or Markdown. The desktop app also accepts CVH, AniBoom, Sibnet, Animedia and VK Video links, as well as direct MP4, HLS and DASH URLs.
 
 ## Features
 

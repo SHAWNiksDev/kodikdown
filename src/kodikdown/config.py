@@ -33,6 +33,7 @@ class Settings:
     confirm_cancel_download: bool = True
     confirm_delete: bool = True
     animations: bool = True
+    group_series: bool = True
 
     def updated(
         self,
@@ -47,6 +48,7 @@ class Settings:
         confirm_cancel_download: bool | None = None,
         confirm_delete: bool | None = None,
         animations: bool | None = None,
+        group_series: bool | None = None,
     ) -> Settings:
         return replace(
             self,
@@ -66,6 +68,7 @@ class Settings:
             ),
             confirm_delete=self.confirm_delete if confirm_delete is None else confirm_delete,
             animations=self.animations if animations is None else animations,
+            group_series=self.group_series if group_series is None else group_series,
         )
 
 
@@ -114,6 +117,7 @@ class ConfigStore:
             confirm_cancel_download=stored.get("confirm_cancel_download", True) is not False,
             confirm_delete=stored.get("confirm_delete", True) is not False,
             animations=stored.get("animations", True) is not False,
+            group_series=stored.get("group_series") is not False,
         )
 
     def save(self, settings: Settings) -> None:
@@ -130,6 +134,7 @@ class ConfigStore:
                 "confirm_cancel_download": settings.confirm_cancel_download,
                 "confirm_delete": settings.confirm_delete,
                 "animations": settings.animations,
+                "group_series": settings.group_series,
             },
             indent=2,
             ensure_ascii=False,

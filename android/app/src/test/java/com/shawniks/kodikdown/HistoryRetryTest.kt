@@ -15,7 +15,7 @@ class HistoryRetryTest {
     @Test fun refreshesSignedUrlsAndRetainsVoiceAndQuality(): Unit = runBlocking {
         val requests = mutableListOf<Translation?>()
         val retry = HistoryRetry.resolve(original) { input, voice ->
-            assertEquals(source, input)
+            assertEquals("https://kodikplayer.com/video/42/hash", input)
             requests.add(voice)
             ResolvedVideo("title", listOf(StreamVariant(1080, "https://fresh/1080"),
                 StreamVariant(720, "https://fresh/720?signature=NEW")),
@@ -25,7 +25,7 @@ class HistoryRetryTest {
         assertEquals("https://fresh/720?signature=NEW", retry.variant.url)
         assertEquals(720, retry.variant.quality)
         assertEquals("Voice B", retry.translation)
-        assertEquals(source, retry.source)
+        assertEquals("https://kodikplayer.com/video/42/hash", retry.source)
     }
 
     @Test fun missingQualityUsesSuppliedLowerVariant(): Unit = runBlocking {

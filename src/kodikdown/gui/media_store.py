@@ -7,7 +7,7 @@ import json
 import math
 import os
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -32,6 +32,8 @@ class HistoryEntry:
     path: str = ""
     error: str = ""
     file_size: int = 0
+    retry_input: str = ""
+    series: str = ""
 
     @classmethod
     def from_json(cls, raw: object) -> HistoryEntry | None:
@@ -45,7 +47,7 @@ class HistoryEntry:
         allowed = {name: value for name, value in raw.items() if name in cls.__dataclass_fields__}
         if any(
             not isinstance(allowed.get(key, ""), str)
-            for key in ("status", "translation", "path", "error")
+            for key in ("status", "translation", "path", "error", "retry_input", "series")
         ):
             return None
         if not 0 <= raw["created"] <= 253402300799 or not math.isfinite(raw["created"]):
@@ -94,7 +96,10 @@ class HistoryStore:
         return self._entries.get(identifier)
 
     def put(self, entry: HistoryEntry) -> None:
-        self._entries[entry.id] = entry
+        self.put_many((entry,))
+
+    def put_many(self, entries: Iterable[HistoryEntry]) -> None:
+        self._entries.update((entry.id, entry) for entry in entries)
         self._save()
 
     def update(self, identifier: str, **changes: Unpack[HistoryChanges]) -> None:
@@ -155,6 +160,7 @@ class MediaFile:
     title: str
     size: int
     modified: float
+    series: str = ""
 
 
 def readable_file(raw: str) -> bool:
@@ -203,34 +209,34 @@ class DeleteFiles(QRunnable):
 
 
 class MediaScan(QRunnable):
-    def __init__(self, generation: int, directory: Path, paths: tuple[str, ...]) -> None:
+    def __init__(
+        self, generation: int, entries: tuple[HistoryEntry, ...], paths: tuple[str, ...]
+    ) -> None:
         super().__init__()
         self.generation = generation
-        self.directory = directory
+        self.entries = entries
         self.paths = paths
         self.signals = ScanSignals()
 
     def run(self) -> None:
         files: list[MediaFile] = []
-        error = ""
-        extensions = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv", ".wmv", ".ts"}
-        try:
-            if self.directory.is_dir():
-                for path in self.directory.iterdir():
-                    if path.suffix.lower() not in extensions or not readable_file(str(path)):
-                        continue
-                    try:
-                        stat = path.stat()
-                        files.append(MediaFile(str(path), path.stem, stat.st_size, stat.st_mtime))
-                    except OSError:
-                        continue
-        except (OSError, ValueError) as exc:
-            error = str(exc)
         availability = {path: readable_file(path) for path in self.paths if path}
+        seen: set[str] = set()
+        for entry in self.entries:
+            if entry.path in seen or not availability.get(entry.path, False):
+                continue
+            try:
+                stat = Path(entry.path).stat()
+            except OSError:
+                continue
+            seen.add(entry.path)
+            files.append(
+                MediaFile(entry.path, entry.title, stat.st_size, stat.st_mtime, entry.series)
+            )
         with contextlib.suppress(RuntimeError):
             self.signals.ready.emit(
                 self.generation,
                 tuple(sorted(files, key=lambda item: item.modified, reverse=True)),
                 availability,
-                error,
+                "",
             )

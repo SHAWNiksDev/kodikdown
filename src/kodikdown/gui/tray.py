@@ -20,6 +20,9 @@ class DesktopTray(QObject):
         self.menu = QMenu(parent)
         self.show_action = self.menu.addAction("")
         self.show_action.triggered.connect(self.show_requested.emit)
+        self.progress_action = self.menu.addAction("")
+        self.progress_action.setEnabled(False)
+        self.progress_action.setVisible(False)
         self.menu.addSeparator()
         self.quit_action = self.menu.addAction("")
         self.quit_action.triggered.connect(self.quit_requested.emit)
@@ -31,6 +34,17 @@ class DesktopTray(QObject):
     def retranslate(self) -> None:
         self.show_action.setText(t("tray_show"))
         self.quit_action.setText(t("tray_quit"))
+
+    def set_progress(self, count: int, title: str, percent: int | None) -> None:
+        text = t("tray_progress", count=count)
+        if title:
+            text += f" · {title[:48]}"
+        if percent is not None:
+            text += f" · {percent}%"
+        self.progress_action.setVisible(count > 0)
+        if self.progress_action.text() != text:
+            self.progress_action.setText(text)
+            self.icon.setToolTip(text if count else "KodikDown")
 
     def ensure_visible(self) -> bool:
         if not QSystemTrayIcon.isSystemTrayAvailable():

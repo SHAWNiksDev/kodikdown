@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yt_dlp
 
-from kodikdown.kodik.models import referer_for
+from kodikdown.kodik.models import ResolvedVideo, referer_for
 from kodikdown.net import USER_AGENT
 
 _PROGRESS_INTERVAL = 0.12
@@ -45,6 +45,17 @@ _TRANSIENT_MARKERS = (
 class DownloadSource:
     url: str
     quality: int | None = None
+    referer: str | None = None
+
+
+def fallback_sources_for(
+    resolved: ResolvedVideo, quality: int, prefer_mp4: bool
+) -> tuple[DownloadSource, ...]:
+    return tuple(
+        DownloadSource(v.download_url(prefer_mp4), v.quality, v.download_referer(prefer_mp4))
+        for v in resolved.variants
+        if v.quality < quality
+    )
 
 
 @dataclass(frozen=True)
@@ -97,6 +108,7 @@ def safe_filename(name: str, fallback: str = "video") -> str:
     cleaned = _ILLEGAL_FS_CHARS.sub("_", name).strip(" .")
     cleaned = _TEMPLATE_CHARS.sub("_", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned)[:120]
+    cleaned = cleaned.encode("utf-8")[:200].decode("utf-8", errors="ignore")
     cleaned = _MEDIA_SUFFIX_RE.sub("", cleaned).strip(" .")
     if not cleaned or set(cleaned) == {"_"}:
         return fallback
@@ -322,7 +334,7 @@ class Downloader:
         Partial files are deliberately kept between attempts: yt-dlp resumes
         the fragments it already has, so the retry is cheap.
         """
-        sources = [DownloadSource(url)]
+        sources = [DownloadSource(url, referer=referer)]
         seen = {url}
         for source in self._fallback_sources:
             if source.url not in seen:
@@ -341,7 +353,7 @@ class Downloader:
                 self._logger.last_error = ""
                 try:
                     self._transfer(
-                        target_base, source.url, referer if index == 0 else referer_for(source.url)
+                        target_base, source.url, source.referer or referer_for(source.url)
                     )
                     return
                 except DownloadFailed as exc:
@@ -411,7 +423,7 @@ class Downloader:
     # -- yt-dlp plumbing ---------------------------------------------------
     def _options(self, target_base: Path, referer: str) -> dict[str, object]:
         return {
-            "format": "best",
+            "format": "best/bestvideo+bestaudio",
             "paths": {"home": str(target_base.parent)},
             "outtmpl": f"{target_base.name}.%(ext)s",
             "noplaylist": True,

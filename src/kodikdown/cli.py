@@ -14,11 +14,10 @@ from kodikdown.downloader import (
     DownloadCancelled,
     Downloader,
     DownloadFailed,
-    DownloadSource,
     ProgressSnapshot,
+    fallback_sources_for,
 )
 from kodikdown.i18n import set_language, t
-from kodikdown.kodik.client import KodikClient
 from kodikdown.kodik.errors import (
     InvalidUrlError,
     NoStreamsError,
@@ -26,12 +25,13 @@ from kodikdown.kodik.errors import (
     RequestFailedError,
     TranslationNotFoundError,
 )
-from kodikdown.kodik.models import ResolvedVideo, Translation, referer_for
+from kodikdown.kodik.models import ResolvedVideo, Translation
+from kodikdown.sources import MediaClient, Series
 
 app = typer.Typer(
     add_completion=False,
     invoke_without_command=True,
-    help="Download videos from Kodik players.",
+    help="Download videos from supported players.",
 )
 
 
@@ -74,7 +74,7 @@ def gui(
 
 @app.command()
 def download(
-    url: Annotated[str, typer.Argument(help="Kodik player link or iframe tag")],
+    url: Annotated[str, typer.Argument(help="Player link, iframe tag, or direct video link")],
     quality: Annotated[int | None, typer.Option("--quality", "-q", min=1)] = None,
     output: Annotated[
         Path | None,
@@ -124,7 +124,7 @@ def download(
         typer.secho(message, fg=typer.colors.RED, err=True)
         raise typer.Exit(6) from None
     except (NoStreamsError, PageStructureError) as exc:
-        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        typer.secho(str(exc) or t("no_streams"), fg=typer.colors.RED, err=True)
         raise typer.Exit(3) from None
     except (RequestFailedError, httpx.HTTPError) as exc:
         typer.secho(f"error: {exc}", fg=typer.colors.RED, err=True)
@@ -135,7 +135,9 @@ def download(
         typer.secho(message, fg=typer.colors.YELLOW, err=True)
 
     if list_qualities:
-        available = ", ".join(f"{v.quality}p" for v in resolved.variants)
+        available = ", ".join(
+            v.label if v.quality else t("quality_auto") for v in resolved.variants
+        )
         typer.echo(t("cli_qualities", title=resolved.title or "video", list=available))
         return
 
@@ -149,12 +151,12 @@ def download(
         return
 
     variant = resolved.pick(quality)
-    stream_url = variant.direct_mp4 if (as_mp4 and variant.direct_mp4) else variant.url
+    stream_url = variant.download_url(as_mp4)
     if print_url:
         typer.echo(stream_url)
         return
 
-    if quality is not None and variant.quality != quality:
+    if quality is not None and variant.quality and variant.quality != quality:
         available = ", ".join(f"{v.quality}p" for v in resolved.variants)
         typer.echo(
             t("cli_quality_fallback", wanted=quality, picked=variant.quality, list=available)
@@ -189,15 +191,11 @@ def download(
         listener=_cli_progress,
         concurrent_fragments=max(8, settings.concurrent_downloads * 4),
         filename=title,
-        fallback_sources=tuple(
-            DownloadSource(v.direct_mp4 if as_mp4 and v.direct_mp4 else v.url, v.quality)
-            for v in resolved.variants
-            if v.quality < variant.quality
-        ),
+        fallback_sources=fallback_sources_for(resolved, variant.quality, as_mp4),
     )
 
     try:
-        path = downloader.download_blocking(stream_url, title, referer_for(stream_url))
+        path = downloader.download_blocking(stream_url, title, variant.download_referer(as_mp4))
     except (KeyboardInterrupt, DownloadCancelled):
         downloader.cancel()
         sys.stderr.write("\r" + " " * 75 + "\r")
@@ -216,8 +214,10 @@ def download(
 
 
 async def _resolve(url: str, translation: str | None = None) -> ResolvedVideo:
-    async with KodikClient() as client:
-        resolved = await client.resolve(url)
+    async with MediaClient() as client:
+        resolved = await client.lookup(url)
+        if isinstance(resolved, Series):
+            raise PageStructureError(t("cli_anime_page"))
         if translation is None:
             return resolved
         chosen = _find_translation(resolved, translation)
@@ -226,7 +226,7 @@ async def _resolve(url: str, translation: str | None = None) -> ResolvedVideo:
             raise TranslationNotFoundError(translation, names)
         if chosen == resolved.translation:
             return resolved
-        return await client.resolve(url, chosen)
+        return await client.resolve_player(url, chosen)
 
 
 def _find_translation(resolved: ResolvedVideo, query: str) -> Translation | None:

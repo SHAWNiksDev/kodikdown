@@ -38,7 +38,12 @@ from PySide6.QtWidgets import (
 
 from kodikdown import __version__
 from kodikdown.config import ConfigStore, Settings
-from kodikdown.downloader import DownloadSource, ProgressSnapshot, is_pending_output, safe_filename
+from kodikdown.downloader import (
+    ProgressSnapshot,
+    fallback_sources_for,
+    is_pending_output,
+    safe_filename,
+)
 from kodikdown.gui.appearance import AppearanceOverlay
 from kodikdown.gui.desktop import open_directory, open_path, reveal_path
 from kodikdown.gui.icons import app_icon, icon
@@ -53,6 +58,7 @@ from kodikdown.gui.media_store import (
     readable_file,
 )
 from kodikdown.gui.save_indicator import SaveIndicator
+from kodikdown.gui.series_picker import SeriesPicker
 from kodikdown.gui.settings_page import SettingsPage
 from kodikdown.gui.theme import MODE_AUTO, palette_for, stylesheet
 from kodikdown.gui.tray import DesktopTray
@@ -64,11 +70,16 @@ from kodikdown.gui.widgets import (
     ProgressBar,
     Toast,
 )
-from kodikdown.gui.workers import DownloadTask, ResolverWorker
+from kodikdown.gui.workers import (
+    DownloadTask,
+    EpisodeDownload,
+    ResolverWorker,
+)
 from kodikdown.i18n import set_language, t
 from kodikdown.kodik.errors import InvalidUrlError
-from kodikdown.kodik.models import ResolvedVideo, StreamVariant, Translation, referer_for
+from kodikdown.kodik.models import ResolvedVideo, StreamVariant, Translation
 from kodikdown.kodik.parser import extract_embed
+from kodikdown.sources import EpisodeRequest, Series, public_source, recognized_link
 
 _MAX_TOASTS = 3
 _TOAST_LIFETIME_MS = 4200
@@ -81,10 +92,12 @@ class _Job:
     row: DownloadRow
     url: str
     title: str
+    directory: Path
     started: bool = field(default=False)
     finished: bool = field(default=False)
     cancelling: bool = field(default=False)
     status: str = "queued"
+    percent: int | None = None
 
 
 class MainWindow(QMainWindow):
@@ -99,6 +112,7 @@ class MainWindow(QMainWindow):
 
         self.resolver = ResolverWorker(self)
         self.resolver.resolved.connect(self._on_resolved)
+        self.resolver.catalog_ready.connect(self._on_catalog_ready)
         self.resolver.failed.connect(self._on_resolve_failed)
 
         self.pool = QThreadPool(self)
@@ -137,7 +151,13 @@ class MainWindow(QMainWindow):
             lambda detail: self._toast(t("history_save_failed", detail=detail), "error")
         )
         self.history = HistoryStore(store.path.with_name("history.json"), self.history_error.emit)
+        self.library = HistoryStore(store.path.with_name("library.json"), self.history_error.emit)
+        if not self.library.path.exists():
+            self.library.put_many(
+                entry for entry in self.history.entries if entry.status == "finished" and entry.path
+            )
         self.destroyed.connect(self.history.close)
+        self.destroyed.connect(self.library.close)
 
         self.setWindowTitle(t("app_title"))
         self.setWindowIcon(app_icon(self._palette.accent))
@@ -188,6 +208,9 @@ class MainWindow(QMainWindow):
         body.addWidget(self._build_url_row())
         body.addWidget(self._build_status_row())
         body.addWidget(self._build_result_card())
+        self.series_picker = SeriesPicker()
+        self.series_picker.download_requested.connect(self._download_episodes)
+        body.addWidget(self.series_picker)
         body.addWidget(self._build_downloads_header())
         body.addWidget(self._build_downloads_area(), 1)
         download_layout.addLayout(body, 1)
@@ -286,6 +309,7 @@ class MainWindow(QMainWindow):
         self.url_clear_action.setVisible(False)
         self.url_clear_action.triggered.connect(self.url_edit.clear)
         self.url_edit.textChanged.connect(lambda text: self.url_clear_action.setVisible(bool(text)))
+        self.url_edit.textChanged.connect(self._on_link_changed)
         self.url_edit.returnPressed.connect(self._on_find)
 
         self.paste_button = QPushButton(t("paste"))
@@ -333,6 +357,7 @@ class MainWindow(QMainWindow):
 
         self.title_label = QLabel()
         self.title_label.setObjectName("panel-title")
+        self.title_label.setTextFormat(Qt.TextFormat.PlainText)
         self.title_label.setWordWrap(True)
         layout.addWidget(self.title_label)
 
@@ -537,6 +562,7 @@ class MainWindow(QMainWindow):
         self.name_caption.setText(t("file_name"))
         self.translation_caption.setText(t("translation"))
         self.quality_caption.setText(t("quality"))
+        self.series_picker.retranslate()
         self.download_button.setText(t("download"))
         self.mp4_check.setText(t("download_mp4"))
         self.open_folder_button.setText(t("open_folder"))
@@ -547,9 +573,9 @@ class MainWindow(QMainWindow):
         self._selection_changed()
         if self._resolving:
             self.set_status(t("resolving"))
-        elif self._resolved is None:
+        elif self._resolved is None and self.series_picker.isHidden():
             self.set_status(t("hint"))
-        else:
+        elif self._resolved is not None:
             self._build_quality_pills(self._resolved, self._quality)
             if self._resolved.warnings:
                 self.warning_label.setText(t("warning_proxy"))
@@ -593,6 +619,13 @@ class MainWindow(QMainWindow):
         # A voice-over only applies to the video it was listed for.
         translation = self._translation_for(raw)
         self._start_resolve(raw, translation)
+
+    def _on_link_changed(self, raw: str) -> None:
+        if self._resolving and raw.strip() != self._url_in_use:
+            self._cancel_resolve()
+        matches = raw.strip() == self._resolved_url
+        self.result_card.setVisible(matches and self._resolved is not None)
+        self.series_picker.set_busy(self._resolving or not matches)
 
     def _translation_for(self, raw: str) -> Translation | None:
         if self._resolved is None or raw.strip() != self._resolved_url:
@@ -641,7 +674,9 @@ class MainWindow(QMainWindow):
         self.find_button.setIcon(
             icon("close", "#ffffff", 15) if resolving else icon("play", "#ffffff", 15)
         )
+        matches = self.url_edit.text().strip() == self._resolved_url
         self.download_button.setEnabled(not resolving and self._resolved is not None)
+        self.series_picker.set_busy(resolving or not matches)
         if resolving:
             self.resolve_bar.set_busy()
             self.resolve_bar.show()
@@ -657,6 +692,7 @@ class MainWindow(QMainWindow):
         if (
             retry is not None
             and retry.translation
+            and EpisodeRequest.from_url(retry.retry_input or retry.source_input) is None
             and (resolved.translation is None or resolved.translation.title != retry.translation)
         ):
             track = next(
@@ -668,7 +704,7 @@ class MainWindow(QMainWindow):
                 self._toast(t("translation_unavailable"), "error")
                 return
             self._retry_translation = True
-            self._start_resolve(retry.source_input, track)
+            self._start_resolve(retry.retry_input or retry.source_input, track)
             return
         same_video = self._url_in_use == self._resolved_url and bool(self._resolved_url)
         if not same_video:
@@ -676,6 +712,7 @@ class MainWindow(QMainWindow):
         self._resolved_url = self._url_in_use
         self._resolved = resolved
         self._variants = resolved.variants
+        self.series_picker.hide()
         self._set_resolving(False)
         self._populate_result(
             resolved,
@@ -690,7 +727,22 @@ class MainWindow(QMainWindow):
             self.name_edit.setText(retry.file_name)
             self._name_edited = True
             self.mp4_check.setChecked(retry.prefer_mp4)
-            self._on_download(confirmed=True)
+            self._on_download(confirmed=True, retry=retry)
+
+    def _on_catalog_ready(self, request_id: int, series: Series) -> None:
+        if request_id != self._request_id:
+            return
+        self._retry_entry = None
+        self._resolved = None
+        self._variants = ()
+        self._resolved_url = self._url_in_use
+        self._set_resolving(False)
+        self.result_card.hide()
+        quality = self.settings.default_quality
+        self.series_picker.set_series(
+            series, 1080 if quality == "ask" else int(quality), self.settings.group_series
+        )
+        self.set_status("")
 
     def _on_resolve_failed(self, request_id: int, kind: str, detail: str) -> None:
         if request_id != self._request_id:
@@ -700,12 +752,13 @@ class MainWindow(QMainWindow):
         self._variants = ()
         self._set_resolving(False)
         self.result_card.hide()
+        self.series_picker.hide()
         if kind == "network":
             self.set_status(t("network_error", detail=detail or "?"), state="error")
         elif kind == "unexpected":
             self.set_status(t("unexpected_error", detail=detail), state="error")
         else:
-            self.set_status(t(kind), state="error")
+            self.set_status(t(kind, detail=detail), state="error")
 
     def _populate_result(self, resolved: ResolvedVideo, keep_quality: int | None) -> None:
         self.title_label.setText(resolved.title or t("title_unknown"))
@@ -751,7 +804,7 @@ class MainWindow(QMainWindow):
         self._quality = selected
 
         for index, variant in enumerate(resolved.variants):
-            label = f"{variant.quality}p"
+            label = variant.label if variant.quality else t("quality_auto")
             if index == 0:
                 label += f" · {t('best_badge')}"
             pill = QPushButton(label)
@@ -786,7 +839,7 @@ class MainWindow(QMainWindow):
         return self._variants[0]
 
     # -- downloads ---------------------------------------------------------
-    def _on_download(self, *, confirmed: bool = False) -> None:
+    def _on_download(self, *, confirmed: bool = False, retry: HistoryEntry | None = None) -> None:
         if self._resolving:
             return
         resolved = self._resolved
@@ -795,28 +848,129 @@ class MainWindow(QMainWindow):
             return
 
         use_mp4 = self.mp4_check.isChecked() and bool(variant.direct_mp4)
-        url = variant.direct_mp4 if use_mp4 else variant.url
-        assert url is not None
-
-        if url in self._active_urls:
-            self._toast(t("already_downloading"), "warning")
-            return
-
+        url = variant.download_url(use_mp4)
         title = self.name_edit.text().strip() or resolved.title or t("title_unknown")
-        if any(
-            not job.finished
-            and safe_filename(job.title).casefold() == safe_filename(title).casefold()
-            for job in self._jobs.values()
-        ):
+
+        directory = self._series_directory(retry.series if retry else "")
+        if self._already_queued(url, title, directory):
             self._toast(t("already_downloading"), "warning")
             return
         if not confirmed:
             existing = self._existing_download_path(safe_filename(title))
             if existing:
-                self._confirm_existing(title, existing, lambda: self._on_download(confirmed=True))
+                request_id = self._request_id
+
+                def download_confirmed() -> None:
+                    if self._request_id == request_id and self.url_edit.text().strip() == raw:
+                        self._on_download(confirmed=True)
+
+                raw = self.url_edit.text().strip()
+                self._confirm_existing(title, existing, download_confirmed)
                 return
+        self._enqueue_download(
+            url,
+            title,
+            variant.quality,
+            public_source(retry.source_input if retry else self._resolved_url or self._url_in_use),
+            retry.translation
+            if retry
+            else resolved.translation.title
+            if resolved.translation
+            else "",
+            use_mp4,
+            referer=variant.download_referer(use_mp4),
+            resolved=resolved,
+            retry_input=retry.retry_input or retry.source_input if retry else "",
+            series=retry.series if retry else "",
+        )
+
+    def _already_queued(self, url: str, title: str, directory: Path) -> bool:
+        filename = safe_filename(title).casefold()
+        return url in self._active_urls or any(
+            not job.finished
+            and job.directory == directory
+            and safe_filename(job.title).casefold() == filename
+            for job in self._jobs.values()
+        )
+
+    def _download_episodes(self) -> None:
+        picker = self.series_picker
+        series, choice = picker.series, picker.choice()
+        if not series or not choice or self._resolving:
+            return
+        if self.url_edit.text().strip() != self._resolved_url:
+            return
+        quality = int(picker.quality.currentData())
+        prefer_mp4 = self.settings.prefer_mp4
+        group = series.title if picker.group.isChecked() else ""
+        original = public_source(self._resolved_url)
+        saved = [
+            entry for entry in self.library.entries if entry.path and readable_file(entry.path)
+        ]
+        saved_sources = {entry.retry_input or entry.source_input for entry in saved}
+        directory = self._series_directory(group)
+        queued: list[HistoryEntry] = []
+        skipped = 0
+        for episode in picker.selected(choice):
+            request = EpisodeRequest(episode.number, choice.player, choice.voice)
+            source = request.link(series.url)
+            number = episode.number.zfill(2)
+            title = t("episode_number", number=number)
+            if not group:
+                title += f" · {series.title[:72]}"
+            if choice.voice:
+                title = f"{title} · {choice.voice}"
+            filename = safe_filename(title)
+            if (
+                source in saved_sources
+                or self._already_queued(source, title, directory)
+                or self._existing_download_path(
+                    filename, directory=directory, include_history=False
+                )
+            ):
+                skipped += 1
+                continue
+            queued.append(
+                self._enqueue_download(
+                    source,
+                    title,
+                    quality,
+                    original,
+                    choice.voice,
+                    prefer_mp4,
+                    retry_input=source,
+                    series=group,
+                    episode=EpisodeDownload(
+                        series.title, choice, episode, quality or None, prefer_mp4
+                    ),
+                )
+            )
+        if queued:
+            self.history.put_many(queued)
+            self._render_history()
+            self._update_settings_lock()
+        message = t("episodes_queued", count=len(queued))
+        if skipped:
+            message += " " + t("episodes_skipped", count=skipped)
+        self._toast(message, "info" if queued else "warning")
+
+    def _enqueue_download(
+        self,
+        url: str,
+        title: str,
+        quality: int,
+        source: str,
+        voice: str,
+        prefer_mp4: bool,
+        *,
+        referer: str = "",
+        resolved: ResolvedVideo | None = None,
+        episode: EpisodeDownload | None = None,
+        retry_input: str = "",
+        series: str = "",
+    ) -> HistoryEntry:
         job_id = uuid.uuid4().hex
-        row = DownloadRow(job_id, title, variant.quality, self._palette)
+        row = DownloadRow(job_id, title, quality, self._palette)
         row.cancel_requested.connect(self._request_cancel_job)
         row.remove_requested.connect(self._remove_job)
         row.selection_requested.connect(self._toggle_download_selection)
@@ -824,18 +978,18 @@ class MainWindow(QMainWindow):
         row.folder_requested.connect(self._reveal_file)
         row.mark_starting()
 
+        directory = self._series_directory(series)
         task = DownloadTask(
             job_id,
             url,
             title,
-            referer_for(url),
-            self.settings.download_dir,
+            referer,
+            directory,
             concurrent_fragments=4,
-            fallback_sources=tuple(
-                DownloadSource(v.direct_mp4 if use_mp4 and v.direct_mp4 else v.url, v.quality)
-                for v in resolved.variants
-                if v.quality < variant.quality
-            ),
+            fallback_sources=fallback_sources_for(resolved, quality, prefer_mp4)
+            if resolved
+            else (),
+            episode=episode,
         )
         task.signals.started.connect(self._on_job_started)
         task.signals.progress.connect(self._on_progress)
@@ -843,26 +997,29 @@ class MainWindow(QMainWindow):
         task.signals.failed.connect(self._on_job_failed)
         task.signals.cancelled.connect(self._on_job_cancelled)
 
-        self._jobs[job_id] = _Job(task=task, row=row, url=url, title=title)
+        self._jobs[job_id] = _Job(task=task, row=row, url=url, title=title, directory=directory)
         self._active_urls.add(url)
-        self.history.put(
-            HistoryEntry(
-                job_id,
-                title,
-                safe_filename(title),
-                self._resolved_url or self._url_in_use,
-                variant.quality,
-                time.time(),
-                translation=resolved.translation.title if resolved.translation else "",
-                prefer_mp4=use_mp4,
-            )
+        entry = HistoryEntry(
+            job_id,
+            title,
+            safe_filename(title),
+            source,
+            quality,
+            time.time(),
+            translation=voice,
+            prefer_mp4=prefer_mp4,
+            retry_input=retry_input,
+            series=series,
         )
-        self._render_history()
-        self._update_settings_lock()
+        if episode is None:
+            self.history.put(entry)
+            self._render_history()
+            self._update_settings_lock()
         self._insert_row(row)
         self.pool.start(task)
         # Only claim the job is waiting when no worker picked it up.
         self._later(_QUEUE_HINT_MS, lambda: self._hint_queued(job_id))
+        return entry
 
     def _insert_row(self, row: DownloadRow) -> None:
         self.downloads_empty.hide()
@@ -896,6 +1053,7 @@ class MainWindow(QMainWindow):
             job.started = True
             job.status = "downloading"
             job.row.mark_downloading()
+            self._update_tray()
             self.history.update(job_id, status="downloading")
             self._render_history()
 
@@ -924,6 +1082,9 @@ class MainWindow(QMainWindow):
                     self.history.update(job_id, **changes)
                     self._render_history()
                 job.row.update_progress(snapshot)
+                if snapshot.total:
+                    job.percent = min(100, int(snapshot.downloaded * 100 / snapshot.total))
+                    self._update_tray()
 
     def _on_job_finished(self, job_id: str, path: str) -> None:
         job = self._jobs.get(job_id)
@@ -941,6 +1102,8 @@ class MainWindow(QMainWindow):
         job.row.refresh_availability(available)
         job.status = "finished"
         self.history.update(job_id, status="finished", path=path, file_size=size)
+        if entry := self.history.get(job_id):
+            self.library.put(entry)
         self._job_settled(job)
         self._toast(
             t("saved_to", path=Path(path).name) if available else t("file_missing"),
@@ -1007,6 +1170,15 @@ class MainWindow(QMainWindow):
 
     def _update_settings_lock(self) -> None:
         self.settings_page.set_transfer_locked(self._transfers_busy())
+        if hasattr(self, "tray"):
+            self._update_tray()
+
+    def _update_tray(self) -> None:
+        active = [job for job in self._jobs.values() if not job.finished]
+        current = next((job for job in active if job.started), None)
+        self.tray.set_progress(
+            len(active), current.title if current else "", current.percent if current else None
+        )
 
     def _accept_settings_action(self) -> bool:
         now = time.monotonic()
@@ -1191,7 +1363,12 @@ class MainWindow(QMainWindow):
                 + [job.row.path for job in self._jobs.values() if job.finished and job.row.path]
             )
         )
-        task = MediaScan(self._media_generation, self.settings.download_dir, paths)
+        entries = self.library.entries
+        task = MediaScan(
+            self._media_generation,
+            entries,
+            tuple(dict.fromkeys((*paths, *(entry.path for entry in entries)))),
+        )
         self._scan_task = task
         task.signals.ready.connect(self._on_media_scanned)
         self._media_pool.start(task)
@@ -1247,15 +1424,25 @@ class MainWindow(QMainWindow):
         if entry is not None and entry.source_input:
             clipboard = QGuiApplication.clipboard()
             if clipboard is not None:
-                clipboard.setText(entry.source_input)
+                clipboard.setText(public_source(entry.source_input))
                 self._toast(t("link_copied"))
 
-    def _existing_download_path(self, file_name: str) -> str:
-        for entry in self.history.entries:
-            if entry.file_name.casefold() == file_name.casefold() and readable_file(entry.path):
-                return entry.path
+    def _series_directory(self, series: str) -> Path:
+        return (
+            self.settings.download_dir / safe_filename(series)
+            if series
+            else self.settings.download_dir
+        )
+
+    def _existing_download_path(
+        self, file_name: str, *, directory: Path | None = None, include_history: bool = True
+    ) -> str:
+        if include_history:
+            for entry in self.history.entries:
+                if entry.file_name.casefold() == file_name.casefold() and readable_file(entry.path):
+                    return entry.path
         for suffix in (".mp4", ".mkv", ".webm", ".ts"):
-            path = self.settings.download_dir / (file_name + suffix)
+            path = (directory or self.settings.download_dir) / (file_name + suffix)
             if readable_file(str(path)):
                 return str(path)
         return ""
@@ -1301,9 +1488,10 @@ class MainWindow(QMainWindow):
                 return
             self._retry_entry = entry
             self._retry_translation = False
-            self.url_edit.setText(entry.source_input)
+            source = entry.retry_input or entry.source_input
+            self.url_edit.setText(source)
             self._switch_tab(0)
-            self._start_resolve(entry.source_input, None)
+            self._start_resolve(source, None)
 
         existing = (
             entry.path
@@ -1331,6 +1519,9 @@ class MainWindow(QMainWindow):
             delete()
 
     def _media_deleted(self, paths: set[str], error: str) -> None:
+        self.library.remove(
+            {entry.id for entry in self.library.entries if entry.path in paths}, set()
+        )
         for path in paths:
             self._availability[path] = False
         self._render_history()
@@ -1352,10 +1543,11 @@ class MainWindow(QMainWindow):
         raw = clipboard.text().strip() if clipboard is not None else ""
         if not raw or raw == self._last_clipboard:
             return
-        try:
-            extract_embed(raw)
-        except InvalidUrlError:
-            return
+        if not recognized_link(raw):
+            try:
+                extract_embed(raw)
+            except InvalidUrlError:
+                return
         self._last_clipboard = raw
         self.prefill(raw)
 
@@ -1535,6 +1727,7 @@ class MainWindow(QMainWindow):
         self.resolver.shutdown()
         self.pool.waitForDone(5000)
         self.history.close()
+        self.library.close()
         self._media_pool.clear()
         self._media_timer.stop()
         super().closeEvent(event)
