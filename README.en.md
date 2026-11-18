@@ -31,7 +31,7 @@ The Android 4.5.0 source is included. Updating the public APK in place requires 
 
 ## Use
 
-See the [illustrated desktop and Android guide](docs/guide-ru.md) for the Yosuga no Sora walkthrough and instructions for copying player links.
+See the [illustrated desktop and Android guide](docs/guide-ru.md) for setup and instructions on copying player links.
 
 ### Download episodes from an anime page on desktop
 
