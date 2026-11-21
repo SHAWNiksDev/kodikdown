@@ -29,12 +29,39 @@ abstract class PrepareBrandResources : DefaultTask() {
     }
 }
 
+abstract class WriteSourceTrees : DefaultTask() {
+    @get:Input
+    abstract val sourceTrees: Property<String>
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun write() {
+        val source = sourceTrees.get()
+        check(source.matches(Regex("[a-f0-9]{40} [a-f0-9]{40}"))) {
+            "Build the signed release with android/build.sh --release to record its source hashes."
+        }
+        outputDirectory.file("kodikdown-source-trees.txt").get().asFile.apply {
+            check(parentFile.mkdirs() || parentFile.isDirectory) { "Could not create the APK assets directory." }
+            writeText("$source\n")
+        }
+    }
+}
+
 androidComponents.onVariants { variant ->
     val variantName = variant.name.replaceFirstChar(Char::uppercaseChar)
     val brands = tasks.register<PrepareBrandResources>("prepare${variantName}BrandResources") {
         sourceDirectory.set(rootProject.layout.projectDirectory.dir("../src/kodikdown/gui/brands"))
     }
     variant.sources.res?.addGeneratedSourceDirectory(brands, PrepareBrandResources::outputDirectory)
+}
+
+androidComponents.onVariants(androidComponents.selector().withBuildType("release")) { variant ->
+    val sourceHashes = tasks.register<WriteSourceTrees>("writeReleaseSourceTrees") {
+        sourceTrees.set(providers.gradleProperty("kodikdownSourceTrees").orElse(""))
+    }
+    variant.sources.assets?.addGeneratedSourceDirectory(sourceHashes, WriteSourceTrees::outputDirectory)
 }
 
 val signingProperties = Properties().apply {

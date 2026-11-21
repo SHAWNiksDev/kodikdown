@@ -19,7 +19,25 @@ if [[ "${1:-}" == "--release" ]]; then
     shift
 fi
 if [[ "$variant" == "release" ]]; then
-    "$DIR/gradlew" -p "$DIR" testReleaseUnitTest lintRelease assembleRelease "$@"
+    repo="$DIR/.."
+    brand_dir=src/kodikdown/gui/brands
+    source_trees() {
+        git -C "$repo" rev-parse HEAD:android "HEAD:$brand_dir" | paste -sd ' ' -
+    }
+    expected_trees="$(source_trees)"
+    check_release_source() {
+        local current changes
+        current="$(source_trees)"
+        changes="$(git -C "$repo" status --porcelain --untracked-files=all -- android "$brand_dir")"
+        if [[ "$current" != "$expected_trees" || -n "$changes" ]]; then
+            printf '%s\n' 'Build the signed APK from clean, unchanged Android and brand source trees.' >&2
+            exit 1
+        fi
+    }
+    check_release_source
+    "$DIR/gradlew" -p "$DIR" testReleaseUnitTest lintRelease assembleRelease "$@" \
+        "-PkodikdownSourceTrees=$expected_trees"
+    check_release_source
 else
     "$DIR/gradlew" -p "$DIR" testDebugUnitTest lintDebug assembleDebug "$@"
 fi

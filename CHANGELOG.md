@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Русский
+
+- ПК резервирует имена файлов между процессами. ОС освобождает блокировки после завершения процесса. Повтор из истории ищет дубликат в папке нужного сериала.
+- Android корректно скачивает HLS с относительными ссылками после редиректов и передаёт `Referer` при прямой загрузке MP4. Отмена дожидается закрытия сетевых операций перед удалением временных файлов.
+- Исправлены гонка при создании кэша, обработка имён с многобайтовыми символами и восстановление строк после отмены свайпа. Библиотека обновляет доступность файлов реже и точечно.
+- Подписанный APK содержит SHA деревьев Android и общих иконок. CI сверяет их с исходниками в теге перед публикацией.
+
+### English
+
+- Desktop reserves output names across processes. The OS releases the locks when a process exits. History retries look for duplicates in the episode's own series folder.
+- Android resolves relative HLS links after redirects and sends the `Referer` for direct MP4 downloads. Cancellation waits for network readers to close before removing partial files.
+- Fixed a cache directory race, multibyte filenames and row restoration after cancelled swipe actions. File availability checks run less often and refresh the affected rows.
+- The locally signed APK embeds the Android and shared icon tree hashes. CI checks them against the release tag before publishing.
+
 ## [4.5.0] - 2026-11-19
 
 ### Скачивание по ссылке на аниме

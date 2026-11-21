@@ -1,10 +1,10 @@
 # How to use KodikDown
 
-[Home](../README.en.md) · [Русский](guide-ru.md) · [Download KodikDown 4.5.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.5.0)
+[Home](../README.en.md) · [Русский](guide-ru.md) · [Download KodikDown](../README.en.md#download)
 
 [Desktop](#desktop) · [Android](#android) · [Player links](#copy-a-player-link)
 
-Copy the anime page URL from your browser. KodikDown supports YummyAnime, including the old site, AnimeGO, AniLiberty and AniDUB. You can paste a player URL, an `<iframe>` embed or a direct video link into the same field. The numbered arrows match the steps below.
+Copy the anime page URL from your browser. KodikDown supports YummyAnime, including the old site, AnimeGO, AniLiberty and AniDUB. You can paste a player URL, an `<iframe>` embed or a direct video link into the same field.
 
 ## Desktop
 
@@ -34,14 +34,14 @@ Use the window's close button to keep downloading in the background. If your des
 
 <img src="screenshots/guide/android-library.png" width="320" alt="Arrow pointing to the Android series folder filter" />
 
-Allow notifications if Android asks and you want to see download progress. You can change the download folder in **Settings**. On Android 7–9, the app may need storage permission.
+Allow notifications if you want to see download progress. To change the download folder, open **Settings** and choose a folder in the system picker. On Android 7–9, the app may need storage permission.
 
 <details>
 <summary>Check your installed version</summary>
 
 Open **Settings** and scroll to **About**. The version is shown next to KodikDown.
 
-<img src="screenshots/android-about.png" width="380" alt="KodikDown 4.5.0 under About on Android" />
+<img src="screenshots/android-about.png" width="380" alt="The KodikDown version under About on Android" />
 
 </details>
 
@@ -74,6 +74,6 @@ For AniLiberty and AniDUB, copy the release page URL. On mobile, **Share → Kod
 
 ## Direct links and quality
 
-Paste direct **MP4** or **HLS (`.m3u8`)** links into the app. Desktop also supports **DASH (`.mpd`)** and needs FFmpeg to process HLS. Android supports completed, unencrypted HLS with MPEG-TS or fMP4 and no separate audio track.
+Paste direct **MP4** or **HLS (`.m3u8`)** links into the app. Desktop also supports **DASH (`.mpd`)** and needs FFmpeg to process HLS. Android supports completed, unencrypted HLS with MPEG-TS or fMP4. Separate audio tracks and `EXT-X-DISCONTINUITY` tags are unsupported.
 
-**Original** means that the source determines the resolution. When the requested quality is unavailable, KodikDown tries the nearest available lower resolution. Stream URLs can expire. Run **Find video** again with the original page or player link to retry.
+**Original** means the source did not report a resolution up front. If the requested quality is missing, KodikDown chooses the closest lower quality, or the lowest available if all options are higher. Stream URLs can expire. Run **Find video** again with the original link or retry the download from history to get a fresh URL.

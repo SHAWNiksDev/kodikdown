@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -14,8 +17,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install ruff
-      - run: ruff check src tests
-      - run: ruff format --check src tests
+      - run: ruff check src tests packaging/verify_android_release.py
+      - run: ruff format --check src tests packaging/verify_android_release.py
 
   typecheck:
     runs-on: ubuntu-latest
@@ -68,6 +71,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: kodikdown-linux-preview
+          if-no-files-found: error
           path: dist/kodikdown
 
   android:
@@ -87,6 +91,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: kodikdown-android-preview
+          if-no-files-found: error
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
   android-device:
@@ -125,7 +130,8 @@ jobs:
             adb shell pm grant com.shawniks.kodikdown android.permission.READ_EXTERNAL_STORAGE || true
             adb shell pm grant com.shawniks.kodikdown android.permission.WRITE_EXTERNAL_STORAGE || true
             adb shell pm grant com.shawniks.kodikdown android.permission.POST_NOTIFICATIONS || true
-            adb shell am instrument -r -w -e class com.shawniks.kodikdown.HistoryDeviceTest,com.shawniks.kodikdown.SettingsDeviceTest,com.shawniks.kodikdown.RemuxDeviceTest,com.shawniks.kodikdown.ReliabilityDeviceTest,com.shawniks.kodikdown.ResponsiveDeviceTest com.shawniks.kodikdown.test/android.test.InstrumentationTestRunner | tee android-device-results.txt
+            adb shell am instrument -r -w -e class com.shawniks.kodikdown.HistoryDeviceTest,com.shawniks.kodikdown.SettingsDeviceTest,com.shawniks.kodikdown.RemuxDeviceTest,com.shawniks.kodikdown.ReliabilityDeviceTest,com.shawniks.kodikdown.ResponsiveDeviceTest com.shawniks.kodikdown.test/android.test.InstrumentationTestRunner > android-device-results.txt || { cat android-device-results.txt; exit 1; }
+            cat android-device-results.txt
             timeout 20s adb logcat -b all -d > android-device-logcat.txt || true
             ! grep -E 'FAILURES!!!|INSTRUMENTATION_FAILED|INSTRUMENTATION_ABORTED|shortMsg=|Process crashed' android-device-results.txt
             grep -E 'OK \([0-9]+ tests?\)' android-device-results.txt

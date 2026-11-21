@@ -4,13 +4,13 @@
 
 **Скачивайте аниме по ссылке на страницу или плеер и смотрите офлайн.**
 
-[Скачать](#скачать) · [Инструкция для ПК и Android](docs/guide-ru.md) · [Что нового в 4.5.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.5.0) · [English](README.en.md)
+[Скачать](#скачать) · [Инструкция для ПК и Android](docs/guide-ru.md) · [Что нового](CHANGELOG.md) · [English](README.en.md)
 
 [![Релиз](https://img.shields.io/github/v/release/SHAWNiksDev/kodikdown)](https://github.com/SHAWNiksDev/kodikdown/releases/latest)
 [![CI](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml/badge.svg)](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml)
 [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-<img src="docs/screenshots/desktop-ru.png" width="880" alt="KodikDown 4.5.0 на ПК с тремя выбранными сериями" />
+<img src="docs/screenshots/desktop-ru.png" width="880" alt="KodikDown на ПК с тремя выбранными сериями" />
 
 </div>
 
@@ -22,7 +22,7 @@
 | **Linux x64** | [Скачать для Linux](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64) | Дайте файлу право на запуск |
 | **Android 7.0+** | [Скачать APK](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-android.apk) | Откройте APK на телефоне |
 
-> **Переход на Android 4.5.0.** У APK новая подпись. Перед установкой удалите прежнюю версию. История и настройки сбросятся, видео в общей папке останутся.
+> **Обновление Android со сборок до 4.5.0.** Если Android сообщает о конфликте подписей, удалите старую версию и установите новый APK. История и настройки сбросятся, а видео в общей папке останутся.
 
 На Linux запустите `chmod +x kodikdown-linux-x86_64`, затем `./kodikdown-linux-x86_64`. Для обработки HLS на ПК установите **FFmpeg** и проверьте командой `ffmpeg -version`, что программа доступна. В PowerShell можно установить FFmpeg командой `winget install --id Gyan.FFmpeg -e`.
 
@@ -34,7 +34,7 @@
 2. Нажмите **Найти видео**. Выберите плеер, озвучку, качество и нужные серии.
 3. Нажмите **Скачать**. Готовые серии будут в **Библиотеке**. Включите **В папку сериала**, если хотите сохранить их вместе.
 
-Есть ссылка на плеер или код `<iframe>`? Вставьте его в то же поле. В гайде показано, как скопировать адрес плеера и где найти результат на ПК и телефоне. [Инструкция со скриншотами](docs/guide-ru.md)
+Ссылку на плеер или код `<iframe>` можно вставить в то же поле. [Инструкция со скриншотами](docs/guide-ru.md)
 
 ## Поддерживаемые источники
 
@@ -60,7 +60,7 @@
 <details>
 <summary>Консоль и запуск из исходников</summary>
 
-Для запуска из исходников нужны Python 3.11+ и FFmpeg.
+Для запуска из исходников нужен Python 3.11+. Для сборки HLS на ПК нужен FFmpeg.
 
 ```bash
 git clone https://github.com/SHAWNiksDev/kodikdown.git
@@ -79,6 +79,8 @@ kodikdown-cli download --help
 ```
 
 У готовых консольных сборок имя файла начинается с `kodikdown-` и содержит `-cli`.
+
+CLI скачивает одну серию за вызов. При одновременной загрузке файлов с одинаковым именем новые файлы получают суффиксы `(2)`, `(3)` и так далее.
 
 </details>
 
@@ -101,10 +103,21 @@ pyinstaller packaging/kodikdown-cli.spec --noconfirm
 
 ```bash
 bash android/build.sh
-bash android/build.sh --release
 ```
 
-Для релиза задайте параметры подписи в `android/keystore.properties` по [настройкам Gradle](android/app/build.gradle.kts). Сохраните ключ и пароль вне Git, чтобы подписывать будущие обновления тем же ключом.
+Для проверок на личном телефоне добавьте `-PkodikdownDeviceQa=true` к задачам `assembleDebug` и `assembleDebugAndroidTest`. Суффикс `.deviceqa` отделяет тестовые APK и их данные от установленного приложения.
+
+Код ПК и CLI находится в `src/kodikdown/`, код Android в `android/app/`. Иконки источников общие. Gradle копирует их из `src/kodikdown/gui/brands/` при сборке.
+
+### Подписанный Android-релиз
+
+Подпись остаётся локальной. Укажите `storeFile`, `keyAlias`, `storePassword` и `keyPassword` в `android/keystore.properties` или используйте переменные `KODIKDOWN_*`. Храните ключ и пароли вне Git. [Настройки подписи Gradle](android/app/build.gradle.kts)
+
+1. Согласуйте версии Python и Android и закоммитьте исходники Android и общие иконки.
+2. Запустите `bash android/build.sh --release`. Скрипт встроит Git SHA деревьев `android/` и `src/kodikdown/gui/brands/` в подписанный `packaging/kodikdown-android.apk`.
+3. Закоммитьте APK. Тег `v<версия>` должен указывать на коммит с этим APK и теми же деревьями исходников. Правки в остальной части репозитория допустимы.
+
+Workflow сверяет встроенные SHA с деревьями исходников в теге и проверяет версию, подпись и параметры APK. Ручной Windows workflow собирает файлы для выбранного тега и сохраняет их как артефакты запуска.
 
 </details>
 

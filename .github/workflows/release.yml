@@ -5,22 +5,27 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   windows:
     uses: ./.github/workflows/windows.yml
     with:
       tag: ${{ github.ref_name }}
+      commit: ${{ github.sha }}
 
   linux:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -e '.[dev]'
+      - name: Check the release version
+        run: python -c 'import os; from kodikdown import __version__; assert os.environ["GITHUB_REF_NAME"] == f"v{__version__}"'
       - name: Build the desktop app
         env:
           KODIKDOWN_BUILD_NAME: kodikdown-linux-x86_64
@@ -33,6 +38,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: kodikdown-linux
+          if-no-files-found: error
           path: |
             dist/kodikdown-linux-x86_64
             dist/kodikdown-linux-x86_64-cli
@@ -41,6 +47,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -49,49 +57,23 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      # Release signing stays local. CI verifies the published APK without
-      # receiving a private key or a signing password.
       - name: Verify the signed Android release
-        run: |
-          python3 - <<'PY'
-          import os
-          import re
-          import subprocess
-          from pathlib import Path
-
-          tools = Path(os.environ["ANDROID_HOME"]) / "build-tools" / "35.0.0"
-          apk = Path("packaging/kodikdown-android.apk")
-          if not apk.is_file():
-              raise SystemExit("Build and sign packaging/kodikdown-android.apk before tagging a release.")
-          manifest = subprocess.check_output([str(tools / "aapt"), "dump", "badging", apk], text=True)
-          if not manifest.startswith("package: name='com.shawniks.kodikdown' "):
-              raise SystemExit("The APK must use the production application ID.")
-          version = re.search(r"versionName='([^']+)'", manifest)
-          if version is None:
-              raise SystemExit("The APK has no version name.")
-          if version.group(1) != os.environ["GITHUB_REF_NAME"].removeprefix("v"):
-              raise SystemExit(f"Android APK {version.group(1)} does not match the release tag.")
-          cert = subprocess.check_output(
-              [str(tools / "apksigner"), "verify", "--print-certs", apk], text=True
-          )
-          expected = "dee5b1f9e6159afd9f854bddfb71929006b723fe45f3a98d0a887791d6b8a265"
-          actual = re.search(r"certificate SHA-256 digest: (\w+)", cert)
-          if actual is None or actual.group(1) != expected:
-              raise SystemExit("The APK is not signed with the release certificate.")
-          if "application-debuggable" in manifest:
-              raise SystemExit("A debug APK must not be published as the release.")
-          print("APK signature, version and release flags verified.")
-          PY
+        run: python3 packaging/verify_android_release.py
       - uses: actions/upload-artifact@v4
         with:
           name: kodikdown-android
+          if-no-files-found: error
           path: packaging/kodikdown-android.apk
 
   release:
     needs: [linux, android, windows]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
@@ -108,8 +90,13 @@ jobs:
           section = re.search(
               rf"^## \[{re.escape(version)}\].*?(?=^## \[|\Z)", changelog, re.M | re.S
           )
-          if not pathlib.Path("dist/kodikdown-android.apk").is_file():
-              raise SystemExit("The verified Android APK is missing from the release artifacts.")
+          required = {
+              "kodikdown-android.apk", "kodikdown-linux-x86_64", "kodikdown-linux-x86_64-cli",
+              "kodikdown-windows-x86_64.exe", "kodikdown-windows-x86_64-cli.exe",
+          }
+          missing = required - {path.name for path in pathlib.Path("dist").iterdir() if path.is_file()}
+          if missing:
+              raise SystemExit(f"Missing release artifacts: {', '.join(sorted(missing))}")
           body = section.group(0).partition("\n")[2].strip() if section else f"KodikDown {version}."
           pathlib.Path("release-notes.md").write_text(body + "\n", encoding="utf-8")
           PY

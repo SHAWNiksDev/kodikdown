@@ -4,13 +4,13 @@
 
 **Download anime from a page or player link and watch offline.**
 
-[Download](#download) · [Desktop and Android guide](docs/guide-en.md) · [What's new in 4.5.0](https://github.com/SHAWNiksDev/kodikdown/releases/tag/v4.5.0) · [Русский](README.md)
+[Download](#download) · [Desktop and Android guide](docs/guide-en.md) · [What's new](CHANGELOG.md) · [Русский](README.md)
 
 [![Release](https://img.shields.io/github/v/release/SHAWNiksDev/kodikdown)](https://github.com/SHAWNiksDev/kodikdown/releases/latest)
 [![CI](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml/badge.svg)](https://github.com/SHAWNiksDev/kodikdown/actions/workflows/ci.yml)
 [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-<img src="docs/screenshots/desktop-en.png" width="880" alt="KodikDown 4.5.0 on desktop with three episodes selected" />
+<img src="docs/screenshots/desktop-en.png" width="880" alt="KodikDown on desktop with three episodes selected" />
 
 </div>
 
@@ -22,7 +22,7 @@
 | **Linux x64** | [Download for Linux](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64) | Make the file executable |
 | **Android 7.0+** | [Download APK](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-android.apk) | Open the APK on your phone |
 
-> **Upgrading to Android 4.5.0.** This APK has a new signing key. Uninstall the previous version before installing it. This clears app settings and history. Videos saved to shared storage stay on the device.
+> **Upgrading from Android builds older than 4.5.0.** If Android reports a signature conflict, uninstall the old app and install the new APK. This clears app settings and history. Videos in shared storage stay on the device.
 
 On Linux, run `chmod +x kodikdown-linux-x86_64` followed by `./kodikdown-linux-x86_64`. To process HLS on desktop, install **FFmpeg** and check that `ffmpeg -version` runs. On Windows, you can install it with `winget install --id Gyan.FFmpeg -e`.
 
@@ -34,7 +34,7 @@ Get command-line builds and checksums from the [release page](https://github.com
 2. Click **Find video**. Choose a player, voice-over, quality and the episodes you want.
 3. Click **Download**. Finished episodes appear in **Library**. Use **Save in a series folder** to keep them together on disk.
 
-Already have a player link or `<iframe>` embed code? Paste it into the same field. The guide shows where to find player links and finished downloads on desktop and Android. [Illustrated guide](docs/guide-en.md)
+You can also paste a player link or `<iframe>` embed code into the same field. [Illustrated guide](docs/guide-en.md)
 
 ## Supported sources
 
@@ -60,7 +60,7 @@ Episodes, voice-overs and resolutions vary by source. Alloha downloads are curre
 <details>
 <summary>CLI and running from source</summary>
 
-Running from source requires Python 3.11+ and FFmpeg.
+Running from source requires Python 3.11+. Desktop HLS processing requires FFmpeg.
 
 ```bash
 git clone https://github.com/SHAWNiksDev/kodikdown.git
@@ -79,6 +79,8 @@ kodikdown-cli download --help
 ```
 
 Packaged command-line builds have a filename that starts with `kodikdown-` and includes `-cli`.
+
+The CLI downloads one episode per command. Concurrent downloads with the same name use filename suffixes such as `(2)` and `(3)`.
 
 </details>
 
@@ -101,10 +103,21 @@ Android builds require JDK 17, Android SDK 35 and Build Tools 35.0.0. Set `ANDRO
 
 ```bash
 bash android/build.sh
-bash android/build.sh --release
 ```
 
-For release signing, set up `android/keystore.properties` as shown in the [Gradle configuration](android/app/build.gradle.kts). Keep the key and password outside Git and use the same key for future updates.
+For testing on a personal phone, pass `-PkodikdownDeviceQa=true` to `assembleDebug` and `assembleDebugAndroidTest`. The `.deviceqa` suffix keeps the test APKs and their data separate from the installed app.
+
+The desktop app and CLI live in `src/kodikdown/`. The Android app lives in `android/app/`. Gradle copies the shared player icons from `src/kodikdown/gui/brands/` at build time.
+
+### Signed Android releases
+
+Signing happens locally. Set `storeFile`, `keyAlias`, `storePassword` and `keyPassword` in `android/keystore.properties` or use the `KODIKDOWN_*` environment variables. Keep the key and passwords out of Git. [Gradle signing configuration](android/app/build.gradle.kts)
+
+1. Match the Python and Android versions and commit the Android source and shared icons.
+2. Run `bash android/build.sh --release`. The build embeds the Git tree hashes of `android/` and `src/kodikdown/gui/brands/` in the signed `packaging/kodikdown-android.apk`.
+3. Commit the APK. The `v<version>` release tag must include that APK and the same source trees. Changes elsewhere in the repository are fine.
+
+The release workflow matches the embedded hashes to the source trees at the tag and verifies the APK version, signing certificate and build flags. The manual Windows workflow builds the requested tag and stores the files as workflow artifacts.
 
 </details>
 
