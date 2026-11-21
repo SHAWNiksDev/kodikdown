@@ -72,7 +72,7 @@ def test_close_hides_but_keeps_download_and_can_restore(window, monkeypatch):
     assert not window._closing
     assert not window.history._closed
     assert not cancelled
-    assert window._jobs[identifier] is job
+    assert window.downloads.jobs[identifier] is job
     window.tray.show_action.trigger()
     assert window.isVisible()
     assert window.url_edit.text() == "keep my input"

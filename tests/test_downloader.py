@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import http.server
+import multiprocessing
 import shutil
 import socket
 import subprocess
@@ -21,6 +22,7 @@ from kodikdown.downloader import (
     ProgressSnapshot,
     _bytes_on_disk,
     _is_transient,
+    is_pending_output,
     release_target,
     safe_filename,
     unique_target,
@@ -43,11 +45,14 @@ def test_safe_filename_falls_back_when_empty() -> None:
 
 def test_safe_filename_caps_length() -> None:
     assert len(safe_filename("x" * 500)) == 120
+    assert safe_filename("界" * 120) == "界" * 66
+    assert safe_filename("clip\udcff.mp4") == "clip"
 
 
 def test_safe_filename_avoids_windows_reserved_names() -> None:
     assert safe_filename("CON") != "CON"
     assert safe_filename("nul.mp4") != "nul.mp4"
+    assert safe_filename("LPT².txt") == "_LPT².txt"
 
 
 def test_safe_filename_drops_media_extension() -> None:
@@ -90,6 +95,84 @@ def test_unique_target_avoids_resuming_unknown_partial_files(tmp_path: Path) -> 
     (tmp_path / "clip.mp4.part-Frag3").write_bytes(b"frag")
 
     assert unique_target(tmp_path, "clip").name == "clip (2)"
+
+
+def _reserve_in_process(directory, ready, proceed, paths, cancel):
+    target = unique_target(directory, "clip")
+    partial = target.with_suffix(".mp4.part")
+    try:
+        ready.wait(timeout=10)
+        partial.write_bytes(b"cancelled" if cancel else b"keep")
+        paths.put(target.name)
+        if not proceed.wait(timeout=10):
+            raise TimeoutError("parent did not release workers")
+        if cancel:
+            Downloader(directory)._remove_partials(target)
+    finally:
+        release_target(target)
+
+
+def test_processes_reserve_separate_partial_files(tmp_path: Path) -> None:
+    context = multiprocessing.get_context("spawn")
+    ready = context.Barrier(2)
+    proceed = context.Event()
+    paths = context.Queue()
+    processes = [
+        context.Process(target=_reserve_in_process, args=(tmp_path, ready, proceed, paths, cancel))
+        for cancel in (True, False)
+    ]
+    for process in processes:
+        process.start()
+    try:
+        names = {paths.get(timeout=15), paths.get(timeout=15)}
+        assert names == {"clip", "clip (2)"}
+        assert all(is_pending_output(tmp_path / f"{name}.mp4") for name in names)
+    finally:
+        proceed.set()
+        for process in processes:
+            process.join(10)
+            if process.is_alive():
+                process.kill()
+                process.join()
+        paths.close()
+    assert all(process.exitcode == 0 for process in processes)
+    assert [path.read_bytes() for path in tmp_path.glob("*.part")] == [b"keep"]
+    assert [path.name for path in tmp_path.glob(".kodikdown*.lock")] == [".kodikdown.lock"]
+
+
+def _hold_reservation(directory, ready):
+    target = unique_target(directory, "clip")
+    ready.send(target.name)
+    time.sleep(60)
+
+
+def test_killed_process_releases_its_reservation(tmp_path: Path) -> None:
+    context = multiprocessing.get_context("spawn")
+    receiver, sender = context.Pipe(duplex=False)
+    process = context.Process(target=_hold_reservation, args=(tmp_path, sender))
+    process.start()
+    sender.close()
+    output = tmp_path / "clip.mp4"
+    try:
+        assert receiver.poll(15)
+        assert receiver.recv() == "clip"
+        assert is_pending_output(output)
+        other = unique_target(tmp_path, "clip")
+        assert other.name == "clip (2)"
+        release_target(other)
+    finally:
+        if process.is_alive():
+            process.kill()
+        process.join(10)
+        receiver.close()
+    assert process.exitcode is not None
+    assert not is_pending_output(output)
+    target = unique_target(tmp_path, "clip")
+    try:
+        assert target.name == "clip"
+        assert [path.name for path in tmp_path.iterdir()] == [".kodikdown.lock"]
+    finally:
+        release_target(target)
 
 
 @pytest.mark.parametrize("stem", ["episode", "episode[1]"])
@@ -460,7 +543,7 @@ def test_slow_mp4_reports_progress_and_can_cancel_before_end_of_file(tmp_path: P
             )
         assert progress.is_set()
         assert not waited_for_eof.is_set()
-        assert not list(tmp_path.iterdir())
+        assert {path.name for path in tmp_path.iterdir()} == {".kodikdown.lock"}
     finally:
         progress.set()
         server.shutdown()

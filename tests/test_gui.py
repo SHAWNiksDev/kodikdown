@@ -214,7 +214,7 @@ def window(qtbot, tmp_path: Path):
 
     def cleanup(widget):
         widget._quit_requested = True
-        for job in widget._jobs.values():
+        for job in widget.downloads.jobs.values():
             if not job.finished:
                 job.task.cancel()
                 job.finished = True
@@ -223,12 +223,12 @@ def window(qtbot, tmp_path: Path):
 
     qtbot.addWidget(window, before_close_func=cleanup)
     yield window
-    for job in window._jobs.values():
+    for job in window.downloads.jobs.values():
         if not job.finished:
             job.task.cancel()
             job.finished = True
     window.resolver.shutdown()
-    window.pool.waitForDone(5000)
+    window.downloads.pool.waitForDone(5000)
     if window._confirmation is not None:
         window._confirmation.reject()
     window.request_quit()
@@ -304,19 +304,19 @@ def test_result_card_lists_qualities_and_tracks_selection(window: MainWindow) ->
     window._on_resolved(window._request_id, _sample_video())
 
     assert not window.result_card.isHidden()
-    labels = [button.text() for button in window.quality_group.buttons()]
+    labels = [button.text() for button in window.result_card.quality_group.buttons()]
     assert labels == ["720p · best", "480p", "360p"]
-    assert window._quality == 720
-    assert not window.mp4_check.isHidden()
+    assert window.result_card.quality == 720
+    assert not window.result_card.mp4_check.isHidden()
 
-    window._select_quality(480)
-    assert window._selected_variant().quality == 480
+    window.result_card.select_quality(480)
+    assert window.result_card.selected_variant().quality == 480
     # Only the 720p entry has a plain mp4 behind it.
-    assert window.mp4_check.isHidden()
+    assert window.result_card.mp4_check.isHidden()
 
-    window._select_quality(720)
-    assert not window.mp4_check.isHidden()
-    assert window.name_edit.text() == "Test video"
+    window.result_card.select_quality(720)
+    assert not window.result_card.mp4_check.isHidden()
+    assert window.result_card.name_edit.text() == "Test video"
 
 
 def test_voice_over_switch_reuses_the_same_link(window: MainWindow) -> None:
@@ -340,8 +340,8 @@ def test_voice_over_switch_reuses_the_same_link(window: MainWindow) -> None:
     window._url_in_use = PAGE_URL
     window._resolved_url = PAGE_URL
 
-    assert not window.translation_row.isHidden()
-    window.translation_combo.setCurrentIndex(1)
+    assert not window.result_card.translation_row.isHidden()
+    window.result_card.translation_combo.setCurrentIndex(1)
 
     assert window._resolving is True
     assert window._translation_for(PAGE_URL) == translations[1]
@@ -350,19 +350,19 @@ def test_voice_over_switch_reuses_the_same_link(window: MainWindow) -> None:
 
 
 def test_download_row_follows_its_signals(window: MainWindow, monkeypatch) -> None:
-    monkeypatch.setattr(window.pool, "start", lambda task: None)
+    monkeypatch.setattr(window.downloads.pool, "start", lambda task: None)
     window._on_resolved(window._request_id, _sample_video())
     window.url_edit.setText(PAGE_URL)
     window._url_in_use = PAGE_URL
     window._resolved_url = PAGE_URL
 
     window._on_download()
-    job_id, job = next(iter(window._jobs.items()))
+    job_id, job = next(iter(window.downloads.jobs.items()))
     assert job.row.title_label.text() == "Test video"
     assert window.downloads_empty.isHidden()
 
     window._on_download()
-    assert len(window._jobs) == 1  # the same stream is not queued twice
+    assert len(window.downloads.jobs) == 1  # the same stream is not queued twice
 
     path = window.settings.download_dir / "Test video.mp4"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -370,10 +370,10 @@ def test_download_row_follows_its_signals(window: MainWindow, monkeypatch) -> No
     window._on_job_finished(job_id, str(path))
     assert job.finished is True
     assert job.row.property("state") == "done"
-    assert window._active_urls == set()
+    assert window.downloads.active_urls == set()
 
     window._clear_finished()
-    assert window._jobs == {}
+    assert window.downloads.jobs == {}
     assert not window.downloads_empty.isHidden()
 
 
@@ -388,7 +388,7 @@ def test_download_progress_reaches_the_row(qtbot, window: MainWindow, media_serv
     window._resolved_url = PAGE_URL
 
     window._on_download()
-    _job_id, job = next(iter(window._jobs.items()))
+    _job_id, job = next(iter(window.downloads.jobs.items()))
     snapshots: list[ProgressSnapshot] = []
     job.task.signals.progress.connect(lambda _jid, snapshot: snapshots.append(snapshot))
 
@@ -398,7 +398,7 @@ def test_download_progress_reaches_the_row(qtbot, window: MainWindow, media_serv
     assert any(snapshot.downloaded > 0 for snapshot in snapshots)
     assert job.row.property("state") == "done"
     assert window.downloads_empty.isHidden()
-    assert window._active_urls == set()
+    assert window.downloads.active_urls == set()
 
 
 def test_progress_keeps_moving_while_fragments_are_slow(
@@ -414,7 +414,7 @@ def test_progress_keeps_moving_while_fragments_are_slow(
     window._resolved_url = PAGE_URL
 
     window._on_download()
-    _job_id, job = next(iter(window._jobs.items()))
+    _job_id, job = next(iter(window.downloads.jobs.items()))
     snapshots: list[ProgressSnapshot] = []
     job.task.signals.progress.connect(lambda _jid, snapshot: snapshots.append(snapshot))
 
@@ -448,9 +448,9 @@ def test_cancelling_a_queued_download_is_immediate(qtbot, window: MainWindow) ->
             self._release.wait(30)
 
     release = threading.Event()
-    window.pool.setMaxThreadCount(1)
-    window.pool.start(Blocker(release))
-    qtbot.waitUntil(lambda: window.pool.activeThreadCount() == 1, timeout=10_000)
+    window.downloads.pool.setMaxThreadCount(1)
+    window.downloads.pool.start(Blocker(release))
+    qtbot.waitUntil(lambda: window.downloads.pool.activeThreadCount() == 1, timeout=10_000)
 
     window._on_resolved(
         window._request_id,
@@ -461,7 +461,7 @@ def test_cancelling_a_queued_download_is_immediate(qtbot, window: MainWindow) ->
     window._resolved_url = PAGE_URL
     window._on_download()
 
-    job_id, job = next(iter(window._jobs.items()))
+    job_id, job = next(iter(window.downloads.jobs.items()))
     assert job.started is False
 
     window._cancel_job(job_id)
@@ -486,7 +486,7 @@ def test_retranslate_switches_the_interface_language(window: MainWindow) -> None
     set_language("ru")
     window.retranslate()
     assert window.find_button.text() == "Найти видео"
-    assert window.download_button.text() == "Скачать"
+    assert window.result_card.download_button.text() == "Скачать"
 
     set_language("en")
     window.retranslate()
@@ -497,16 +497,16 @@ def test_name_edit_resets_on_new_video(window: MainWindow) -> None:
     # First video resolved
     window._url_in_use = "https://kodikplayer.com/video/1/a/720p"
     window._on_resolved(window._request_id, _sample_video())
-    assert window.name_edit.text() == "Test video"
+    assert window.result_card.name_edit.text() == "Test video"
 
     # User manually customizes the title
-    window.name_edit.setText("My Custom Title")
-    window._on_name_edited("My Custom Title")
-    assert window._name_edited is True
+    window.result_card.name_edit.setText("My Custom Title")
+    window.result_card._on_name_edited("My Custom Title")
+    assert window.result_card.name_edited is True
 
     # Same video resolved again (e.g. quality / translation switch): keeps custom title
     window._on_resolved(window._request_id, _sample_video())
-    assert window.name_edit.text() == "My Custom Title"
+    assert window.result_card.name_edit.text() == "My Custom Title"
 
     # Different video resolved: resets custom title to the new video title!
     window._url_in_use = "https://kodikplayer.com/video/2/b/720p"
@@ -515,8 +515,8 @@ def test_name_edit_resets_on_new_video(window: MainWindow) -> None:
         variants=_sample_video().variants,
     )
     window._on_resolved(window._request_id, second_video)
-    assert window._name_edited is False
-    assert window.name_edit.text() == "Second Anime"
+    assert window.result_card.name_edited is False
+    assert window.result_card.name_edit.text() == "Second Anime"
 
 
 def test_progress_bar_pauses_when_hidden_and_resumes_when_shown(window: MainWindow) -> None:
@@ -550,10 +550,10 @@ def test_shortcuts_configured_on_main_window(window: MainWindow) -> None:
 
 
 def test_settings_syncs_prefer_mp4_to_main_window(window: MainWindow) -> None:
-    assert window.mp4_check.isChecked() is False
+    assert window.result_card.mp4_check.isChecked() is False
     window.open_settings()
     window.settings_page.prefer_mp4_check.click()
-    assert window.mp4_check.isChecked() is True
+    assert window.result_card.mp4_check.isChecked() is True
     assert window.settings.prefer_mp4 is True
     assert window.store.load().prefer_mp4 is True
 
@@ -596,12 +596,12 @@ def test_cancelled_translation_restores_the_playable_selection(
     )
     window._url_in_use = PAGE_URL
     window._on_resolved(window._request_id, video)
-    window.translation_combo.setCurrentIndex(1)
+    window.result_card.translation_combo.setCurrentIndex(1)
     request = window._request_id
     assert window._resolving
-    assert not window.download_button.isEnabled()
+    assert not window.result_card.download_button.isEnabled()
     window._on_download()
-    assert not window._jobs
+    assert not window.downloads.jobs
 
     if escape:
         qtbot.keyClick(window, Qt.Key.Key_Escape)
@@ -609,10 +609,10 @@ def test_cancelled_translation_restores_the_playable_selection(
         window._on_find()
 
     assert not window._resolving
-    assert window.download_button.isEnabled()
-    assert window.translation_combo.currentData() == original.key
+    assert window.result_card.download_button.isEnabled()
+    assert window.result_card.translation_combo.currentData() == original.key
     assert window._translation_for(PAGE_URL) == original
-    assert window._selected_variant().url == "https://cdn/original.m3u8"
+    assert window.result_card.selected_variant().url == "https://cdn/original.m3u8"
     # The cancelled reply must not replace the restored result.
     window._on_resolved(request, _sample_video())
     assert window._resolved is video
@@ -669,8 +669,10 @@ def test_anime_page_queues_selected_episodes_and_keeps_going_on_error(
     picker.select_all.click()
     picker.download.click()
     picker.download.click()
-    assert len(window._jobs) == 3
-    qtbot.waitUntil(lambda: all(job.finished for job in window._jobs.values()), timeout=30_000)
+    assert len(window.downloads.jobs) == 3
+    qtbot.waitUntil(
+        lambda: all(job.finished for job in window.downloads.jobs.values()), timeout=30_000
+    )
 
     entries = {
         request.number: entry

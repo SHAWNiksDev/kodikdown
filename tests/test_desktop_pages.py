@@ -35,32 +35,32 @@ def window(qtbot, tmp_path):
         widget._quit_requested = True
         if widget._confirmation is not None:
             widget._confirmation.reject()
-        for job in widget._jobs.values():
+        for job in widget.downloads.jobs.values():
             if not job.finished:
                 job.task.cancel()
                 job.finished = True
         widget.resolver.shutdown()
-        widget.pool.waitForDone(5000)
+        widget.downloads.pool.waitForDone(5000)
 
     qtbot.addWidget(window, before_close_func=cleanup)
     yield window
     cleanup(window)
     window.close()
-    window._media_pool.waitForDone(2000)
+    window.media.pool.waitForDone(2000)
 
 
 def enqueue(window, monkeypatch):
-    monkeypatch.setattr(window.pool, "start", lambda task: None)
+    monkeypatch.setattr(window.downloads.pool, "start", lambda task: None)
     window._url_in_use = SOURCE
     window._on_resolved(window._request_id, video())
     window._on_download()
-    return next(iter(window._jobs.items()))
+    return next(iter(window.downloads.jobs.items()))
 
 
 def test_settings_are_a_page_and_preserve_downloader_inputs(window):
     window.url_edit.setText(SOURCE)
     window._on_resolved(window._request_id, video())
-    window.name_edit.setText("My episode")
+    window.result_card.name_edit.setText("My episode")
     result = window._resolved
     window.open_settings()
     assert window.pages.currentWidget() is window.settings_page
@@ -70,7 +70,7 @@ def test_settings_are_a_page_and_preserve_downloader_inputs(window):
     assert not hasattr(window, "settings_button")
     window.navigation_buttons[0].click()
     assert window.url_edit.text() == SOURCE
-    assert window.name_edit.text() == "My episode"
+    assert window.result_card.name_edit.text() == "My episode"
     assert window._resolved is result
 
 
@@ -96,14 +96,14 @@ def test_theme_reveal_and_language_spam_preserve_jobs(window, monkeypatch, qtbot
     assert window.settings.theme == "dark"
     assert window.settings.language == "auto"
     assert len(window.findChildren(AppearanceOverlay)) == 1
-    assert window._jobs[identifier] is job
+    assert window.downloads.jobs[identifier] is job
     assert job.row.bar._target == 60
     qtbot.waitUntil(lambda: not window.appearance_overlay.busy, timeout=1500)
     qtbot.wait(520)
     window.settings_page.language_buttons["ru"].click()
     assert window.settings.language == "ru"
     assert window.find_button.text() == "Найти видео"
-    assert window._jobs[identifier] is job
+    assert window.downloads.jobs[identifier] is job
     assert job.row.bar._target == 60
     assert not job.finished
     assert window.pages.currentWidget() is window.settings_page
@@ -139,7 +139,7 @@ def test_transfer_settings_lock_for_lookup_queue_and_assembly(window, monkeypatc
     window._request_cancel_job(identifier)
     window._remove_job(identifier)
     assert cancelled == []
-    assert identifier in window._jobs
+    assert identifier in window.downloads.jobs
     window._render_history()
     window.history_page.table.topLevelItem(0).setSelected(True)
     assert not window.history_page.delete_button.isEnabled()
@@ -190,11 +190,11 @@ def test_history_retry_confirms_and_gets_fresh_source_and_voice(window, tmp_path
     assert QApplication.clipboard().text() == SOURCE.split('"')[1]
     calls = []
     monkeypatch.setattr(window.resolver, "resolve", lambda *args: calls.append(args))
-    monkeypatch.setattr(window.pool, "start", lambda task: None)
+    monkeypatch.setattr(window.downloads.pool, "start", lambda task: None)
     window._retry_history(entry.id)
     assert window._confirmation is not None
     assert calls == []
-    assert window._jobs == {}
+    assert window.downloads.jobs == {}
     # The explicit download-again action allows one new copy.
     dialog = window._confirmation
     next(
@@ -208,9 +208,9 @@ def test_history_retry_confirms_and_gets_fresh_source_and_voice(window, tmp_path
     resolved = replace(video(), translations=(voice_a, voice_b), translation=voice_a)
     window._on_resolved(window._request_id, resolved)
     assert calls[-1][2] == voice_b
-    assert window._jobs == {}
+    assert window.downloads.jobs == {}
     window._on_resolved(window._request_id, replace(resolved, translation=voice_b))
-    identifier, job = next(iter(window._jobs.items()))
+    identifier, job = next(iter(window.downloads.jobs.items()))
     assert job.url == "https://cdn.example/fresh-480"
     assert job.title == "Episode"
     saved = window.history.get(identifier)
@@ -218,6 +218,26 @@ def test_history_retry_confirms_and_gets_fresh_source_and_voice(window, tmp_path
     assert saved.translation == "Voice B"
     assert saved.quality == 480
     assert existing.read_bytes() == b"finished video"
+
+
+def test_history_retry_finds_duplicate_in_its_own_series_folder(window, monkeypatch):
+    for series in ("Other series", "Current series"):
+        folder = window.settings.download_dir / series
+        folder.mkdir(parents=True)
+        (folder / "Episode.mp4").write_bytes(b"video")
+    other = window.settings.download_dir / "Other series" / "Episode.mp4"
+    window.history.put(HistoryEntry("other", "Episode", "Episode", SOURCE, 480, 2, path=str(other)))
+    window.history.put(
+        HistoryEntry("retry", "Episode", "Episode", SOURCE, 480, 1, series="Current series")
+    )
+    confirmed = []
+    monkeypatch.setattr(
+        window, "_confirm_existing", lambda title, path, retry: confirmed.append(path)
+    )
+
+    window._retry_history("retry")
+
+    assert confirmed == [str(window.settings.download_dir / "Current series" / "Episode.mp4")]
 
 
 def test_deleted_video_disables_actions_everywhere_and_preserves_history(
@@ -296,7 +316,7 @@ def test_only_finished_download_rows_can_be_selected(window, monkeypatch):
     window._remove_selected_downloads()
     assert window._confirmation is not None
     window._confirmation.button(QMessageBox.StandardButton.Yes).click()
-    assert identifier not in window._jobs
+    assert identifier not in window.downloads.jobs
     assert window.history.get(identifier) is not None
 
 
@@ -404,18 +424,18 @@ def test_clearing_history_keeps_existing_session_download_available(window, monk
     path.parent.mkdir(parents=True)
     path.write_bytes(b"finished video")
     window._on_job_finished(identifier, str(path))
-    qtbot.waitUntil(lambda: not window._scan_running, timeout=3000)
+    qtbot.waitUntil(lambda: not window.media.scanning, timeout=3000)
     window.settings = window.settings.updated(confirm_delete=False)
     window._remove_history({identifier})
     assert window.history.get(identifier) is None
     window._request_media_refresh()
-    qtbot.waitUntil(lambda: not window._scan_running, timeout=3000)
+    qtbot.waitUntil(lambda: not window.media.scanning, timeout=3000)
     assert path.exists()
     assert not job.row.open_button.isHidden()
-    assert window._availability[str(path)]
+    assert window.media.availability[str(path)]
     path.unlink()
     window._request_media_refresh()
-    qtbot.waitUntil(lambda: not window._scan_running, timeout=3000)
+    qtbot.waitUntil(lambda: not window.media.scanning, timeout=3000)
     assert job.row.open_button.isHidden()
 
 
@@ -432,19 +452,18 @@ def test_unknown_user_download_directory_rolls_back_without_exception(window):
 
 
 def test_periodic_refresh_does_not_starve_a_slow_scan(window, monkeypatch, qtbot):
-    qtbot.waitUntil(lambda: not window._scan_running, timeout=3000)
+    qtbot.waitUntil(lambda: not window.media.scanning, timeout=3000)
     tasks = []
-    monkeypatch.setattr(window._media_pool, "start", tasks.append)
+    monkeypatch.setattr(window.media.pool, "start", tasks.append)
     monkeypatch.setattr(window, "isVisible", lambda: True)
     monkeypatch.setattr(window, "isActiveWindow", lambda: True)
     window._request_media_refresh()
     task = tasks[0]
     for _ in range(4):
         window._poll_media()
-    assert window._media_generation == task.generation
-    assert not window._scan_again
-    window._on_media_scanned(task.generation, (), {}, "")
-    assert not window._scan_running
+    assert window.media._generation == task.generation
+    window.media._on_scanned(task.generation, (), {})
+    assert not window.media.scanning
 
 
 def test_started_download_changes_label_and_late_start_does_not_reset_assembly(window, monkeypatch):

@@ -89,4 +89,5 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 qt_api = "pyside6"

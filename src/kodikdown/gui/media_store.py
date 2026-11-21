@@ -179,7 +179,7 @@ def readable_file(raw: str) -> bool:
 
 
 class ScanSignals(QObject):
-    ready = Signal(int, object, object, str)
+    ready = Signal(int, object, object)
 
 
 class DeleteSignals(QObject):
@@ -238,5 +238,4 @@ class MediaScan(QRunnable):
                 self.generation,
                 tuple(sorted(files, key=lambda item: item.modified, reverse=True)),
                 availability,
-                "",
             )

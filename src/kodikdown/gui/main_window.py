@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import time
-import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSize, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QCloseEvent,
     QDesktopServices,
@@ -21,7 +19,6 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QButtonGroup,
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -41,29 +38,26 @@ from kodikdown.config import ConfigStore, Settings
 from kodikdown.downloader import (
     ProgressSnapshot,
     fallback_sources_for,
-    is_pending_output,
     safe_filename,
 )
 from kodikdown.gui.appearance import AppearanceOverlay
 from kodikdown.gui.desktop import open_directory, open_path, reveal_path
+from kodikdown.gui.download_queue import DownloadJob, DownloadQueue
 from kodikdown.gui.icons import app_icon, icon
+from kodikdown.gui.media_controller import MediaController
 from kodikdown.gui.media_page import MediaPage
 from kodikdown.gui.media_store import (
-    DeleteFiles,
     HistoryChanges,
     HistoryEntry,
-    HistoryStore,
-    MediaFile,
-    MediaScan,
     readable_file,
 )
+from kodikdown.gui.result_card import ResultCard
 from kodikdown.gui.save_indicator import SaveIndicator
 from kodikdown.gui.series_picker import SeriesPicker
 from kodikdown.gui.settings_page import SettingsPage
 from kodikdown.gui.theme import MODE_AUTO, palette_for, stylesheet
 from kodikdown.gui.tray import DesktopTray
 from kodikdown.gui.widgets import (
-    CheckBox,
     DownloadRow,
     ElidedLabel,
     FadeMixin,
@@ -71,13 +65,12 @@ from kodikdown.gui.widgets import (
     Toast,
 )
 from kodikdown.gui.workers import (
-    DownloadTask,
     EpisodeDownload,
     ResolverWorker,
 )
 from kodikdown.i18n import set_language, t
 from kodikdown.kodik.errors import InvalidUrlError
-from kodikdown.kodik.models import ResolvedVideo, StreamVariant, Translation
+from kodikdown.kodik.models import ResolvedVideo, Translation
 from kodikdown.kodik.parser import extract_embed
 from kodikdown.sources import EpisodeRequest, Series, public_source, recognized_link
 
@@ -86,22 +79,7 @@ _TOAST_LIFETIME_MS = 4200
 _QUEUE_HINT_MS = 1200
 
 
-@dataclass
-class _Job:
-    task: DownloadTask
-    row: DownloadRow
-    url: str
-    title: str
-    directory: Path
-    started: bool = field(default=False)
-    finished: bool = field(default=False)
-    cancelling: bool = field(default=False)
-    status: str = "queued"
-    percent: int | None = None
-
-
 class MainWindow(QMainWindow):
-    history_error = Signal(str)
     exit_requested = Signal()
 
     def __init__(self, store: ConfigStore, settings: Settings) -> None:
@@ -115,49 +93,37 @@ class MainWindow(QMainWindow):
         self.resolver.catalog_ready.connect(self._on_catalog_ready)
         self.resolver.failed.connect(self._on_resolve_failed)
 
-        self.pool = QThreadPool(self)
-        self.pool.setMaxThreadCount(settings.concurrent_downloads)
+        self.downloads = DownloadQueue(settings.concurrent_downloads, self)
+        self.downloads.started.connect(self._on_job_started)
+        self.downloads.progress.connect(self._on_progress)
+        self.downloads.finished.connect(self._on_job_finished)
+        self.downloads.failed.connect(self._on_job_failed)
+        self.downloads.cancelled.connect(self._on_job_cancelled)
 
         self._request_id = 0
         self._resolving = False
         self._resolved: ResolvedVideo | None = None
-        self._variants: tuple[StreamVariant, ...] = ()
-        self._quality: int | None = None
-        self._jobs: dict[str, _Job] = {}
         self._selected_jobs: set[str] = set()
         self._url_in_use = ""
         self._resolved_url = ""
-        self._name_edited = False
-        self._active_urls: set[str] = set()
         self._toasts: list[Toast] = []
         self._settings_last_change = float("-inf")
         self._confirmation: QMessageBox | None = None
         self._retry_entry: HistoryEntry | None = None
         self._retry_translation = False
-        self._availability: dict[str, bool] = {}
-        self._media_generation = 0
-        self._scan_running = False
-        self._scan_again = False
-        self._media_error = ""
-        self._scan_task: MediaScan | None = None
-        self._media_pool = QThreadPool(self)
-        self._media_pool.setMaxThreadCount(1)
         self._current_tab = 0
         self._tab_backstack: list[int] = []
         self._last_clipboard = ""
         self._closing = False
         self._quit_requested = False
-        self.history_error.connect(
+        self.media = MediaController(store.path, self)
+        self.history = self.media.history
+        self.library = self.media.library
+        self.media.changed.connect(self._render_media)
+        self.media.deleted.connect(self._media_deleted)
+        self.media.save_failed.connect(
             lambda detail: self._toast(t("history_save_failed", detail=detail), "error")
         )
-        self.history = HistoryStore(store.path.with_name("history.json"), self.history_error.emit)
-        self.library = HistoryStore(store.path.with_name("library.json"), self.history_error.emit)
-        if not self.library.path.exists():
-            self.library.put_many(
-                entry for entry in self.history.entries if entry.status == "finished" and entry.path
-            )
-        self.destroyed.connect(self.history.close)
-        self.destroyed.connect(self.library.close)
 
         self.setWindowTitle(t("app_title"))
         self.setWindowIcon(app_icon(self._palette.accent))
@@ -207,7 +173,13 @@ class MainWindow(QMainWindow):
         body.setSpacing(12)
         body.addWidget(self._build_url_row())
         body.addWidget(self._build_status_row())
-        body.addWidget(self._build_result_card())
+        self.result_card = ResultCard(self.settings.prefer_mp4, self._palette)
+        self.result_card.translation_changed.connect(self._on_translation_changed)
+        self.result_card.download_requested.connect(self._on_download)
+        self.result_card.folder_requested.connect(
+            lambda: self._open_folder(self.settings.download_dir)
+        )
+        body.addWidget(self.result_card)
         self.series_picker = SeriesPicker()
         self.series_picker.download_requested.connect(self._download_episodes)
         body.addWidget(self.series_picker)
@@ -346,95 +318,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.resolve_bar)
         return container
 
-    def _build_result_card(self) -> QWidget:
-        self.result_card = QFrame()
-        self.result_card.setObjectName("card")
-        self.result_card.hide()
-
-        layout = QVBoxLayout(self.result_card)
-        layout.setContentsMargins(16, 14, 16, 16)
-        layout.setSpacing(10)
-
-        self.title_label = QLabel()
-        self.title_label.setObjectName("panel-title")
-        self.title_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.title_label.setWordWrap(True)
-        layout.addWidget(self.title_label)
-
-        self.warning_label = QLabel()
-        self.warning_label.setObjectName("warning")
-        self.warning_label.setWordWrap(True)
-        self.warning_label.hide()
-        layout.addWidget(self.warning_label)
-
-        name_row = QHBoxLayout()
-        name_row.setSpacing(8)
-        self.name_caption = QLabel(t("file_name"))
-        self.name_caption.setObjectName("muted")
-        self.name_caption.setMinimumWidth(84)
-        self.name_edit = QLineEdit()
-        self.name_edit.textEdited.connect(self._on_name_edited)
-        name_row.addWidget(self.name_caption)
-        name_row.addWidget(self.name_edit, 1)
-        layout.addLayout(name_row)
-
-        self.translation_row = QWidget()
-        translation_layout = QHBoxLayout(self.translation_row)
-        translation_layout.setContentsMargins(0, 0, 0, 0)
-        translation_layout.setSpacing(8)
-        self.translation_caption = QLabel(t("translation"))
-        self.translation_caption.setObjectName("muted")
-        self.translation_caption.setMinimumWidth(84)
-        self.translation_combo = QComboBox()
-        self.translation_combo.currentIndexChanged.connect(self._on_translation_changed)
-        translation_layout.addWidget(self.translation_caption)
-        translation_layout.addWidget(self.translation_combo, 1)
-        self.translation_row.hide()
-        layout.addWidget(self.translation_row)
-
-        quality_row = QHBoxLayout()
-        quality_row.setSpacing(8)
-        self.quality_caption = QLabel(t("quality"))
-        self.quality_caption.setObjectName("muted")
-        self.quality_caption.setMinimumWidth(84)
-        self.quality_caption.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        self.quality_box = QWidget()
-        self.quality_layout = QHBoxLayout(self.quality_box)
-        self.quality_layout.setContentsMargins(0, 0, 0, 0)
-        self.quality_layout.setSpacing(6)
-        self.quality_layout.addStretch(1)
-        self.quality_group = QButtonGroup(self)
-        self.quality_group.setExclusive(True)
-        quality_row.addWidget(self.quality_caption)
-        quality_row.addWidget(self.quality_box, 1)
-        layout.addLayout(quality_row)
-
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
-        self.mp4_check = CheckBox(t("download_mp4"))
-        self.mp4_check.setChecked(self.settings.prefer_mp4)
-        self.download_button = QPushButton(t("download"))
-        self.download_button.setObjectName("primary")
-        self.download_button.setIcon(icon("download", "#ffffff", 16))
-        self.download_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.download_button.setMinimumWidth(130)
-        self.download_button.clicked.connect(self._on_download)
-        self.open_folder_button = QPushButton(t("open_folder"))
-        self.open_folder_button.setIcon(icon("folder", self._palette.text_muted, 15))
-        self.open_folder_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.open_folder_button.clicked.connect(
-            lambda: self._open_folder(self.settings.download_dir)
-        )
-
-        actions.addWidget(self.mp4_check)
-        actions.addStretch(1)
-        actions.addWidget(self.open_folder_button)
-        actions.addWidget(self.download_button)
-        layout.addLayout(actions)
-        return self.result_card
-
     def _build_downloads_header(self) -> QWidget:
         container = QWidget()
         layout = QHBoxLayout(container)
@@ -532,8 +415,8 @@ class MainWindow(QMainWindow):
         self.url_clear_action.setIcon(icon("close", colour, 16))
         self.paste_button.setIcon(icon("clipboard", colour, 15))
         self.find_button.setIcon(icon("close" if self._resolving else "play", "#ffffff", 15))
-        self.download_button.setIcon(icon("download", "#ffffff", 16))
-        self.open_folder_button.setIcon(icon("folder", colour, 15))
+        self.result_card.download_button.setIcon(icon("download", "#ffffff", 16))
+        self.result_card.open_folder_button.setIcon(icon("folder", colour, 15))
         self.clear_button.setIcon(icon("trash", self._palette.accent, 14))
         self.folder_button.setIcon(icon("folder", self._palette.accent, 14))
         self._refresh_navigation_icons()
@@ -541,7 +424,7 @@ class MainWindow(QMainWindow):
         self.library_page.apply_palette(self._palette)
         self.history_page.apply_palette(self._palette)
         self.resolve_bar.apply_palette(self._palette)
-        for job in self._jobs.values():
+        for job in self.downloads.jobs.values():
             job.row.apply_palette(self._palette)
 
     def _refresh_navigation_icons(self) -> None:
@@ -559,13 +442,13 @@ class MainWindow(QMainWindow):
         self.url_clear_action.setText(t("clear_link"))
         self.paste_button.setText(t("paste"))
         self.find_button.setText(t("cancel") if self._resolving else t("resolve"))
-        self.name_caption.setText(t("file_name"))
-        self.translation_caption.setText(t("translation"))
-        self.quality_caption.setText(t("quality"))
+        self.result_card.name_caption.setText(t("file_name"))
+        self.result_card.translation_caption.setText(t("translation"))
+        self.result_card.quality_caption.setText(t("quality"))
         self.series_picker.retranslate()
-        self.download_button.setText(t("download"))
-        self.mp4_check.setText(t("download_mp4"))
-        self.open_folder_button.setText(t("open_folder"))
+        self.result_card.download_button.setText(t("download"))
+        self.result_card.mp4_check.setText(t("download_mp4"))
+        self.result_card.open_folder_button.setText(t("open_folder"))
         self.downloads_caption.setText(t("downloads_section").upper())
         self.clear_button.setText(t("clear_finished"))
         self.downloads_empty.setText(t("downloads_empty"))
@@ -576,9 +459,11 @@ class MainWindow(QMainWindow):
         elif self._resolved is None and self.series_picker.isHidden():
             self.set_status(t("hint"))
         elif self._resolved is not None:
-            self._build_quality_pills(self._resolved, self._quality)
+            self.result_card.build_quality_pills(
+                self._resolved, self.result_card.quality, self.settings.default_quality
+            )
             if self._resolved.warnings:
-                self.warning_label.setText(t("warning_proxy"))
+                self.result_card.warning_label.setText(t("warning_proxy"))
         for button, key in zip(
             self.navigation_buttons,
             ("tab_downloads", "tab_library", "tab_history", "tab_settings"),
@@ -588,7 +473,7 @@ class MainWindow(QMainWindow):
         self.settings_page.retranslate()
         self.library_page.retranslate()
         self.history_page.retranslate()
-        for job in self._jobs.values():
+        for job in self.downloads.jobs.values():
             job.row.retranslate()
 
     # -- lookup ------------------------------------------------------------
@@ -630,9 +515,9 @@ class MainWindow(QMainWindow):
     def _translation_for(self, raw: str) -> Translation | None:
         if self._resolved is None or raw.strip() != self._resolved_url:
             return None
-        if self.translation_row.isHidden():
+        if self.result_card.translation_row.isHidden():
             return self._resolved.translation
-        key = self.translation_combo.currentData()
+        key = self.result_card.translation_combo.currentData()
         for item in self._resolved.translations:
             if item.key == key:
                 return item
@@ -645,10 +530,10 @@ class MainWindow(QMainWindow):
         # The visible selection must describe the streams we still have.
         if self._resolved is not None and self._resolved.translations:
             active = self._resolved.translation or self._resolved.translations[0]
-            index = self.translation_combo.findData(active.key)
-            self.translation_combo.blockSignals(True)
-            self.translation_combo.setCurrentIndex(index)
-            self.translation_combo.blockSignals(False)
+            index = self.result_card.translation_combo.findData(active.key)
+            self.result_card.translation_combo.blockSignals(True)
+            self.result_card.translation_combo.setCurrentIndex(index)
+            self.result_card.translation_combo.blockSignals(False)
         self._url_in_use = self._resolved_url
         self._set_resolving(False)
         self.set_status("")
@@ -664,9 +549,6 @@ class MainWindow(QMainWindow):
         if self._url_in_use and not self._resolving:
             self._start_resolve(self._url_in_use, self._translation_for(self._url_in_use))
 
-    def _on_name_edited(self, _text: str) -> None:
-        self._name_edited = True
-
     def _set_resolving(self, resolving: bool) -> None:
         self._resolving = resolving
         self._update_settings_lock()
@@ -675,7 +557,7 @@ class MainWindow(QMainWindow):
             icon("close", "#ffffff", 15) if resolving else icon("play", "#ffffff", 15)
         )
         matches = self.url_edit.text().strip() == self._resolved_url
-        self.download_button.setEnabled(not resolving and self._resolved is not None)
+        self.result_card.download_button.setEnabled(not resolving and self._resolved is not None)
         self.series_picker.set_busy(resolving or not matches)
         if resolving:
             self.resolve_bar.set_busy()
@@ -708,25 +590,26 @@ class MainWindow(QMainWindow):
             return
         same_video = self._url_in_use == self._resolved_url and bool(self._resolved_url)
         if not same_video:
-            self._name_edited = False
+            self.result_card.name_edited = False
         self._resolved_url = self._url_in_use
         self._resolved = resolved
-        self._variants = resolved.variants
         self.series_picker.hide()
         self._set_resolving(False)
-        self._populate_result(
+        self.result_card.populate(
             resolved,
             resolved.pick(retry.quality).quality
             if retry
-            else self._quality
+            else self.result_card.quality
             if same_video
             else None,
+            self.settings.default_quality,
         )
+        self.set_status("")
         if retry is not None:
             self._retry_entry = None
-            self.name_edit.setText(retry.file_name)
-            self._name_edited = True
-            self.mp4_check.setChecked(retry.prefer_mp4)
+            self.result_card.name_edit.setText(retry.file_name)
+            self.result_card.name_edited = True
+            self.result_card.mp4_check.setChecked(retry.prefer_mp4)
             self._on_download(confirmed=True, retry=retry)
 
     def _on_catalog_ready(self, request_id: int, series: Series) -> None:
@@ -734,7 +617,7 @@ class MainWindow(QMainWindow):
             return
         self._retry_entry = None
         self._resolved = None
-        self._variants = ()
+        self.result_card.variants = ()
         self._resolved_url = self._url_in_use
         self._set_resolving(False)
         self.result_card.hide()
@@ -749,7 +632,7 @@ class MainWindow(QMainWindow):
             return
         self._retry_entry = None
         self._resolved = None
-        self._variants = ()
+        self.result_card.variants = ()
         self._set_resolving(False)
         self.result_card.hide()
         self.series_picker.hide()
@@ -760,99 +643,21 @@ class MainWindow(QMainWindow):
         else:
             self.set_status(t(kind, detail=detail), state="error")
 
-    def _populate_result(self, resolved: ResolvedVideo, keep_quality: int | None) -> None:
-        self.title_label.setText(resolved.title or t("title_unknown"))
-        if not self._name_edited:
-            self.name_edit.setText(resolved.title or t("title_unknown"))
-
-        self.warning_label.setVisible("proxy" in resolved.warnings)
-        if resolved.warnings:
-            self.warning_label.setText(t("warning_proxy"))
-
-        has_choices = len(resolved.translations) > 1
-        self.translation_row.setVisible(has_choices)
-        if has_choices:
-            self.translation_combo.blockSignals(True)
-            self.translation_combo.clear()
-            for item in resolved.translations:
-                self.translation_combo.addItem(item.title, item.key)
-            active = resolved.translation or resolved.translations[0]
-            index = self.translation_combo.findData(active.key)
-            self.translation_combo.setCurrentIndex(index if index >= 0 else 0)
-            self.translation_combo.blockSignals(False)
-
-        self._build_quality_pills(resolved, keep_quality)
-        self.download_button.setEnabled(True)
-        self.result_card.show()
-        FadeMixin.fade_in(self.result_card)
-        self.set_status("")
-
-    def _build_quality_pills(self, resolved: ResolvedVideo, keep_quality: int | None) -> None:
-        for button in list(self.quality_group.buttons()):
-            self.quality_group.removeButton(button)
-            self.quality_layout.removeWidget(button)
-            button.hide()
-            button.deleteLater()
-
-        # Keep whatever the user had picked for this video, otherwise start
-        # from the best stream the server offers.
-        available = {variant.quality for variant in resolved.variants}
-        preferred = (
-            int(self.settings.default_quality) if self.settings.default_quality != "ask" else None
-        )
-        selected = keep_quality if keep_quality in available else resolved.pick(preferred).quality
-        self._quality = selected
-
-        for index, variant in enumerate(resolved.variants):
-            label = variant.label if variant.quality else t("quality_auto")
-            if index == 0:
-                label += f" · {t('best_badge')}"
-            pill = QPushButton(label)
-            pill.setObjectName("quality")
-            pill.setCheckable(True)
-            pill.setChecked(variant.quality == selected)
-            pill.setCursor(Qt.CursorShape.PointingHandCursor)
-            pill.clicked.connect(
-                lambda _checked=False, quality=variant.quality: self._select_quality(quality)
-            )
-            self.quality_group.addButton(pill)
-            self.quality_layout.insertWidget(self.quality_layout.count() - 1, pill)
-        self._refresh_mp4_hint()
-
-    def _select_quality(self, quality: int) -> None:
-        self._quality = quality
-        self._refresh_mp4_hint()
-
-    def _refresh_mp4_hint(self) -> None:
-        variant = self._selected_variant()
-        self.mp4_check.setVisible(bool(variant and variant.direct_mp4))
-
-    def _selected_variant(self) -> StreamVariant | None:
-        if not self._variants:
-            return None
-        quality = self._quality
-        if quality is None:
-            return self._variants[0]
-        for variant in self._variants:
-            if variant.quality == quality:
-                return variant
-        return self._variants[0]
-
     # -- downloads ---------------------------------------------------------
     def _on_download(self, *, confirmed: bool = False, retry: HistoryEntry | None = None) -> None:
         if self._resolving:
             return
         resolved = self._resolved
-        variant = self._selected_variant()
+        variant = self.result_card.selected_variant()
         if resolved is None or variant is None:
             return
 
-        use_mp4 = self.mp4_check.isChecked() and bool(variant.direct_mp4)
+        use_mp4 = self.result_card.mp4_check.isChecked() and bool(variant.direct_mp4)
         url = variant.download_url(use_mp4)
-        title = self.name_edit.text().strip() or resolved.title or t("title_unknown")
+        title = self.result_card.name_edit.text().strip() or resolved.title or t("title_unknown")
 
         directory = self._series_directory(retry.series if retry else "")
-        if self._already_queued(url, title, directory):
+        if self.downloads.contains(url, title, directory):
             self._toast(t("already_downloading"), "warning")
             return
         if not confirmed:
@@ -882,15 +687,6 @@ class MainWindow(QMainWindow):
             resolved=resolved,
             retry_input=retry.retry_input or retry.source_input if retry else "",
             series=retry.series if retry else "",
-        )
-
-    def _already_queued(self, url: str, title: str, directory: Path) -> bool:
-        filename = safe_filename(title).casefold()
-        return url in self._active_urls or any(
-            not job.finished
-            and job.directory == directory
-            and safe_filename(job.title).casefold() == filename
-            for job in self._jobs.values()
         )
 
     def _download_episodes(self) -> None:
@@ -923,7 +719,7 @@ class MainWindow(QMainWindow):
             filename = safe_filename(title)
             if (
                 source in saved_sources
-                or self._already_queued(source, title, directory)
+                or self.downloads.contains(source, title, directory)
                 or self._existing_download_path(
                     filename, directory=directory, include_history=False
                 )
@@ -969,8 +765,18 @@ class MainWindow(QMainWindow):
         retry_input: str = "",
         series: str = "",
     ) -> HistoryEntry:
-        job_id = uuid.uuid4().hex
-        row = DownloadRow(job_id, title, quality, self._palette)
+        job = self.downloads.add(
+            url,
+            title,
+            self._series_directory(series),
+            quality,
+            self._palette,
+            referer,
+            fallback_sources_for(resolved, quality, prefer_mp4) if resolved else (),
+            episode,
+        )
+        row = job.row
+        job_id = job.task.job_id
         row.cancel_requested.connect(self._request_cancel_job)
         row.remove_requested.connect(self._remove_job)
         row.selection_requested.connect(self._toggle_download_selection)
@@ -978,27 +784,6 @@ class MainWindow(QMainWindow):
         row.folder_requested.connect(self._reveal_file)
         row.mark_starting()
 
-        directory = self._series_directory(series)
-        task = DownloadTask(
-            job_id,
-            url,
-            title,
-            referer,
-            directory,
-            concurrent_fragments=4,
-            fallback_sources=fallback_sources_for(resolved, quality, prefer_mp4)
-            if resolved
-            else (),
-            episode=episode,
-        )
-        task.signals.started.connect(self._on_job_started)
-        task.signals.progress.connect(self._on_progress)
-        task.signals.finished.connect(self._on_job_finished)
-        task.signals.failed.connect(self._on_job_failed)
-        task.signals.cancelled.connect(self._on_job_cancelled)
-
-        self._jobs[job_id] = _Job(task=task, row=row, url=url, title=title, directory=directory)
-        self._active_urls.add(url)
         entry = HistoryEntry(
             job_id,
             title,
@@ -1016,7 +801,7 @@ class MainWindow(QMainWindow):
             self._render_history()
             self._update_settings_lock()
         self._insert_row(row)
-        self.pool.start(task)
+        self.downloads.pool.start(job.task)
         # Only claim the job is waiting when no worker picked it up.
         self._later(_QUEUE_HINT_MS, lambda: self._hint_queued(job_id))
         return entry
@@ -1027,7 +812,7 @@ class MainWindow(QMainWindow):
         FadeMixin.fade_in(row, duration=200, start=0.0)
 
     def _hint_queued(self, job_id: str) -> None:
-        job = self._jobs.get(job_id)
+        job = self.downloads.jobs.get(job_id)
         if job is not None and not job.started and not job.finished:
             job.row.mark_queued()
 
@@ -1037,18 +822,13 @@ class MainWindow(QMainWindow):
         Keep the running task alive until it confirms cancellation and has
         cleaned up its files. Queued tasks can be removed immediately.
         """
-        job = self._jobs.get(job_id)
+        job = self.downloads.jobs.get(job_id)
         if job is None or job.finished or job.status == "assembling":
             return
-        job.cancelling = True
-        job.task.cancel()
-        if self.pool.tryTake(job.task):
-            self._on_job_cancelled(job_id)
-        else:
-            job.row.mark_cancelling()
+        self.downloads.cancel(job)
 
     def _on_job_started(self, job_id: str) -> None:
-        job = self._jobs.get(job_id)
+        job = self.downloads.jobs.get(job_id)
         if job is not None and not job.started and not job.finished and not job.cancelling:
             job.started = True
             job.status = "downloading"
@@ -1058,7 +838,7 @@ class MainWindow(QMainWindow):
             self._render_history()
 
     def _on_progress(self, job_id: str, snapshot: object) -> None:
-        job = self._jobs.get(job_id)
+        job = self.downloads.jobs.get(job_id)
         # Late callbacks must not overwrite a row that already has an outcome.
         if job is not None and not job.finished and not job.cancelling:
             job.started = True
@@ -1087,13 +867,13 @@ class MainWindow(QMainWindow):
                     self._update_tray()
 
     def _on_job_finished(self, job_id: str, path: str) -> None:
-        job = self._jobs.get(job_id)
+        job = self.downloads.jobs.get(job_id)
         if job is None or job.finished:
             return
         job.finished = True
         path = str(Path(path).absolute())
         available = readable_file(path)
-        self._availability[path] = available
+        self.media.availability[path] = available
         size = 0
         if available:
             with contextlib.suppress(OSError):
@@ -1111,7 +891,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_job_failed(self, job_id: str, detail: str) -> None:
-        job = self._jobs.get(job_id)
+        job = self.downloads.jobs.get(job_id)
         if job is None or job.finished:
             return
         job.finished = True
@@ -1121,7 +901,7 @@ class MainWindow(QMainWindow):
         self._job_settled(job)
 
     def _on_job_cancelled(self, job_id: str) -> None:
-        job = self._jobs.get(job_id)
+        job = self.downloads.jobs.get(job_id)
         if job is None or job.finished:
             return
         job.finished = True
@@ -1132,18 +912,18 @@ class MainWindow(QMainWindow):
         self._toast(t("cancelled"))
 
     def _clear_finished(self) -> None:
-        for job_id, job in list(self._jobs.items()):
+        for job_id, job in list(self.downloads.jobs.items()):
             if not job.finished:
                 continue
             job.row.setParent(None)
             job.row.deleteLater()
-            del self._jobs[job_id]
-        self._selected_jobs.intersection_update(self._jobs)
+            del self.downloads.jobs[job_id]
+        self._selected_jobs.intersection_update(self.downloads.jobs)
         self._selection_changed()
         self._update_empty_state()
 
     def _update_empty_state(self) -> None:
-        self.downloads_empty.setVisible(not self._jobs)
+        self.downloads_empty.setVisible(not self.downloads.jobs)
 
     # -- dialogs and helpers ----------------------------------------------
     def open_settings(self) -> None:
@@ -1166,7 +946,7 @@ class MainWindow(QMainWindow):
             self._auto_paste()
 
     def _transfers_busy(self) -> bool:
-        return self._resolving or any(not job.finished for job in self._jobs.values())
+        return self._resolving or any(not job.finished for job in self.downloads.jobs.values())
 
     def _update_settings_lock(self) -> None:
         self.settings_page.set_transfer_locked(self._transfers_busy())
@@ -1174,7 +954,7 @@ class MainWindow(QMainWindow):
             self._update_tray()
 
     def _update_tray(self) -> None:
-        active = [job for job in self._jobs.values() if not job.finished]
+        active = [job for job in self.downloads.jobs.values() if not job.finished]
         current = next((job for job in active if job.started), None)
         self.tray.set_progress(
             len(active), current.title if current else "", current.percent if current else None
@@ -1217,10 +997,10 @@ class MainWindow(QMainWindow):
             if central is not None:
                 self.appearance_overlay.capture(central.rect().center(), circular=False)
         self.settings = updated
-        self.pool.setMaxThreadCount(updated.concurrent_downloads)
+        self.downloads.pool.setMaxThreadCount(updated.concurrent_downloads)
         self.folder_label.setText(str(updated.download_dir))
         if updated.prefer_mp4 != previous.prefer_mp4:
-            self.mp4_check.setChecked(updated.prefer_mp4)
+            self.result_card.mp4_check.setChecked(updated.prefer_mp4)
         self.settings_page.bind(updated)
         if language_changed:
             set_language(updated.language)
@@ -1230,7 +1010,9 @@ class MainWindow(QMainWindow):
         else:
             self.appearance_overlay.start()
         if updated.default_quality != previous.default_quality and self._resolved is not None:
-            self._build_quality_pills(self._resolved, None)
+            self.result_card.build_quality_pills(
+                self._resolved, None, self.settings.default_quality
+            )
         if updated.download_dir != previous.download_dir:
             self._request_media_refresh()
         self.save_indicator.pulse(animated=updated.animations)
@@ -1274,7 +1056,7 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl("https://github.com/SHAWNiksDev"))
 
     def _request_cancel_job(self, identifier: str) -> None:
-        job = self._jobs.get(identifier)
+        job = self.downloads.jobs.get(identifier)
         if job is None or job.finished or job.cancelling:
             return
         if job.status == "assembling":
@@ -1289,25 +1071,25 @@ class MainWindow(QMainWindow):
         else:
             self._cancel_job(identifier)
 
-    def _job_settled(self, job: _Job) -> None:
-        self._active_urls.discard(job.url)
+    def _job_settled(self, job: DownloadJob) -> None:
+        self.downloads.settle(job)
         self._update_settings_lock()
         self._render_history()
         self._request_media_refresh()
 
     def _remove_job(self, identifier: str) -> None:
-        job = self._jobs.get(identifier)
+        job = self.downloads.jobs.get(identifier)
         if job is None or not job.finished:
             return
         job.row.setParent(None)
         job.row.deleteLater()
-        del self._jobs[identifier]
+        del self.downloads.jobs[identifier]
         self._selected_jobs.discard(identifier)
         self._selection_changed()
         self._update_empty_state()
 
     def _toggle_download_selection(self, identifier: str) -> None:
-        job = self._jobs.get(identifier)
+        job = self.downloads.jobs.get(identifier)
         if job is None or not job.finished:
             return
         if identifier in self._selected_jobs:
@@ -1339,62 +1121,32 @@ class MainWindow(QMainWindow):
             remove()
 
     def _active_ids(self) -> set[str]:
-        return {identifier for identifier, job in self._jobs.items() if not job.finished}
+        return {identifier for identifier, job in self.downloads.jobs.items() if not job.finished}
 
     def _render_history(self) -> None:
-        self.history_page.set_history(self.history.entries, self._availability, self._active_ids())
+        self.history_page.set_history(
+            self.history.entries, self.media.availability, self._active_ids()
+        )
 
     def _poll_media(self) -> None:
-        if self.isVisible() and self.isActiveWindow() and not self._scan_running:
+        if self.isVisible() and self.isActiveWindow() and not self.media.scanning:
             self._request_media_refresh()
 
     def _request_media_refresh(self) -> None:
-        if self._closing:
-            return
-        self._media_generation += 1
-        if self._scan_running:
-            self._scan_again = True
-            return
-        self._scan_running = True
-        # Download rows outlive cleared history; their files still need checks.
-        paths = tuple(
-            dict.fromkeys(
-                [entry.path for entry in self.history.entries if entry.path]
-                + [job.row.path for job in self._jobs.values() if job.finished and job.row.path]
+        self.media.refresh(
+            tuple(
+                job.row.path
+                for job in self.downloads.jobs.values()
+                if job.finished and job.row.path
             )
         )
-        entries = self.library.entries
-        task = MediaScan(
-            self._media_generation,
-            entries,
-            tuple(dict.fromkeys((*paths, *(entry.path for entry in entries)))),
-        )
-        self._scan_task = task
-        task.signals.ready.connect(self._on_media_scanned)
-        self._media_pool.start(task)
 
-    def _on_media_scanned(
-        self, generation: int, files: tuple[MediaFile, ...], available: dict[str, bool], error: str
-    ) -> None:
-        self._scan_running = False
-        self._scan_task = None
-        if self._closing:
-            return
-        if generation == self._media_generation:
-            self._availability = available
-            self.library_page.set_files(files)
-            self._render_history()
-            if error and self._current_tab == 1 and error != self._media_error:
-                self._toast(t("folder_open_failed", detail=error), "warning")
-                self._media_error = error
-            elif not error:
-                self._media_error = ""
-            for job in self._jobs.values():
-                if job.finished and job.row.path:
-                    job.row.refresh_availability(available.get(job.row.path, False))
-        if self._scan_again:
-            self._scan_again = False
-            self._request_media_refresh()
+    def _render_media(self) -> None:
+        self.library_page.set_files(self.media.files)
+        self._render_history()
+        for job in self.downloads.jobs.values():
+            if job.finished and job.row.path:
+                job.row.refresh_availability(self.media.availability.get(job.row.path, False))
 
     def _remove_history(self, identifiers: set[str]) -> None:
         if identifiers & self._active_ids():
@@ -1496,7 +1248,11 @@ class MainWindow(QMainWindow):
         existing = (
             entry.path
             if readable_file(entry.path)
-            else self._existing_download_path(entry.file_name)
+            else self._existing_download_path(
+                entry.file_name,
+                directory=self._series_directory(entry.series),
+                include_history=not entry.series,
+            )
         )
         if existing:
             self._confirm_existing(entry.title, existing, retry)
@@ -1505,13 +1261,8 @@ class MainWindow(QMainWindow):
 
     def _delete_media_files(self, paths: set[str]) -> None:
         def delete() -> None:
-            protected = {path for path in paths if is_pending_output(Path(path))}
-            if protected:
+            if not self.media.delete(paths):
                 self._toast(t("assembly_protected"), "warning")
-                return
-            task = DeleteFiles(paths)
-            task.signals.done.connect(self._media_deleted)
-            self._media_pool.start(task)
 
         if self.settings.confirm_delete:
             self._ask(t("delete_selected_confirm", count=len(paths)), delete, action="delete_file")
@@ -1519,17 +1270,11 @@ class MainWindow(QMainWindow):
             delete()
 
     def _media_deleted(self, paths: set[str], error: str) -> None:
-        self.library.remove(
-            {entry.id for entry in self.library.entries if entry.path in paths}, set()
-        )
-        for path in paths:
-            self._availability[path] = False
         self._render_history()
-        self._request_media_refresh()
         if error:
             self._toast(t("delete_failed", detail=error), "error")
         elif paths:
-            self._toast(t("file_deleted"))
+            self._toast(t("file_deleted"), "success")
 
     def _auto_paste(self) -> None:
         if (
@@ -1706,7 +1451,7 @@ class MainWindow(QMainWindow):
             event.ignore()
             self._confirmation.raise_()
             return
-        active = [job for job in self._jobs.values() if not job.finished]
+        active = [job for job in self.downloads.jobs.values() if not job.finished]
         if any(job.status == "assembling" for job in active):
             self._toast(t("assembly_protected"), "warning")
             event.ignore()
@@ -1718,17 +1463,15 @@ class MainWindow(QMainWindow):
         self.tray.close()
         self.save_indicator.finish()
         self.appearance_overlay.finish()
-        for identifier, job in self._jobs.items():
+        for identifier, job in self.downloads.jobs.items():
             if not job.finished:
                 self.history.update(identifier, status="cancelled")
         for job in active:
             job.task.cancel()
-        self.pool.clear()
+        self.downloads.pool.clear()
         self.resolver.shutdown()
-        self.pool.waitForDone(5000)
-        self.history.close()
-        self.library.close()
-        self._media_pool.clear()
+        self.downloads.pool.waitForDone(5000)
+        self.media.close()
         self._media_timer.stop()
         super().closeEvent(event)
         self.exit_requested.emit()

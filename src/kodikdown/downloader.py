@@ -15,6 +15,8 @@ import yt_dlp
 
 from kodikdown.kodik.models import ResolvedVideo, referer_for
 from kodikdown.net import USER_AGENT
+from kodikdown.output_locks import any_reserved, try_reserve
+from kodikdown.output_locks import release as release_target
 
 _PROGRESS_INTERVAL = 0.12
 # yt-dlp only reports between fragments, and a single fragment can be several
@@ -99,8 +101,8 @@ _RESERVED_NAMES = {
     "prn",
     "aux",
     "nul",
-    *(f"com{i}" for i in range(1, 10)),
-    *(f"lpt{i}" for i in range(1, 10)),
+    *(f"com{i}" for i in "123456789¹²³"),
+    *(f"lpt{i}" for i in "123456789¹²³"),
 }
 
 
@@ -108,7 +110,7 @@ def safe_filename(name: str, fallback: str = "video") -> str:
     cleaned = _ILLEGAL_FS_CHARS.sub("_", name).strip(" .")
     cleaned = _TEMPLATE_CHARS.sub("_", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned)[:120]
-    cleaned = cleaned.encode("utf-8")[:200].decode("utf-8", errors="ignore")
+    cleaned = cleaned.encode("utf-8", errors="ignore")[:200].decode("utf-8", errors="ignore")
     cleaned = _MEDIA_SUFFIX_RE.sub("", cleaned).strip(" .")
     if not cleaned or set(cleaned) == {"_"}:
         return fallback
@@ -118,18 +120,12 @@ def safe_filename(name: str, fallback: str = "video") -> str:
     return cleaned
 
 
-_RESERVED_TARGETS: set[str] = set()
-_RESERVED_LOCK = threading.Lock()
-
-
 def is_pending_output(path: Path) -> bool:
     """Whether a video is still owned by a transfer or postprocessor."""
-    resolved = path.resolve()
-    with _RESERVED_LOCK:
-        return any(
-            resolved.parent == Path(base).parent and resolved.name.startswith(Path(base).name + ".")
-            for base in _RESERVED_TARGETS
-        )
+    return any_reserved(
+        path.parent,
+        (path.name[:index] for index, char in enumerate(path.name) if index and char == "."),
+    )
 
 
 def unique_target(directory: Path, stem: str) -> Path:
@@ -138,21 +134,19 @@ def unique_target(directory: Path, stem: str) -> Path:
     Names already promised to another running transfer are skipped as well,
     otherwise two simultaneous downloads could write into the same file.
     """
-    with _RESERVED_LOCK:
-        candidate = directory / stem
-        index = 2
-        while str(candidate.resolve()) in _RESERVED_TARGETS or _existing_media(candidate):
-            candidate = directory / f"{stem} ({index})"
-            index += 1
-            if index > 1000:
-                raise FileExistsError(f"no free file name left for {stem!r}")
-        _RESERVED_TARGETS.add(str(candidate.resolve()))
-        return candidate
-
-
-def release_target(target: Path) -> None:
-    with _RESERVED_LOCK:
-        _RESERVED_TARGETS.discard(str(target.resolve()))
+    for index in range(1, 1000):
+        candidate = directory / (stem if index == 1 else f"{stem} ({index})")
+        if not try_reserve(candidate):
+            continue
+        try:
+            # Check while holding the reservation. A previous process may have just published.
+            if not _existing_media(candidate):
+                return candidate
+        except BaseException:
+            release_target(candidate)
+            raise
+        release_target(candidate)
+    raise FileExistsError(f"no free file name left for {stem!r}")
 
 
 def _existing_media(target_base: Path) -> bool:
@@ -259,7 +253,10 @@ class Downloader:
             raise DownloadFailed(f"{self.output_dir} is not a folder")
 
         stem = safe_filename(self._filename or title)
-        target_base = unique_target(self.output_dir, stem)
+        try:
+            target_base = unique_target(self.output_dir, stem)
+        except OSError as exc:
+            raise DownloadFailed(f"could not reserve a file in {self.output_dir}: {exc}") from exc
         try:
             self._start_monitor(target_base)
             cancelled = False
