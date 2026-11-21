@@ -5,13 +5,19 @@ import os
 import sys
 import threading
 from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
 
 if sys.platform == "win32":
     import msvcrt
+    import stat
+    from ctypes import WinDLL, wintypes
+
+    _set_file_attributes = WinDLL("kernel32").SetFileAttributesW
+    _set_file_attributes.argtypes = [wintypes.LPCWSTR, wintypes.DWORD]
+    _set_file_attributes.restype = wintypes.BOOL
 else:
     import fcntl
 
@@ -68,9 +74,10 @@ def _directory_locks(directory: Path, *, create: bool = False) -> Iterator[_Dire
     with _mutex:
         locks = _directories.get(directory)
         if locks is None:
+            path = directory / ".kodikdown.lock"
             try:
                 flags = os.O_RDWR | (os.O_CREAT if create else 0)
-                fd = os.open(directory / ".kodikdown.lock", flags, 0o666)
+                fd = os.open(path, flags, 0o666)
             except FileNotFoundError:
                 if create:
                     raise
@@ -78,6 +85,14 @@ def _directory_locks(directory: Path, *, create: bool = False) -> Iterator[_Dire
                 return
             locks = _directories[directory] = _DirectoryLocks(fd)
         try:
+            if sys.platform == "win32" and create and not locks.owners:
+                with suppress(OSError):
+                    attributes = os.fstat(locks.fd).st_file_attributes
+                    if not attributes & stat.FILE_ATTRIBUTE_HIDDEN:
+                        _set_file_attributes(
+                            str(directory / ".kodikdown.lock"),
+                            (attributes & ~stat.FILE_ATTRIBUTE_NORMAL) | stat.FILE_ATTRIBUTE_HIDDEN,
+                        )
             yield locks
         finally:
             # POSIX drops all of our ranges if any descriptor for this file closes.

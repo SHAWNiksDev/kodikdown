@@ -1,4 +1,3 @@
-# -*- mode: python ; coding: utf-8 -*-
 """PyInstaller recipe for the KodikDown desktop build.
 
 Build from the repository root:
@@ -7,15 +6,12 @@ Build from the repository root:
 """
 
 import os
+import sys
 from pathlib import Path
 
 ROOT = Path(SPECPATH).resolve().parent  # noqa: F821 - injected by PyInstaller
-# Release builds rename the artefact per platform; PyInstaller ignores --name
-# when a spec file is used, so the name has to come from the environment.
 NAME = os.environ.get("KODIKDOWN_BUILD_NAME", "kodikdown").strip() or "kodikdown"
 
-# Qt ships a lot more than a widgets app needs; leaving the multimedia,
-# web-engine and QML stacks out keeps the one-file build reasonable.
 EXCLUDED_QT = [
     "PySide6.Qt3DAnimation",
     "PySide6.Qt3DCore",
@@ -57,28 +53,30 @@ EXCLUDED_QT = [
     "PySide6.QtWebSockets",
 ]
 
-EXCLUDES = EXCLUDED_QT + [
+EXCLUDES = [
+    *EXCLUDED_QT,
     "IPython",
     "PIL",
     "matplotlib",
+    "mypy",
     "numpy",
+    "pydantic.mypy",
+    "pydantic.v1.mypy",
     "pydoc",
     "pytest",
+    "setuptools",
+    "sqlite3",
     "tkinter",
 ]
 
 a = Analysis(  # noqa: F821 - injected by PyInstaller
     [str(ROOT / "src" / "kodikdown" / "gui" / "__main__.py")],
     pathex=[str(ROOT / "src")],
-    binaries=[],
     datas=[
         (str(ROOT / "src/kodikdown/gui/brands/*.png"), "kodikdown/gui/brands"),
     ],
-    hiddenimports=["kodikdown.gui"],
-    hookspath=[],
-    runtime_hooks=[],
+    hookspath=[str(ROOT / "packaging" / "hooks")],
     excludes=EXCLUDES,
-    noarchive=False,
 )
 pyz = PYZ(a.pure)  # noqa: F821 - injected by PyInstaller
 
@@ -87,15 +85,9 @@ exe = EXE(  # noqa: F821 - injected by PyInstaller
     a.scripts,
     a.binaries,
     a.datas,
-    [],
     name=NAME,
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
+    strip=sys.platform == "linux",
     upx=False,
-    runtime_tmpdir=None,
     console=False,
-    disable_windowed_traceback=False,
-    # A plain .ico: turning a PNG into one would need Pillow on build machines.
-    icon=str(ROOT / "docs" / "app.ico") if (ROOT / "docs" / "app.ico").exists() else None,
+    icon=str(ROOT / "docs" / "app.ico") if sys.platform == "win32" else None,
 )

@@ -1,4 +1,3 @@
-# -*- mode: python ; coding: utf-8 -*-
 """PyInstaller recipe for the scriptable command-line build.
 
 Build from the repository root:
@@ -7,6 +6,7 @@ Build from the repository root:
 """
 
 import os
+import sys
 from pathlib import Path
 
 ROOT = Path(SPECPATH).resolve().parent  # noqa: F821 - injected by PyInstaller
@@ -15,13 +15,20 @@ NAME = os.environ.get("KODIKDOWN_BUILD_NAME", "kodikdown-cli").strip() or "kodik
 a = Analysis(  # noqa: F821 - injected by PyInstaller
     [str(ROOT / "src" / "kodikdown" / "cli.py")],
     pathex=[str(ROOT / "src")],
-    binaries=[],
-    datas=[],
-    hiddenimports=["kodikdown.cli"],
-    hookspath=[],
-    runtime_hooks=[],
-    excludes=["PySide6", "shiboken6", "kodikdown.gui", "tkinter", "pytest"],
-    noarchive=False,
+    hookspath=[str(ROOT / "packaging" / "hooks")],
+    excludes=[
+        "PySide6",
+        "kodikdown.gui",
+        "mypy",
+        "pydantic.mypy",
+        "pydantic.v1.mypy",
+        "pydoc",
+        "pytest",
+        "setuptools",
+        "shiboken6",
+        "sqlite3",
+        "tkinter",
+    ],
 )
 pyz = PYZ(a.pure)  # noqa: F821 - injected by PyInstaller
 
@@ -30,12 +37,7 @@ exe = EXE(  # noqa: F821 - injected by PyInstaller
     a.scripts,
     a.binaries,
     a.datas,
-    [],
     name=NAME,
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
+    strip=sys.platform == "linux",
     upx=False,
-    runtime_tmpdir=None,
-    console=True,
 )

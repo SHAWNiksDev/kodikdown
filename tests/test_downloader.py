@@ -5,6 +5,7 @@ import http.server
 import multiprocessing
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -171,6 +172,19 @@ def test_killed_process_releases_its_reservation(tmp_path: Path) -> None:
     try:
         assert target.name == "clip"
         assert [path.name for path in tmp_path.iterdir()] == [".kodikdown.lock"]
+    finally:
+        release_target(target)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows file attributes")
+@pytest.mark.parametrize("existing", [False, True])
+def test_reservation_file_is_hidden_on_windows(tmp_path: Path, existing: bool) -> None:
+    anchor = tmp_path / ".kodikdown.lock"
+    if existing:
+        anchor.touch()
+    target = unique_target(tmp_path, "clip")
+    try:
+        assert anchor.stat().st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN
     finally:
         release_target(target)
 
