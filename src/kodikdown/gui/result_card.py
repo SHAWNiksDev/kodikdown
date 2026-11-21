@@ -155,8 +155,6 @@ class ResultCard(QFrame):
             button.hide()
             button.deleteLater()
 
-        # Keep whatever the user had picked for this video, otherwise start
-        # from the best stream the server offers.
         available = {variant.quality for variant in resolved.variants}
         preferred = int(default_quality) if default_quality != "ask" else None
         selected = keep_quality if keep_quality in available else resolved.pick(preferred).quality

@@ -152,7 +152,6 @@ class MainWindow(QMainWindow):
             self.appearance_overlay.finish()
             self.apply_theme(MODE_AUTO, animate=True)
 
-    # -- construction ------------------------------------------------------
     def _build(self) -> None:
         central = QWidget()
         central.setObjectName("window")
@@ -382,7 +381,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.folder_button)
         return footer
 
-    # -- theme and language ------------------------------------------------
     def apply_theme(
         self, mode: str, *, animate: bool = False, origin: QWidget | None = None
     ) -> None:
@@ -476,7 +474,6 @@ class MainWindow(QMainWindow):
         for job in self.downloads.jobs.values():
             job.row.retranslate()
 
-    # -- lookup ------------------------------------------------------------
     def prefill(self, url: str) -> None:
         """Start a lookup for a link given on the command line."""
         self.url_edit.setText(url)
@@ -501,7 +498,6 @@ class MainWindow(QMainWindow):
             self._toast(t("link_required"), "warning")
             self.url_edit.setFocus()
             return
-        # A voice-over only applies to the video it was listed for.
         translation = self._translation_for(raw)
         self._start_resolve(raw, translation)
 
@@ -643,7 +639,6 @@ class MainWindow(QMainWindow):
         else:
             self.set_status(t(kind, detail=detail), state="error")
 
-    # -- downloads ---------------------------------------------------------
     def _on_download(self, *, confirmed: bool = False, retry: HistoryEntry | None = None) -> None:
         if self._resolving:
             return
@@ -802,7 +797,6 @@ class MainWindow(QMainWindow):
             self._update_settings_lock()
         self._insert_row(row)
         self.downloads.pool.start(job.task)
-        # Only claim the job is waiting when no worker picked it up.
         self._later(_QUEUE_HINT_MS, lambda: self._hint_queued(job_id))
         return entry
 
@@ -925,7 +919,6 @@ class MainWindow(QMainWindow):
     def _update_empty_state(self) -> None:
         self.downloads_empty.setVisible(not self.downloads.jobs)
 
-    # -- dialogs and helpers ----------------------------------------------
     def open_settings(self) -> None:
         self._switch_tab(3)
 

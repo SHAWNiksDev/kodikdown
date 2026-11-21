@@ -76,4 +76,6 @@ For AniLiberty and AniDUB, copy the release page URL. On mobile, **Share → Kod
 
 Paste direct **MP4** or **HLS (`.m3u8`)** links into the app. Desktop also supports **DASH (`.mpd`)** and needs FFmpeg to process HLS. Android supports completed, unencrypted HLS with MPEG-TS or fMP4. Separate audio tracks and `EXT-X-DISCONTINUITY` tags are unsupported.
 
-**Original** means the source did not report a resolution up front. If the requested quality is missing, KodikDown chooses the closest lower quality, or the lowest available if all options are higher. Stream URLs can expire. Run **Find video** again with the original link or retry the download from history to get a fresh URL.
+**Original** means the source did not specify a resolution. If the requested quality is unavailable, KodikDown picks the closest lower quality. If every option is higher, it picks the lowest one.
+
+Stream URLs can expire. To refresh the URL, run **Find video** with the original player link or retry the download from history.

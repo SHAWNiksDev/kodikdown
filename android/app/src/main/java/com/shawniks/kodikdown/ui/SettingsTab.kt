@@ -11,6 +11,7 @@ import android.view.HapticFeedbackConstants
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.CompoundButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -219,59 +220,23 @@ internal class SettingsTab(
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
 
-        binding.switchPreferMp4.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bind(); return@setOnCheckedChangeListener }
-            prefs.preferMp4 = isChecked
-            applied()
-            binding.cbDownloadMp4.isChecked = isChecked
+        binding.switchPreferMp4.saveSetting { checked ->
+            prefs.preferMp4 = checked
+            binding.cbDownloadMp4.isChecked = checked
         }
-
-        binding.switchWifiOnly.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bind(); return@setOnCheckedChangeListener }
-            prefs.wifiOnly = isChecked
-            applied()
-        }
-
-        binding.switchGroupSeries.setOnCheckedChangeListener { _, checked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bind(); return@setOnCheckedChangeListener }
-            prefs.groupSeries = checked
-            applied()
-        }
-
-        binding.switchAutoPaste.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bind(); return@setOnCheckedChangeListener }
-            prefs.autoPaste = isChecked
-            applied()
-        }
-
-        binding.switchSwipeDelete.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bind(); return@setOnCheckedChangeListener }
-            prefs.swipeToDelete = isChecked
-            applied()
-        }
-
-        binding.switchConfirmSwipeDelete.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bind(); return@setOnCheckedChangeListener }
-            prefs.confirmSwipeDelete = isChecked
-            applied()
-        }
-
-        binding.switchConfirmCancelDownload.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bind(); return@setOnCheckedChangeListener }
-            prefs.confirmCancelDownload = isChecked
-            applied()
-        }
+        binding.switchWifiOnly.saveSetting { prefs.wifiOnly = it }
+        binding.switchGroupSeries.saveSetting { prefs.groupSeries = it }
+        binding.switchAutoPaste.saveSetting { prefs.autoPaste = it }
+        binding.switchSwipeDelete.saveSetting { prefs.swipeToDelete = it }
+        binding.switchConfirmSwipeDelete.saveSetting { prefs.confirmSwipeDelete = it }
+        binding.switchConfirmCancelDownload.saveSetting { prefs.confirmCancelDownload = it }
 
         binding.switchHapticFeedback.setOnCheckedChangeListener { _, isChecked ->
             if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bind(); return@setOnCheckedChangeListener }
+            if (!acceptSettingsClick()) {
+                bind()
+                return@setOnCheckedChangeListener
+            }
             if (isChecked) prefs.hapticFeedback = true
             applied()
             prefs.hapticFeedback = isChecked
@@ -346,6 +311,18 @@ internal class SettingsTab(
             } catch (e: Exception) {
                 Log.w("SettingsTab", "Cannot open GitHub", e)
             }
+        }
+    }
+
+    private fun CompoundButton.saveSetting(update: (Boolean) -> Unit) {
+        setOnCheckedChangeListener { _, checked ->
+            if (bindingSettings) return@setOnCheckedChangeListener
+            if (!acceptSettingsClick()) {
+                bind()
+                return@setOnCheckedChangeListener
+            }
+            update(checked)
+            applied()
         }
     }
 

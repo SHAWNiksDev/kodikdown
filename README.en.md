@@ -60,7 +60,7 @@ Episodes, voice-overs and resolutions vary by source. Alloha downloads are curre
 <details>
 <summary>CLI and running from source</summary>
 
-Running from source requires Python 3.11+. Desktop HLS processing requires FFmpeg.
+Running from source requires Python 3.11 or later. HLS downloads on desktop need FFmpeg.
 
 ```bash
 git clone https://github.com/SHAWNiksDev/kodikdown.git
@@ -78,7 +78,7 @@ kodikdown-cli download "<player-link>" --list-qualities
 kodikdown-cli download --help
 ```
 
-Packaged command-line builds have a filename that starts with `kodikdown-` and includes `-cli`.
+Look for `-cli` in the filenames of packaged command-line builds.
 
 The CLI downloads one episode per command. Concurrent downloads with the same name use filename suffixes such as `(2)` and `(3)`.
 
