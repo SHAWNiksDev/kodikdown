@@ -1,12 +1,13 @@
 package com.shawniks.kodikdown.downloader
 
 import android.content.Context
+import com.shawniks.kodikdown.KodikApp
 import com.shawniks.kodikdown.data.DownloadItem
 import com.shawniks.kodikdown.data.DownloadStatus
 import com.shawniks.kodikdown.data.HistoryManager
 import com.shawniks.kodikdown.data.LibraryManager
-import com.shawniks.kodikdown.data.StreamVariant
 import com.shawniks.kodikdown.data.ResolvedVideo
+import com.shawniks.kodikdown.data.StreamVariant
 import com.shawniks.kodikdown.util.FileUtils
 import java.io.File
 import java.io.IOException
@@ -158,7 +159,7 @@ object DownloadManager {
             }
         }
         val directory = File(context.cacheDir, "downloads")
-        if (!directory.isDirectory && !directory.mkdirs())
+        if (!directory.mkdirs() && !directory.isDirectory)
             throw IOException("Could not create download cache")
         val tempFile = File(directory, "${item.id}.mp4")
         val primaryKind = if (item.isMp4 && (hlsUrl == null || hlsUrl == item.url)) "mp4" else "hls"
@@ -207,6 +208,25 @@ object DownloadManager {
                         )
                     }
                 }
+                val processing = {
+                    updateItem(item.id) { it.copy(status = DownloadStatus.ASSEMBLING) }
+                }
+                suspend fun downloadHls() = downloader.downloadHls(
+                    source.url,
+                    tempFile,
+                    { item.id in cancelledItems },
+                    source.quality,
+                    onProgress = progress,
+                    onFragmentProgress = { done, count ->
+                        updateItem(item.id) {
+                            it.copy(downloadedFragments = done, fragmentCount = count,
+                                progress = done.toFloat() / count)
+                        }
+                    },
+                    onNetworkWait = networkWait,
+                    onProcessing = processing,
+                    referer = source.referer,
+                )
                 try {
                     if (direct != null || source.kind == "mp4") {
                         try {
@@ -216,11 +236,8 @@ object DownloadManager {
                                 { item.id in cancelledItems },
                                 progress,
                                 onNetworkWait = networkWait,
-                            onProcessing = {
-                                    updateItem(item.id) {
-                                        it.copy(status = DownloadStatus.ASSEMBLING)
-                                    }
-                                },
+                                onProcessing = processing,
+                                referer = source.referer,
                             )
                         } catch (e: IOException) {
                             if (source.kind == "mp4" || source.url == direct) throw e
@@ -234,55 +251,15 @@ object DownloadManager {
                                     progress = 0f,
                                 )
                             }
-                            downloader.downloadHls(
-                                source.url,
-                                tempFile,
-                                { item.id in cancelledItems },
-                                source.quality,
-                                onProgress = progress,
-                                onFragmentProgress = { done, count ->
-                                    updateItem(item.id) {
-                                        it.copy(downloadedFragments = done, fragmentCount = count,
-                                            progress = done.toFloat() / count)
-                                    }
-                                },
-                                onNetworkWait = networkWait,
-                            onProcessing = {
-                                    updateItem(item.id) {
-                                        it.copy(status = DownloadStatus.ASSEMBLING)
-                                    }
-                                },
-                            )
+                            downloadHls()
                         }
                     } else {
-                        downloader.downloadHls(
-                            source.url,
-                            tempFile,
-                            { item.id in cancelledItems },
-                            source.quality,
-                            onProgress = progress,
-                            onFragmentProgress = { done, count ->
-                                updateItem(item.id) {
-                                    it.copy(downloadedFragments = done, fragmentCount = count,
-                                        progress = done.toFloat() / count)
-                                }
-                            },
-                            onNetworkWait = networkWait,
-                            onProcessing = {
-                                updateItem(item.id) { it.copy(status = DownloadStatus.ASSEMBLING) }
-                            },
-                            referer = source.referer,
-                        )
+                        downloadHls()
                     }
                     break
                 } catch (e: IOException) {
                     tempFile.delete()
-                    if (
-                        index == sources.lastIndex ||
-                            (!e.message.orEmpty().contains("403") &&
-                                !e.message.orEmpty().contains("404"))
-                    )
-                        throw e
+                    if (index == sources.lastIndex || e !is DownloadHttpException || e.code !in setOf(403, 404)) throw e
                 }
             }
             currentCoroutineContext().ensureActive()
@@ -333,7 +310,7 @@ object DownloadManager {
         val updated = transform(previous)
         _items.update { list -> list.map { if (it.id == id) updated else it } }
         if (updated.status != previous.status) {
-            HistoryManager.recordFromDownload(com.shawniks.kodikdown.KodikApp.instance, updated)
+            HistoryManager.recordFromDownload(KodikApp.instance, updated)
         }
     }
 }

@@ -10,10 +10,11 @@ import androidx.recyclerview.widget.RecyclerView
 import com.shawniks.kodikdown.R
 import com.shawniks.kodikdown.data.DownloadStatus
 import com.shawniks.kodikdown.data.HistoryItem
+import com.shawniks.kodikdown.data.MediaFiles
 import com.shawniks.kodikdown.databinding.ItemHistoryBinding
+import com.shawniks.kodikdown.downloader.DownloadManager
 import com.shawniks.kodikdown.ui.AnimationExtensions.applyPressEffect
 import com.shawniks.kodikdown.util.FileUtils
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -31,30 +32,45 @@ class HistoryAdapter(
 
     var isSelectionMode: Boolean = false
         set(value) {
+            if (field == value) return
             field = value
-            notifyDataSetChanged()
+            notifyItemRangeChanged(0, itemCount)
         }
 
     val selectedIds: MutableSet<String> = mutableSetOf()
 
+    fun refreshAvailability(changed: Set<MediaFiles.Reference>) {
+        if (changed.isEmpty()) return
+        currentList.forEachIndexed { index, item ->
+            if (item.status == DownloadStatus.FINISHED && MediaFiles.Reference(item.savedPath, item.contentUri) in changed) {
+                notifyItemChanged(index)
+            }
+        }
+    }
+
     fun selectAll() {
         selectedIds.clear()
-        currentList.forEach { selectedIds.add(it.id) }
-        notifyDataSetChanged()
+        currentList.filterNot { DownloadManager.isActive(it.id) }.forEach { selectedIds.add(it.id) }
+        notifyItemRangeChanged(0, itemCount)
     }
 
     fun clearSelection() {
         selectedIds.clear()
-        notifyDataSetChanged()
+        notifyItemRangeChanged(0, itemCount)
     }
 
-    fun toggleSelection(id: String) {
+    private fun toggleSelection(id: String) {
         if (selectedIds.contains(id)) {
             selectedIds.remove(id)
         } else {
             selectedIds.add(id)
         }
-        notifyDataSetChanged()
+        refreshRow(id)
+    }
+
+    fun refreshRow(id: String) {
+        val position = currentList.indexOfFirst { it.id == id }
+        if (position >= 0) notifyItemChanged(position)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): HistoryViewHolder {
@@ -75,13 +91,12 @@ class HistoryAdapter(
         }
 
         fun bind(item: HistoryItem) {
-            val active = com.shawniks.kodikdown.downloader.DownloadManager.isActive(item.id)
-            val available = com.shawniks.kodikdown.data.MediaFiles.isAvailable(item.savedPath, item.contentUri)
+            val active = DownloadManager.isActive(item.id)
+            val available = MediaFiles.isAvailable(item.savedPath, item.contentUri)
             val isSelected = selectedIds.contains(item.id)
             val context = binding.root.context
             binding.tvHistoryTitle.text = listOfNotNull(item.series, item.title).joinToString(" · ")
 
-            // Status Badge
             when (item.status) {
                 DownloadStatus.FINISHED -> {
                     binding.tvHistoryStatus.text = context.getString(if (available) R.string.status_completed else R.string.file_missing)
@@ -109,7 +124,6 @@ class HistoryAdapter(
                 }
             }
 
-            // Selection Checkbox & Card Highlight
             if (isSelectionMode) {
                 binding.ivSelectCheck.visibility = View.VISIBLE
                 binding.ivSelectCheck.setImageResource(
@@ -123,7 +137,6 @@ class HistoryAdapter(
                 binding.root.setBackgroundResource(R.drawable.bg_card)
             }
 
-            // Metadata text
             val metaParts = mutableListOf<String>()
             if (item.quality > 0) metaParts.add("${item.quality}p")
             if (!item.translation.isNullOrEmpty()) metaParts.add(item.translation)
@@ -132,7 +145,6 @@ class HistoryAdapter(
 
             binding.tvHistoryMeta.text = metaParts.joinToString(" • ")
 
-            // Error display
             if (!item.errorMessage.isNullOrEmpty() && item.status == DownloadStatus.FAILED) {
                 binding.tvHistoryError.visibility = View.VISIBLE
                 binding.tvHistoryError.text = item.errorMessage
@@ -157,10 +169,10 @@ class HistoryAdapter(
                 if (active) false else onItemLongClick(item)
             }
 
-            binding.btnHistoryRedownload.setOnClickListener { if (!com.shawniks.kodikdown.downloader.DownloadManager.isActive(item.id)) onRedownloadClicked(item) }
+            binding.btnHistoryRedownload.setOnClickListener { if (!DownloadManager.isActive(item.id)) onRedownloadClicked(item) }
             binding.btnHistoryPlay.setOnClickListener { onPlayClicked(item) }
             binding.btnHistoryCopy.setOnClickListener { onCopyClicked(item) }
-            binding.btnHistoryDelete.setOnClickListener { if (!com.shawniks.kodikdown.downloader.DownloadManager.isActive(item.id)) onDeleteClicked(item) }
+            binding.btnHistoryDelete.setOnClickListener { if (!DownloadManager.isActive(item.id)) onDeleteClicked(item) }
         }
     }
 

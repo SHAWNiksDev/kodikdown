@@ -3,6 +3,7 @@ package com.shawniks.kodikdown.data
 import android.content.Context
 import android.util.AtomicFile
 import android.util.Log
+import com.shawniks.kodikdown.downloader.DownloadManager
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -123,18 +124,11 @@ object HistoryManager {
     }
 
     fun remove(context: Context, id: String) {
-        mutate(context) { list -> list.filterNot { it.id == id && !com.shawniks.kodikdown.downloader.DownloadManager.isActive(it.id) } }
+        mutate(context) { list -> list.filterNot { it.id == id && !DownloadManager.isActive(it.id) } }
     }
 
     fun clear(context: Context) {
-        mutate(context) { list -> list.filter { com.shawniks.kodikdown.downloader.DownloadManager.isActive(it.id) } }
-    }
-
-    fun findCompleted(url: String, fileName: String): HistoryItem? {
-        return _items.value.firstOrNull {
-            it.status == DownloadStatus.FINISHED &&
-                (it.url == url || it.fileName.equals(fileName, ignoreCase = true))
-        }
+        mutate(context) { list -> list.filter { DownloadManager.isActive(it.id) } }
     }
 
     private fun loadFromDisk(context: Context) {

@@ -72,8 +72,7 @@ a = Analysis(  # noqa: F821 - injected by PyInstaller
     pathex=[str(ROOT / "src")],
     binaries=[],
     datas=[
-        (str(ROOT / "src/kodikdown/gui/brands/drawable-nodpi/*.png"),
-         "kodikdown/gui/brands/drawable-nodpi"),
+        (str(ROOT / "src/kodikdown/gui/brands/*.png"), "kodikdown/gui/brands"),
     ],
     hiddenimports=["kodikdown.gui"],
     hookspath=[],

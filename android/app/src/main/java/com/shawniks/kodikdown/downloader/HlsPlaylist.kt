@@ -14,8 +14,7 @@ object HlsPlaylist {
     private fun resolve(base: String, path: String): String = URI(base).resolve(path).toString()
 
     fun selectVariant(base: String, text: String, quality: Int? = null): String? {
-        validate(text)
-        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        val lines = playlistLines(text).toList()
         val variants = mutableListOf<Triple<Int, Long, String>>()
         var hasSeparateAudio = false
         for ((index, line) in lines.withIndex()) {
@@ -45,13 +44,11 @@ object HlsPlaylist {
     }
 
     fun parse(base: String, text: String): Media {
-        validate(text)
         var init: Segment? = null
         val segments = mutableListOf<Segment>()
         var pendingRange: String? = null
-        var previousUrl: String? = null
-        var nextOffset = 0L
-        for (line in text.lineSequence().map { it.trim() }) {
+        var ended = false
+        for (line in playlistLines(text)) {
             when {
                 line.startsWith("#EXT-X-KEY:") &&
                     !Regex("(?:[:,])METHOD=NONE(?:,|$)").containsMatchIn(line) ->
@@ -71,20 +68,20 @@ object HlsPlaylist {
                     init = parsed
                 }
                 line.startsWith("#EXT-X-BYTERANGE:") -> pendingRange = line.substringAfter(':')
+                line == "#EXT-X-ENDLIST" -> ended = true
                 line.isNotEmpty() && !line.startsWith("#") -> {
                     val url = resolve(base, line)
-                    if (pendingRange != null && !pendingRange.contains('@') && previousUrl != url) {
-                        throw IOException("HLS byte range has no starting offset")
+                    val range = pendingRange?.let {
+                        val previous = segments.lastOrNull()?.takeIf { segment -> segment.url == url }?.range
+                        val offset = previous?.let { it.offset + it.length }
+                        parseRange(it, offset)
                     }
-                    val range = pendingRange?.let { parseRange(it, nextOffset) }
                     segments.add(Segment(url, range))
-                    nextOffset = range?.let { Math.addExact(it.offset, it.length) } ?: 0
-                    previousUrl = url
                     pendingRange = null
                 }
             }
         }
-        if (!text.lineSequence().any { it.trim() == "#EXT-X-ENDLIST" }) {
+        if (!ended) {
             throw IOException("Live HLS playlists are not supported; use a completed video")
         }
         if (segments.isEmpty() || pendingRange != null)
@@ -92,19 +89,21 @@ object HlsPlaylist {
         return Media(init, segments)
     }
 
-    private fun validate(text: String) {
-        if (!text.trimStart('\uFEFF', ' ', '\n', '\r', '\t').startsWith("#EXTM3U")) {
+    private fun playlistLines(text: String): Sequence<String> {
+        val lines = text.trimStart('\uFEFF', ' ', '\n', '\r', '\t')
+        if (lines.lineSequence().first().trimEnd() != "#EXTM3U") {
             throw IOException("The server did not return an HLS playlist")
         }
+        return lines.lineSequence().drop(1).map(String::trim).filter(String::isNotEmpty)
     }
 
-    private fun parseRange(raw: String, offset: Long): ByteRange {
+    private fun parseRange(raw: String, offset: Long?): ByteRange {
         val parts = raw.split('@', limit = 2)
         val length = parts[0].toLongOrNull() ?: throw IOException("Invalid HLS byte range")
         val start =
             if (parts.size == 2)
                 parts[1].toLongOrNull() ?: throw IOException("Invalid HLS byte offset")
-            else offset
+            else offset ?: throw IOException("HLS byte range has no starting offset")
         if (length <= 0 || start < 0 || start > Long.MAX_VALUE - length)
             throw IOException("Invalid HLS byte range")
         return ByteRange(start, length)

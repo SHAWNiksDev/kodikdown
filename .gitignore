@@ -7,7 +7,7 @@ __pycache__/
 !docs/*.jpg
 !docs/**/*.png
 !docs/**/*.jpg
-!src/kodikdown/gui/brands/drawable-nodpi/*.png
+!src/kodikdown/gui/brands/*.png
 .venv/
 venv/
 dist/

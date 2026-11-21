@@ -36,7 +36,7 @@ _BRANDS = {
 def _brand(name: str, *, player: bool = False) -> QIcon:
     key = "".join(character for character in name.casefold() if character.isalnum())
     if asset := _BRANDS.get(key):
-        directory = Path(__file__).with_name("brands") / "drawable-nodpi"
+        directory = Path(__file__).with_name("brands")
         return QIcon(str(directory / f"brand_{asset}.png"))
     return icon("play", "#8c9db3", 16) if player else QIcon()
 

@@ -1,6 +1,9 @@
 package com.shawniks.kodikdown
 
 import android.app.Application
+import android.app.LocaleManager
+import android.os.Build
+import android.os.LocaleList
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import com.shawniks.kodikdown.data.PreferencesManager
@@ -20,10 +23,10 @@ class KodikApp : Application() {
         }
 
         fun updateAppLocale(langCode: String) {
-            if (android.os.Build.VERSION.SDK_INT >= 33) {
-                instance.getSystemService(android.app.LocaleManager::class.java).applicationLocales =
-                    if (langCode == "auto") android.os.LocaleList.getEmptyLocaleList()
-                    else android.os.LocaleList.forLanguageTags(langCode)
+            if (Build.VERSION.SDK_INT >= 33) {
+                instance.getSystemService(LocaleManager::class.java).applicationLocales =
+                    if (langCode == "auto") LocaleList.getEmptyLocaleList()
+                    else LocaleList.forLanguageTags(langCode)
                 return
             }
             val locales = if (langCode == "auto") {

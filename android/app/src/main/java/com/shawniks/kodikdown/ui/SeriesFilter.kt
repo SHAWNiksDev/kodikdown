@@ -1,5 +1,6 @@
 package com.shawniks.kodikdown.ui
 
+import android.R as AndroidR
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -30,7 +31,7 @@ class SeriesFilter<T>(
         if (options != groups) {
             groups = options
             val labels = listOf(field.context.getString(R.string.all_series_folders)) + groups
-            field.adapter = ArrayAdapter(field.context, android.R.layout.simple_spinner_dropdown_item, labels)
+            field.adapter = ArrayAdapter(field.context, AndroidR.layout.simple_spinner_dropdown_item, labels)
             field.setSelection(groups.indexOf(selected) + 1)
         }
         field.visibility = if (groups.isEmpty()) View.GONE else View.VISIBLE

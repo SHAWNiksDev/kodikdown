@@ -1,17 +1,19 @@
 package com.shawniks.kodikdown
 
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import android.test.InstrumentationTestCase
 import android.view.View
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.shawniks.kodikdown.data.*
 import com.shawniks.kodikdown.downloader.DownloadManager
+import com.shawniks.kodikdown.ui.HistoryAdapter
 import com.shawniks.kodikdown.util.FileUtils
 import java.io.File
 import java.net.ServerSocket
+import java.util.UUID
 import kotlin.concurrent.thread
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -32,17 +34,19 @@ class HistoryDeviceTest : InstrumentationTestCase() {
         prefs.autoPaste = false
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
-        main { activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
-        val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        var originalClip: android.content.ClipData? = null
-        main { originalClip = clipboard.primaryClip }
+        main { activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+        var copiedLink: String? = null
+        main {
+            activity.readClipboard = { copiedLink }
+            activity.writeClipboard = { copiedLink = it }
+        }
         val server = ServerSocket(0)
         val bytes = instrumentation.context.assets.open("resume.mp4").use { it.readBytes() }
         val file = File(context.cacheDir, "qa-history-existing.mp4").apply { writeBytes(bytes) }
         val playerUrl = "https://kodikplayer.com/video/42/abcdef0123456789/720p?episode=2"
         val source = "<iframe src=\"$playerUrl\"></iframe>"
-        val title = "QA history ${java.util.UUID.randomUUID()}"
-        val item = HistoryItem("qa-history-${java.util.UUID.randomUUID()}", title, "qa-history-${java.util.UUID.randomUUID()}",
+        val title = "QA history ${UUID.randomUUID()}"
+        val item = HistoryItem("qa-history-${UUID.randomUUID()}", title, "qa-history-${UUID.randomUUID()}",
             "http://127.0.0.1:${server.localPort}/video.mp4", 720, isMp4 = true,
             savedPath = file.absolutePath, sourceInput = source)
         var downloadedId: String? = null
@@ -63,7 +67,7 @@ class HistoryDeviceTest : InstrumentationTestCase() {
             withTimeout(3000) { HistoryManager.items.first { list -> list.any { it.id == item.id } } }
             MediaFiles.refresh(context)
             main {
-                prefs.downloadDir = "Download/KodikDown-QA"
+                prefs.downloadDir = qaDownloadDirectory()
                 prefs.autoPaste = true
                 prefs.wifiOnly = false
                 activity.findViewById<View>(R.id.tabHistory).performClick()
@@ -72,7 +76,7 @@ class HistoryDeviceTest : InstrumentationTestCase() {
             main {
                 val row = activity.findViewById<RecyclerView>(R.id.rvHistory).getChildAt(0)
                 row.findViewById<View>(R.id.btnHistoryCopy).performClick()
-                assertEquals(playerUrl, clipboard.primaryClip!!.getItemAt(0).text.toString())
+                assertEquals(playerUrl, copiedLink)
                 val play = row.findViewById<View>(R.id.btnHistoryPlay)
                 val retry = row.findViewById<View>(R.id.btnHistoryRedownload)
                 assertTrue(retry.left - play.right >= (7 * activity.resources.displayMetrics.density).toInt())
@@ -82,7 +86,8 @@ class HistoryDeviceTest : InstrumentationTestCase() {
             var cancel: AccessibilityNodeInfo? = null
             val deadline = System.currentTimeMillis() + 3000
             while (cancel == null && System.currentTimeMillis() < deadline) {
-                cancel = automation.rootInActiveWindow?.findAccessibilityNodeInfosByText(activity.getString(R.string.cancel))
+                cancel = automation.rootInActiveWindow?.takeIf { it.packageName == context.packageName }
+                    ?.findAccessibilityNodeInfosByText(activity.getString(R.string.cancel))
                     ?.firstOrNull { it.isClickable && it.className.toString().contains("Button") }
                 if (cancel == null) Thread.sleep(80)
             }
@@ -102,20 +107,20 @@ class HistoryDeviceTest : InstrumentationTestCase() {
             while (!boundLegacy && System.currentTimeMillis() < rowDeadline) {
                 main {
                     val list = activity.findViewById<RecyclerView>(R.id.rvHistory)
-                    val adapter = list.adapter as com.shawniks.kodikdown.ui.HistoryAdapter
+                    val adapter = list.adapter as HistoryAdapter
                     retryRow = list.findViewHolderForAdapterPosition(0)?.itemView
                     boundLegacy = adapter.currentList.firstOrNull()?.id == legacy.id &&
-                        retryRow?.findViewById<android.widget.TextView>(R.id.tvHistoryTitle)?.text.toString() == legacy.title &&
+                        retryRow?.findViewById<TextView>(R.id.tvHistoryTitle)?.text.toString() == legacy.title &&
                         list.itemAnimator?.isRunning != true
                 }
                 if (!boundLegacy) Thread.sleep(40)
             }
             main {
                 val list = activity.findViewById<RecyclerView>(R.id.rvHistory)
-                val adapter = list.adapter as com.shawniks.kodikdown.ui.HistoryAdapter
+                val adapter = list.adapter as HistoryAdapter
                 assertTrue("Legacy retry row was not bound: first=${adapter.currentList.firstOrNull()?.id}, " +
                     "children=${list.childCount}, animating=${list.itemAnimator?.isRunning}, " +
-                    "title=${retryRow?.findViewById<android.widget.TextView>(R.id.tvHistoryTitle)?.text}", boundLegacy)
+                    "title=${retryRow?.findViewById<TextView>(R.id.tvHistoryTitle)?.text}", boundLegacy)
             }
             main {
                 retryRow!!.findViewById<View>(R.id.btnHistoryRedownload).performClick()
@@ -144,18 +149,19 @@ class HistoryDeviceTest : InstrumentationTestCase() {
                 if (!persisted) Thread.sleep(40)
             }
             assertTrue("Original input must survive saving history", persisted)
-            result.contentUri?.let { FileUtils.deleteFile(context, it) }
         } finally {
             file.delete(); server.close()
             HistoryManager.remove(context, item.id)
             HistoryManager.remove(context, item.id + "-legacy")
-            downloadedId?.let { DownloadManager.removeDownload(it); HistoryManager.remove(context, it) }
+            downloadedId?.let { id ->
+                DownloadManager.items.value.firstOrNull { it.id == id }?.contentUri?.let {
+                    FileUtils.deleteFile(context, it)
+                }
+                DownloadManager.removeDownload(id)
+                HistoryManager.remove(context, id)
+            }
             main {
                 prefs.saveSettings(originalSettings)
-                originalClip?.let { clipboard.setPrimaryClip(it) } ?: run {
-                    if (android.os.Build.VERSION.SDK_INT >= 28) clipboard.clearPrimaryClip()
-                    else clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
-                }
                 activity.finish()
             }
             LibraryManager.refresh(context, directory)

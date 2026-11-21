@@ -4,9 +4,7 @@ import com.shawniks.kodikdown.kodik.KodikDecoder
 import com.shawniks.kodikdown.kodik.KodikParser
 import com.shawniks.kodikdown.util.FileUtils
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class KodikLogicTest {
@@ -26,6 +24,9 @@ class KodikLogicTest {
         assertEquals("clip", FileUtils.safeFileName("clip.mp4"))
         assertEquals("_con", FileUtils.safeFileName("con.mp4"))
         assertEquals("My Movie", FileUtils.safeFileName("My   Movie"))
+        assertEquals("界".repeat(66), FileUtils.safeFileName("界".repeat(120)))
+        assertEquals("😀".repeat(50), FileUtils.safeFileName("😀".repeat(60)))
+        assertEquals("_LPT²", FileUtils.safeFileName("LPT².mp4"))
     }
 
     @Test

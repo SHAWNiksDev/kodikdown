@@ -1,5 +1,6 @@
 package com.shawniks.kodikdown.ui
 
+import android.R as AndroidR
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.view.View
@@ -13,6 +14,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.shawniks.kodikdown.R
 import com.shawniks.kodikdown.kodik.Catalog
@@ -82,7 +84,7 @@ class CatalogDialog(
         var choice: CatalogChoice? = null
         val selected = linkedSetOf<String>()
         val dialog = MaterialAlertDialogBuilder(context).setTitle(catalog.title).setView(scroll)
-            .setNegativeButton(android.R.string.cancel, null)
+            .setNegativeButton(AndroidR.string.cancel, null)
             .setPositiveButton(R.string.download, null)
             .create()
 
@@ -91,7 +93,7 @@ class CatalogDialog(
             val checked = items.count { it.number in selected }
             count.text = context.getString(R.string.catalog_selected, checked, items.size)
             selectAll.setText(if (items.isNotEmpty() && checked == items.size) R.string.clear_selection else R.string.select_all_episodes)
-            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE)?.isEnabled = checked > 0
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = checked > 0
         }
 
         fun showEpisodes(index: Int) {
@@ -130,7 +132,7 @@ class CatalogDialog(
         }
         dialog.setOnShowListener {
             updateCount()
-            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val current = choice ?: return@setOnClickListener
                 val picked = current.episodes.filter { it.number in selected }
                 if (picked.isEmpty()) return@setOnClickListener
@@ -154,7 +156,7 @@ class CatalogDialog(
     }
 
     private fun Spinner.items(items: List<String>) {
-        adapter = object : ArrayAdapter<String>(context, android.R.layout.simple_spinner_dropdown_item, items) {
+        adapter = object : ArrayAdapter<String>(context, AndroidR.layout.simple_spinner_dropdown_item, items) {
             override fun getView(position: Int, previous: View?, parent: ViewGroup): View =
                 brand(super.getView(position, previous, parent), items[position])
 

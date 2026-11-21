@@ -88,6 +88,7 @@
     <string name="copy_link">Copy link</string>
     <string name="link_copied">Link copied to clipboard</string>
     <string name="file_deleted">Video deleted</string>
+    <string name="file_delete_failed">Could not delete the video</string>
     <string name="video_count">%1$d videos</string>
     <string name="total_size">Total %1$s</string>
     <string name="storage_permission_required">Storage permission is required to save videos on this Android version. You can also choose a folder in Settings.</string>

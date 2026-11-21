@@ -2,10 +2,13 @@ package com.shawniks.kodikdown.data
 
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
+import android.widget.Toast
 import com.shawniks.kodikdown.KodikApp
 import com.shawniks.kodikdown.R
 import com.shawniks.kodikdown.downloader.DownloadManager
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,7 +18,9 @@ import kotlinx.coroutines.sync.withLock
 
 /** Cache only metadata availability. Never read a video or query storage from a row binding. */
 object MediaFiles {
-    private val pending = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    data class Reference(val path: String?, val uri: String?)
+
+    private val pending = ConcurrentHashMap.newKeySet<String>()
     fun isPending(reference: String?): Boolean = reference != null && reference in pending
     fun setPending(reference: String, value: Boolean) {
         if (value) pending.add(reference) else { pending.remove(reference); requestRefresh() }
@@ -23,10 +28,9 @@ object MediaFiles {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val requests = Channel<Unit>(Channel.CONFLATED)
     private val lock = Mutex()
-    private val state = MutableStateFlow<Map<String, Boolean>>(emptyMap())
-    private val missingCheckedAt = mutableMapOf<String, Long>() // protected by lock
+    private val state = MutableStateFlow<Map<Reference, Boolean>>(emptyMap())
+    private val missingCheckedAt = mutableMapOf<Reference, Long>()
     val availability = state.asStateFlow()
-    private fun key(path: String?, uri: String?) = "${path.orEmpty()}|${uri.orEmpty()}"
 
     init {
         scope.launch {
@@ -38,7 +42,8 @@ object MediaFiles {
     }
 
     fun requestRefresh() { requests.trySend(Unit) }
-    fun isAvailable(path: String?, uri: String?): Boolean = !isPending(path) && !isPending(uri) && state.value[key(path, uri)] == true
+    fun isAvailable(path: String?, uri: String?): Boolean =
+        !isPending(path) && !isPending(uri) && state.value[Reference(path, uri)] == true
 
     fun exists(context: Context, path: String?, uri: String?): Boolean {
         if (isPending(path) || isPending(uri)) return false
@@ -48,9 +53,10 @@ object MediaFiles {
             val file = File(path)
             if (file.isFile && file.canRead() && file.length() > 0) return true
         }
-        if (!uri.isNullOrBlank()) {
+        val content = uri?.takeIf { it.isNotBlank() } ?: path?.takeIf { it.startsWith("content://") }
+        if (content != null) {
             try {
-                context.contentResolver.openAssetFileDescriptor(Uri.parse(uri), "r")?.use { return true }
+                context.contentResolver.openAssetFileDescriptor(Uri.parse(content), "r")?.use { return true }
             } catch (_: Exception) { /* A stale MediaStore row is not a readable video. */ }
         }
         return false
@@ -61,9 +67,9 @@ object MediaFiles {
             val references = HistoryManager.items.value.map { it.savedPath to it.contentUri } +
                 DownloadManager.items.value.filter { it.isFinished }.map { it.savedPath to it.contentUri } +
                 LibraryManager.items.value.map { it.filePath to it.contentUri }
-            val now = android.os.SystemClock.elapsedRealtime()
+            val now = SystemClock.elapsedRealtime()
             val checked = references.filter { !it.first.isNullOrBlank() || !it.second.isNullOrBlank() }.distinct().associate { (path, uri) ->
-                val reference = key(path, uri)
+                val reference = Reference(path, uri)
                 val missing = missingCheckedAt[reference]
                 val available = if (!force && missing != null && now - missing < 30_000L) false
                     else exists(context, path, uri)
@@ -73,7 +79,7 @@ object MediaFiles {
             }
             missingCheckedAt.keys.retainAll(checked.keys)
             state.value = checked
-            LibraryManager.pruneUnavailable { path, uri -> isAvailable(path, uri) }
+            LibraryManager.pruneUnavailable { path, uri -> checked[Reference(path, uri)] != false }
         }
     }
 
@@ -83,7 +89,7 @@ object MediaFiles {
                 else exists(context, pathOrUri, null)
             withContext(Dispatchers.Main) {
                 if (available) action()
-                else android.widget.Toast.makeText(context, R.string.file_missing, android.widget.Toast.LENGTH_SHORT).show()
+                else Toast.makeText(context, R.string.file_missing, Toast.LENGTH_SHORT).show()
             }
             if (!available) requestRefresh()
         }

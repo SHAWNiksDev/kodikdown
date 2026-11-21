@@ -3,6 +3,7 @@ package com.shawniks.kodikdown
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaPlayer
+import android.os.Build
 import android.test.InstrumentationTestCase
 import com.shawniks.kodikdown.downloader.AdtsFrames
 import com.shawniks.kodikdown.downloader.HlsDownloader
@@ -14,7 +15,7 @@ import kotlinx.coroutines.runBlocking
 
 @Suppress("DEPRECATION")
 class RemuxDeviceTest : InstrumentationTestCase() {
-    fun testTransportStreamRemuxHasRawAudioAndPlayableVideo() = verifyRemux(android.os.Build.VERSION.SDK_INT < 25)
+    fun testTransportStreamRemuxHasRawAudioAndPlayableVideo() = verifyRemux(Build.VERSION.SDK_INT < 25)
 
     fun testAndroid7CompatibilityMuxerPreservesBFramesAndRawAudio() = verifyRemux(true)
 

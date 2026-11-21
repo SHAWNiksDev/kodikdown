@@ -1,16 +1,16 @@
 package com.shawniks.kodikdown
 
 import android.Manifest
+import android.R as AndroidR
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -30,100 +30,90 @@ import android.widget.ArrayAdapter
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.addCallback
+import androidx.activity.viewModels
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.ItemTouchHelper
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.SimpleItemAnimator
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.shawniks.kodikdown.data.DownloadStatus
 import com.shawniks.kodikdown.data.HistoryItem
 import com.shawniks.kodikdown.data.HistoryManager
-import com.shawniks.kodikdown.data.LibraryItem
 import com.shawniks.kodikdown.data.LibraryManager
+import com.shawniks.kodikdown.data.MediaFiles
 import com.shawniks.kodikdown.data.PreferencesManager
 import com.shawniks.kodikdown.data.ResolvedVideo
 import com.shawniks.kodikdown.data.StreamVariant
 import com.shawniks.kodikdown.data.Translation
 import com.shawniks.kodikdown.databinding.ActivityMainBinding
 import com.shawniks.kodikdown.downloader.DownloadManager
-import com.shawniks.kodikdown.kodik.KodikClient
 import com.shawniks.kodikdown.kodik.CatalogClient
-import com.shawniks.kodikdown.ui.CatalogDialog
-import com.shawniks.kodikdown.ui.SeriesFilter
 import com.shawniks.kodikdown.ui.AnimationExtensions.applyPressEffect
 import com.shawniks.kodikdown.ui.AnimationExtensions.popBounce
-import com.shawniks.kodikdown.ui.DownloadAdapter
-import com.shawniks.kodikdown.ui.HistoryAdapter
-import com.shawniks.kodikdown.ui.LibraryAdapter
-import com.shawniks.kodikdown.ui.SwipeToDeleteCallback
-import com.shawniks.kodikdown.ui.ThemeRevealHelper
+import com.shawniks.kodikdown.ui.CatalogDialog
+import com.shawniks.kodikdown.ui.DownloadLookup
+import com.shawniks.kodikdown.ui.MediaTabs
+import com.shawniks.kodikdown.ui.SettingsTab
 import com.shawniks.kodikdown.ui.ToastManager
 import com.shawniks.kodikdown.util.FileUtils
 import java.io.File
+import java.io.IOException
 import java.util.ArrayDeque
 import java.util.regex.Pattern
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
+    private val lookup: DownloadLookup by viewModels()
+    internal var readClipboard: () -> String? = ::readSystemClipboard
+    internal var writeClipboard: (String) -> Unit = { link ->
+        getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("video_url", link))
+    }
     private lateinit var binding: ActivityMainBinding
     private lateinit var prefs: PreferencesManager
-    private val client = KodikClient()
-    private val catalogClient = CatalogClient(client)
+    private lateinit var settingsTab: SettingsTab
+    private lateinit var mediaTabs: MediaTabs
+    private lateinit var renderedConfiguration: Configuration
 
     private var resolveJob: Job? = null
     private var isResolving = false
     private var resolveGeneration = 0
-    private val uiCollectors = mutableListOf<Job>()
-    private var bindingSettings = false
-    private val settingsClicks = com.shawniks.kodikdown.ui.ActionGate(500L)
-    private var appearanceBusy = false
-    private var languageTransition = false
     private var fileChecks: Job? = null
-    private var cacheSizeJob: Job? = null
-    private var clearingCache = false
-    private val fileObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
-        override fun onChange(selfChange: Boolean) { com.shawniks.kodikdown.data.MediaFiles.requestRefresh() }
-    }
     private var pendingStorageAction: (() -> Unit)? = null
 
-    private var currentResolved: ResolvedVideo? = null
-    private var resolvedUrl = ""
-    private var selectedVariant: StreamVariant? = null
-    private var selectedTranslation: Translation? = null
-    private var nameManuallyEdited = false
 
-    private lateinit var downloadAdapter: DownloadAdapter
-    private lateinit var libraryAdapter: LibraryAdapter
-    private lateinit var historyAdapter: HistoryAdapter
 
     private var currentTab = 0
     private val tabBackStack = ArrayDeque<Int>()
     private var lastDownloadClickTime = 0L
 
-    // Selection mode state
-    private enum class SelectionType { NONE, DOWNLOADS, LIBRARY, HISTORY }
-    private var selectionType = SelectionType.NONE
-    private var isSelectionMode = false
-
     private val folderPickerLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
-            if (uri != null && !transferSettingsLocked()) {
-                contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                )
+            if (uri != null && !settingsTab.transfersLocked()) {
+                try {
+                    contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                } catch (_: SecurityException) {
+                    ToastManager.show(binding.toastContainer, getString(R.string.storage_permission_required), isError = true)
+                    return@registerForActivityResult
+                }
                 val selectedFolder = uri.toString()
                 prefs.downloadDir = selectedFolder
                 binding.tvFooterPath.text = selectedFolder
                 binding.tvSettingsDownloadDir.text = selectedFolder
-                settingsApplied()
+                settingsTab.applied()
             }
         }
 
@@ -172,11 +162,17 @@ class MainActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
         outState.putInt("saved_tab", currentTab)
         outState.putString("url_input", binding.etUrl.text?.toString())
+        outState.putString("file_name", binding.etFileName.text?.toString())
+        outState.putBoolean("download_mp4", binding.cbDownloadMp4.isChecked)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = PreferencesManager(this)
+        settingsTab = SettingsTab(this, prefs, { binding }, { isResolving },
+            { folderPickerLauncher.launch(null) }, ::triggerHaptic, ::getColorFromAttr)
+        mediaTabs = MediaTabs(this, prefs, { binding }, ::triggerHaptic,
+            settingsTab::updateEnabled, ::requestHistoryRetry, { writeClipboard(it) })
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, R.anim.no_anim, R.anim.no_anim)
@@ -188,8 +184,8 @@ class MainActivity : AppCompatActivity() {
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        renderedConfiguration = Configuration(resources.configuration)
 
-        // Predictive back / Back gesture navigation
         onBackPressedDispatcher.addCallback(this) {
             handleBackPressed()
         }
@@ -203,40 +199,46 @@ class MainActivity : AppCompatActivity() {
 
         initViews()
         initTabs(savedTab)
-        initDownloadsList()
-        initLibrary()
-        initHistory()
-        initSettings()
-        initSelectionBar()
+        mediaTabs.install()
+        settingsTab.install()
 
-        if (!savedUrl.isNullOrEmpty()) {
+        if (savedInstanceState == null) {
+            handleIncomingIntent(intent)
+        } else if (!savedUrl.isNullOrEmpty()) {
             binding.etUrl.setText(savedUrl)
+            if (savedUrl.trim() == lookup.resolvedUrl) restoreResult(
+                savedInstanceState.getString("file_name"), savedInstanceState.getBoolean("download_mp4"),
+            )
         }
-
-        handleIncomingIntent(intent)
     }
 
     override fun onResume() {
         super.onResume()
         LibraryManager.refresh(this, prefs.downloadDir)
         fileChecks?.cancel()
-        fileChecks = lifecycleScope.launch {
-            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
-                com.shawniks.kodikdown.data.MediaFiles.refresh(this@MainActivity, force = false)
-                kotlinx.coroutines.delay(3000)
-            }
-        }
-        contentResolver.registerContentObserver(android.net.Uri.parse("content://media"), true, fileObserver)
+        refreshVisibleFiles()
         if (currentTab == 0 && prefs.autoPaste) {
             checkAutoPaste()
         }
     }
 
     override fun onPause() {
-        binding.settingsSaveIndicator.finish()
+        if (::binding.isInitialized) binding.settingsSaveIndicator.finish()
         fileChecks?.cancel()
-        contentResolver.unregisterContentObserver(fileObserver)
         super.onPause()
+    }
+
+    private fun refreshVisibleFiles() {
+        fileChecks?.cancel()
+        if (currentTab == 3) return
+        MediaFiles.requestRefresh()
+        // Filesystem paths and SAF providers cannot reliably notify us of external deletions.
+        fileChecks = lifecycleScope.launch {
+            while (isActive) {
+                delay(15_000)
+                MediaFiles.refresh(this@MainActivity, force = false)
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -246,8 +248,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleBackPressed() {
-        if (isSelectionMode) {
-            exitSelectionMode()
+        if (mediaTabs.isSelectionMode) {
+            mediaTabs.exitSelectionMode()
             return
         }
 
@@ -301,7 +303,6 @@ class MainActivity : AppCompatActivity() {
         }
         binding.tvFooterPath.text = prefs.downloadDir
 
-        // Apply interactive micro-interaction press effects
         binding.btnClearUrl.applyPressEffect()
         binding.btnPaste.applyPressEffect()
         binding.btnFind.applyPressEffect()
@@ -310,7 +311,6 @@ class MainActivity : AppCompatActivity() {
         binding.btnFooterOpenFolder.applyPressEffect()
         binding.btnClearFinished.applyPressEffect()
 
-        // URL input text watcher
         binding.etUrl.addTextChangedListener(
             object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -345,7 +345,7 @@ class MainActivity : AppCompatActivity() {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     if (binding.etFileName.hasFocus()) {
-                        nameManuallyEdited = true
+                        lookup.nameEdited = true
                     }
                 }
                 override fun afterTextChanged(s: Editable?) {}
@@ -358,138 +358,46 @@ class MainActivity : AppCompatActivity() {
         binding.btnClearFinished.setOnClickListener { DownloadManager.clearFinished() }
     }
 
-    private fun acceptSettingsClick(): Boolean = !bindingSettings && !appearanceBusy &&
-        settingsClicks.accept(android.os.SystemClock.elapsedRealtime())
-
-    private fun settingsApplied() {
-        if (bindingSettings) return
-        triggerHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
-        binding.settingsSaveIndicator.pulse()
-    }
-
-    private fun transferSettingsLocked(): Boolean =
-        isResolving || DownloadManager.items.value.any { !it.isTerminal }
-
-    private fun updateSettingsAvailability() {
-        val unlocked = !transferSettingsLocked()
-        binding.tvSettingsLocked.visibility = if (unlocked) View.GONE else View.VISIBLE
-        listOf(binding.btnSettingsBrowseFolder, binding.btnSettingsResetFolder,
-            binding.btnSettingsMinusConcurrent, binding.btnSettingsPlusConcurrent,
-            binding.spDefaultQuality, binding.switchPreferMp4, binding.switchWifiOnly,
-            binding.btnResetSettings).forEach {
-            it.isEnabled = unlocked && !appearanceBusy
-            it.alpha = if (it.isEnabled) 1f else 0.45f
-        }
-        listOf(binding.btnThemeAuto, binding.btnThemeLight, binding.btnThemeDark,
-            binding.btnLangAuto, binding.btnLangRu, binding.btnLangEn).forEach {
-            it.isEnabled = !appearanceBusy && !isResolving
-        }
-    }
-
-    private fun captureAppearance(fade: Boolean, sourceView: View? = null) {
-        appearanceBusy = true
-        languageTransition = fade
-        triggerHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
-        val root = binding.rootContainer
-        val loc = IntArray(2)
-        val origin = IntArray(2)
-        root.getLocationInWindow(origin)
-        sourceView?.getLocationInWindow(loc)
-        try {
-            val bitmap = Bitmap.createBitmap(
-                (root.width / 2).coerceAtLeast(1), (root.height / 2).coerceAtLeast(1),
-                Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            canvas.scale(0.5f, 0.5f)
-            root.draw(canvas)
-            ThemeRevealHelper.snapshot = bitmap
-            ThemeRevealHelper.originX = if (sourceView == null) root.width / 2
-                else loc[0] - origin[0] + sourceView.width / 2
-            ThemeRevealHelper.originY = if (sourceView == null) root.height / 2
-                else loc[1] - origin[1] + sourceView.height / 2
-        } catch (e: RuntimeException) {
-            Log.w("MainActivity", "Could not capture appearance", e)
-            ThemeRevealHelper.clear()
-        }
-        updateSettingsAvailability()
-    }
-
-    private fun finishAppearance() {
-        ThemeRevealHelper.clear()
-        appearanceBusy = false
-        bindSettingsUi()
-        binding.settingsSaveIndicator.pulse()
-    }
-
-    private fun changeThemeWithReveal(newTheme: String, sourceView: View?) {
-        if (isResolving || prefs.theme == newTheme || !acceptSettingsClick()) return
-        captureAppearance(false, sourceView)
-        prefs.theme = newTheme
-        KodikApp.applyTheme(newTheme)
-        // Selecting Auto can keep the effective theme unchanged.
-        binding.root.postDelayed({
-            if (appearanceBusy && binding.themeOverlay.visibility != View.VISIBLE) finishAppearance()
-        }, 500)
-        bindSettingsUi()
-    }
-
-    private fun changeLanguage(newLang: String) {
-        if (isResolving || prefs.language == newLang || !acceptSettingsClick()) return
-        captureAppearance(true)
-        prefs.language = newLang
-        KodikApp.updateAppLocale(newLang)
-        binding.root.postDelayed({
-            if (appearanceBusy && binding.themeOverlay.visibility != View.VISIBLE) finishAppearance()
-        }, 500)
-    }
-
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (!::binding.isInitialized) return
+        val changes = renderedConfiguration.diff(newConfig)
+        renderedConfiguration = Configuration(newConfig)
+        val appearance = ActivityInfo.CONFIG_LOCALE or ActivityInfo.CONFIG_LAYOUT_DIRECTION or ActivityInfo.CONFIG_UI_MODE
+        if (!settingsTab.appearanceBusy && changes and appearance == 0) return
         val url = binding.etUrl.text.toString()
         val name = binding.etFileName.text.toString()
-        val edited = nameManuallyEdited
         val mp4 = binding.cbDownloadMp4.isChecked
-        val quality = selectedVariant?.quality
         val scroll = binding.viewSettings.scrollY
         val downloaderScroll = binding.viewDownloader.scrollY
-        uiCollectors.forEach { it.cancel() }
-        uiCollectors.clear()
+        mediaTabs.unbind()
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        binding.etUrl.setText(url)
         initViews()
         initTabs(currentTab)
-        initDownloadsList()
-        initLibrary()
-        initHistory()
-        initSettings()
-        initSelectionBar()
-        isSelectionMode = false
-        selectionType = SelectionType.NONE
+        mediaTabs.install()
+        settingsTab.install()
         binding.etUrl.setText(url)
-        currentResolved?.let {
-            displayResolvedVideo(it)
-            if (quality != null) buildQualityPills(it.variants, quality)
-            binding.etFileName.setText(name)
-        }
-        binding.cbDownloadMp4.isChecked = mp4
+        restoreResult(name, mp4)
         if (isResolving) {
             binding.tvFindText.text = getString(R.string.cancel)
             binding.ivFindIcon.setImageResource(R.drawable.ic_close)
             binding.pbResolving.visibility = View.VISIBLE
             binding.btnDownload.isEnabled = false
         }
-        nameManuallyEdited = edited
         binding.viewSettings.post { binding.viewSettings.scrollTo(0, scroll) }
         binding.viewDownloader.post { binding.viewDownloader.scrollTo(0, downloaderScroll) }
-        val bitmap = ThemeRevealHelper.snapshot
-        if (appearanceBusy && bitmap != null) {
-            if (languageTransition) binding.themeOverlay.startFade(bitmap) { finishAppearance() }
-            else binding.themeOverlay.startReveal(bitmap,
-                ThemeRevealHelper.originX.toFloat(), ThemeRevealHelper.originY.toFloat(),
-                duration = 300L) { finishAppearance() }
-        } else if (appearanceBusy) finishAppearance()
+        settingsTab.restoreAppearance()
+    }
+
+    private fun restoreResult(name: String?, preferMp4: Boolean) {
+        lookup.resolved?.let { video ->
+            val quality = lookup.selectedVariant?.quality
+            displayResolvedVideo(video)
+            if (quality != null) buildQualityPills(video.variants, quality)
+            if (name != null) binding.etFileName.setText(name)
+        }
+        binding.cbDownloadMp4.isChecked = preferMp4
     }
 
     private fun checkAutoPaste() {
@@ -513,122 +421,11 @@ class MainActivity : AppCompatActivity() {
             caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
     }
 
-    private var cancelDownloadDialog: androidx.appcompat.app.AlertDialog? = null
-    private var cancelDownloadDialogId: String? = null
-
-    private fun requestDownloadCancellation(id: String) {
-        val item = DownloadManager.items.value.firstOrNull { it.id == id } ?: return
-        if (item.isTerminal) {
-            DownloadManager.removeDownload(id)
-            return
-        }
-        if (DownloadManager.isAssembling(id)) return
-        if (!prefs.confirmCancelDownload) {
-            DownloadManager.cancelDownload(id)
-            return
-        }
-        if (cancelDownloadDialog?.isShowing == true) return
-        cancelDownloadDialogId = id
-        cancelDownloadDialog = MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.confirm_cancel_title)
-            .setMessage(getString(R.string.confirm_cancel_message, item.title))
-            .setPositiveButton(R.string.stop_download) { _, _ -> DownloadManager.cancelDownload(id) }
-            .setNegativeButton(R.string.keep_downloading, null)
-            .setOnDismissListener {
-                cancelDownloadDialog = null
-                cancelDownloadDialogId = null
-            }
-            .show()
-    }
-
     override fun onDestroy() {
-        binding.settingsSaveIndicator.finish()
-        cancelDownloadDialog?.dismiss()
+        if (::binding.isInitialized) binding.settingsSaveIndicator.finish()
+        if (::mediaTabs.isInitialized) mediaTabs.unbind()
+        duplicateDialog?.dismiss()
         super.onDestroy()
-    }
-
-    private fun initDownloadsList() {
-        downloadAdapter =
-            DownloadAdapter(
-                onItemClick = {
-                    triggerHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
-                    if (downloadAdapter.selectedIds.isEmpty()) exitSelectionMode()
-                    else updateSelectionCount(downloadAdapter.selectedIds.size)
-                },
-                onItemLongClick = { item ->
-                    if (!isSelectionMode && item.isTerminal) {
-                        enterSelectionMode(SelectionType.DOWNLOADS, item.id)
-                        true
-                    } else false
-                },
-                onCancelClicked = { item ->
-                    requestDownloadCancellation(item.id)
-                },
-                onOpenClicked = { item ->
-                    val pathOrUri = item.contentUri ?: item.savedPath
-                    if (!pathOrUri.isNullOrEmpty()) {
-                        FileUtils.openFile(this, pathOrUri)
-                    }
-                },
-                onShareClicked = { item ->
-                    val pathOrUri = item.contentUri ?: item.savedPath
-                    if (!pathOrUri.isNullOrEmpty()) {
-                        FileUtils.shareFile(this, pathOrUri)
-                    }
-                },
-            )
-
-        binding.rvDownloads.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = downloadAdapter
-            (itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
-        }
-
-        ItemTouchHelper(SwipeToDeleteCallback(this, canSwipe = { position ->
-            prefs.swipeToDelete && !isSelectionMode &&
-                downloadAdapter.currentList.getOrNull(position)?.isTerminal == true
-        }) { position, _ ->
-            val item = downloadAdapter.currentList.getOrNull(position) ?: return@SwipeToDeleteCallback
-            val reset = { downloadAdapter.notifyDataSetChanged() }
-            if (!prefs.swipeToDelete || isSelectionMode || !item.isTerminal) {
-                reset()
-                return@SwipeToDeleteCallback
-            }
-            triggerHaptic(HapticFeedbackConstants.CONTEXT_CLICK)
-            if (!item.isTerminal || prefs.confirmSwipeDelete) {
-                MaterialAlertDialogBuilder(this)
-                    .setTitle(R.string.delete)
-                    .setMessage(if (item.isTerminal) getString(R.string.remove_download_confirm)
-                        else getString(R.string.cancel_download_confirm))
-                    .setPositiveButton(R.string.delete) { _, _ -> DownloadManager.removeDownload(item.id) }
-                    .setNegativeButton(R.string.cancel) { _, _ -> reset() }
-                    .setOnCancelListener { reset() }
-                    .show()
-            } else DownloadManager.removeDownload(item.id)
-        }).attachToRecyclerView(binding.rvDownloads)
-
-        uiCollectors += lifecycleScope.launch {
-            DownloadManager.items.collect { items ->
-                downloadAdapter.submitList(items)
-                cancelDownloadDialogId?.let { id ->
-                    if (!DownloadManager.isActive(id) || DownloadManager.isAssembling(id)) cancelDownloadDialog?.dismiss()
-                }
-                updateSettingsAvailability()
-                if (items.isEmpty()) {
-                    binding.tvDownloadsEmpty.visibility = View.VISIBLE
-                    binding.rvDownloads.visibility = View.GONE
-                } else {
-                    binding.tvDownloadsEmpty.visibility = View.GONE
-                    binding.rvDownloads.visibility = View.VISIBLE
-                }
-            }
-        }
-        uiCollectors += lifecycleScope.launch {
-            com.shawniks.kodikdown.data.MediaFiles.availability.collect {
-                downloadAdapter.notifyDataSetChanged()
-                if (::historyAdapter.isInitialized) historyAdapter.notifyDataSetChanged()
-            }
-        }
     }
 
     private fun initTabs(savedTab: Int = 0) {
@@ -648,8 +445,8 @@ class MainActivity : AppCompatActivity() {
     private fun switchTab(index: Int, isBack: Boolean = false) {
         if (currentTab == index && isViewInitialized(index)) return
 
-        if (isSelectionMode) {
-            exitSelectionMode()
+        if (mediaTabs.isSelectionMode) {
+            mediaTabs.exitSelectionMode()
         }
 
         val previousIndex = currentTab
@@ -672,18 +469,19 @@ class MainActivity : AppCompatActivity() {
         }
 
         currentTab = index
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) refreshVisibleFiles()
         updateTabUi(index)
         if (index != 0) {
-            WindowInsetsControllerCompat(window, binding.root).hide(androidx.core.view.WindowInsetsCompat.Type.ime())
+            WindowInsetsControllerCompat(window, binding.root).hide(WindowInsetsCompat.Type.ime())
             binding.etUrl.clearFocus()
             binding.etFileName.clearFocus()
         }
 
         when (index) {
-            0 -> if (prefs.autoPaste && !appearanceBusy) checkAutoPaste()
+            0 -> if (prefs.autoPaste && !settingsTab.appearanceBusy) checkAutoPaste()
             1 -> LibraryManager.refresh(this, prefs.downloadDir)
             2 -> HistoryManager.init(this)
-            3 -> bindSettingsUi()
+            3 -> settingsTab.bind()
         }
     }
 
@@ -714,669 +512,16 @@ class MainActivity : AppCompatActivity() {
         binding.tvTabSettings.setTextColor(if (activeTab == 3) accentColor else mutedColor)
     }
 
-    private fun initLibrary() {
-        libraryAdapter =
-            LibraryAdapter(
-                onPlayClicked = { item ->
-                    val uriOrPath = item.contentUri ?: item.filePath
-                    if (!uriOrPath.isNullOrEmpty()) {
-                        FileUtils.openFile(this, uriOrPath)
-                    }
-                },
-                onShareClicked = { item ->
-                    val uriOrPath = item.contentUri ?: item.filePath
-                    if (!uriOrPath.isNullOrEmpty()) {
-                        FileUtils.shareFile(this, uriOrPath)
-                    }
-                },
-                onDeleteClicked = { item ->
-                    confirmDeleteLibraryItem(item)
-                },
-                onItemClick = {
-                    if (isSelectionMode) {
-                        triggerHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
-                        val count = libraryAdapter.selectedIds.size
-                        if (count == 0) {
-                            exitSelectionMode()
-                        } else {
-                            updateSelectionCount(count)
-                        }
-                    }
-                },
-                onItemLongClick = { item ->
-                    if (!isSelectionMode) {
-                        enterSelectionMode(SelectionType.LIBRARY, item.id)
-                        true
-                    } else false
-                }
-            )
-
-        binding.rvLibrary.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = libraryAdapter
+    private fun requestHistoryRetry(item: HistoryItem) {
+        if (isResolving) return
+        val safeName = FileUtils.safeFileName(item.fileName)
+        if (DownloadManager.isAlreadyActive(item.url, safeName, item.series)) {
+            ToastManager.show(binding.toastContainer, getString(R.string.already_downloading))
+            return
         }
-
-        // Swipe-to-delete for Library
-        val librarySwipeHelper = ItemTouchHelper(SwipeToDeleteCallback(this) { position, _ ->
-            if (!prefs.swipeToDelete) {
-                libraryAdapter.notifyItemChanged(position)
-                return@SwipeToDeleteCallback
-            }
-            triggerHaptic(HapticFeedbackConstants.CONTEXT_CLICK)
-            val item = libraryAdapter.currentList.getOrNull(position) ?: return@SwipeToDeleteCallback
-            if (prefs.confirmSwipeDelete) {
-                MaterialAlertDialogBuilder(this)
-                    .setTitle(R.string.delete)
-                    .setMessage(getString(R.string.delete_file_confirm, item.title))
-                    .setPositiveButton(R.string.delete) { _, _ ->
-                        lifecycleScope.launch {
-                            LibraryManager.deleteItem(this@MainActivity, item)
-                            ToastManager.show(binding.toastContainer, getString(R.string.file_deleted))
-                        }
-                    }
-                    .setNegativeButton(R.string.cancel) { _, _ ->
-                        libraryAdapter.notifyItemChanged(position)
-                    }
-                    .setOnCancelListener {
-                        libraryAdapter.notifyItemChanged(position)
-                    }
-                    .show()
-            } else {
-                lifecycleScope.launch {
-                    LibraryManager.deleteItem(this@MainActivity, item)
-                    ToastManager.show(binding.toastContainer, getString(R.string.file_deleted))
-                }
-            }
-        })
-        librarySwipeHelper.attachToRecyclerView(binding.rvLibrary)
-
-        binding.btnLibraryRefresh.applyPressEffect()
-        binding.btnLibraryRefresh.setOnClickListener {
-            binding.btnLibraryRefresh.animate().rotationBy(360f).setDuration(400).start()
-            LibraryManager.refresh(this, prefs.downloadDir)
+        confirmExistingDownload(safeName, listOf(item.savedPath to item.contentUri)) {
+            retryHistory(item, safeName)
         }
-
-        binding.btnLibraryOpenFolder.applyPressEffect()
-        binding.btnLibraryOpenFolder.setOnClickListener {
-            FileUtils.openFolder(this, prefs.downloadDir)
-        }
-
-        val filter = SeriesFilter<LibraryItem>(binding.filterLibrary, { it.series }, libraryAdapter::submitList)
-        uiCollectors += lifecycleScope.launch {
-            LibraryManager.items.collect { list ->
-                filter.submit(list)
-                if (list.isEmpty()) {
-                    binding.llLibraryEmpty.visibility = View.VISIBLE
-                    binding.rvLibrary.visibility = View.GONE
-                    binding.tvLibraryCount.text = getString(R.string.video_count, 0)
-                } else {
-                    binding.llLibraryEmpty.visibility = View.GONE
-                    binding.rvLibrary.visibility = View.VISIBLE
-                    val totalBytes = list.sumOf { it.fileSizeBytes }
-                    val sizeStr = FileUtils.formatFileSize(totalBytes)
-                    binding.tvLibraryCount.text =
-                        "${getString(R.string.video_count, list.size)} • $sizeStr"
-                }
-            }
-        }
-    }
-
-    private fun confirmDeleteLibraryItem(item: LibraryItem) {
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.delete)
-            .setMessage(getString(R.string.delete_file_confirm, item.title))
-            .setPositiveButton(R.string.delete) { _, _ ->
-                lifecycleScope.launch {
-                    val deleted = LibraryManager.deleteItem(this@MainActivity, item)
-                    if (deleted) {
-                        ToastManager.show(
-                            binding.toastContainer,
-                            getString(R.string.file_deleted),
-                        )
-                    }
-                }
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
-
-    private fun initHistory() {
-        historyAdapter =
-            HistoryAdapter(
-                onRedownloadClicked = { item ->
-                    if (isResolving) return@HistoryAdapter
-                    val safeName = FileUtils.safeFileName(item.fileName)
-                    if (!DownloadManager.isAlreadyActive(item.url, safeName)) {
-                        confirmExistingDownload(safeName, listOf(item.savedPath to item.contentUri)) {
-                            retryHistory(item, safeName)
-                        }
-                    } else ToastManager.show(binding.toastContainer, getString(R.string.already_downloading))
-                },
-                onPlayClicked = { item ->
-                    val uriOrPath = item.contentUri ?: item.savedPath
-                    if (!uriOrPath.isNullOrEmpty()) {
-                        FileUtils.openFile(this, uriOrPath)
-                    } else {
-                        FileUtils.openFolder(this, prefs.downloadDir)
-                    }
-                },
-                onCopyClicked = { item ->
-                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                    val source = com.shawniks.kodikdown.data.HistoryLinks.copySource(item)
-                    if (source == null) {
-                        ToastManager.show(binding.toastContainer, getString(R.string.original_link_missing))
-                        return@HistoryAdapter
-                    }
-                    val clip = ClipData.newPlainText("video_url", source)
-                    clipboard?.setPrimaryClip(clip)
-                    ToastManager.show(binding.toastContainer, getString(R.string.link_copied))
-                },
-                onDeleteClicked = { item -> HistoryManager.remove(this, item.id) },
-                onItemClick = {
-                    if (isSelectionMode) {
-                        triggerHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
-                        val count = historyAdapter.selectedIds.size
-                        if (count == 0) {
-                            exitSelectionMode()
-                        } else {
-                            updateSelectionCount(count)
-                        }
-                    }
-                },
-                onItemLongClick = { item ->
-                    if (!isSelectionMode && !DownloadManager.isActive(item.id)) {
-                        enterSelectionMode(SelectionType.HISTORY, item.id)
-                        true
-                    } else false
-                }
-            )
-
-        binding.rvHistory.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
-            adapter = historyAdapter
-        }
-
-        // Swipe-to-delete for History
-        val historySwipeHelper = ItemTouchHelper(SwipeToDeleteCallback(this, canSwipe = { position ->
-            prefs.swipeToDelete && !isSelectionMode &&
-                historyAdapter.currentList.getOrNull(position)?.let { !DownloadManager.isActive(it.id) } == true
-        }) { position, _ ->
-            if (!prefs.swipeToDelete) {
-                historyAdapter.notifyItemChanged(position)
-                return@SwipeToDeleteCallback
-            }
-            triggerHaptic(HapticFeedbackConstants.CONTEXT_CLICK)
-            val item = historyAdapter.currentList.getOrNull(position) ?: return@SwipeToDeleteCallback
-            if (prefs.confirmSwipeDelete) {
-                MaterialAlertDialogBuilder(this)
-                    .setTitle(R.string.delete)
-                    .setMessage(getString(R.string.delete_file_confirm, item.title))
-                    .setPositiveButton(R.string.delete) { _, _ ->
-                        HistoryManager.remove(this, item.id)
-                        ToastManager.show(binding.toastContainer, getString(R.string.item_deleted))
-                    }
-                    .setNegativeButton(R.string.cancel) { _, _ ->
-                        historyAdapter.notifyItemChanged(position)
-                    }
-                    .setOnCancelListener {
-                        historyAdapter.notifyItemChanged(position)
-                    }
-                    .show()
-            } else {
-                HistoryManager.remove(this, item.id)
-                ToastManager.show(binding.toastContainer, getString(R.string.item_deleted))
-            }
-        })
-        historySwipeHelper.attachToRecyclerView(binding.rvHistory)
-
-        binding.btnHistoryClearAll.applyPressEffect()
-        binding.btnHistoryClearAll.setOnClickListener {
-            MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.clear_history)
-                .setMessage(R.string.clear_history_confirm)
-                .setPositiveButton(R.string.clear_history) { _, _ -> HistoryManager.clear(this) }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
-        }
-
-        val filter = SeriesFilter<HistoryItem>(binding.filterHistory, { it.series }, historyAdapter::submitList)
-        uiCollectors += lifecycleScope.launch {
-            HistoryManager.items.collect { list ->
-                filter.submit(list)
-                if (list.isEmpty()) {
-                    binding.llHistoryEmpty.visibility = View.VISIBLE
-                    binding.rvHistory.visibility = View.GONE
-                    binding.tvHistoryCount.text = ""
-                } else {
-                    binding.llHistoryEmpty.visibility = View.GONE
-                    binding.rvHistory.visibility = View.VISIBLE
-                    binding.tvHistoryCount.text = getString(R.string.video_count, list.size)
-                }
-            }
-        }
-    }
-
-    private fun initSelectionBar() {
-        binding.btnSelectionClose.setOnClickListener {
-            exitSelectionMode()
-        }
-
-        binding.btnSelectionDelete.setOnClickListener {
-            val count = if (selectionType == SelectionType.DOWNLOADS) {
-                downloadAdapter.selectedIds.size
-            } else if (selectionType == SelectionType.LIBRARY) {
-                libraryAdapter.selectedIds.size
-            } else {
-                historyAdapter.selectedIds.size
-            }
-            if (count == 0) return@setOnClickListener
-            if (selectionType == SelectionType.DOWNLOADS && downloadAdapter.selectedIds.any { DownloadManager.isActive(it) }) return@setOnClickListener
-            if (selectionType == SelectionType.HISTORY && historyAdapter.selectedIds.any { DownloadManager.isActive(it) }) return@setOnClickListener
-
-            MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.delete)
-                .setMessage(if (selectionType == SelectionType.DOWNLOADS)
-                    getString(R.string.remove_downloads_confirm, count)
-                    else getString(R.string.delete_selected_confirm, count))
-                .setPositiveButton(R.string.delete) { _, _ ->
-                    if (selectionType == SelectionType.DOWNLOADS) {
-                        downloadAdapter.selectedIds.toSet().forEach { DownloadManager.removeDownload(it) }
-                    } else if (selectionType == SelectionType.LIBRARY) {
-                        val idsToDelete = libraryAdapter.selectedIds.toSet()
-                        lifecycleScope.launch {
-                            val itemsToDelete = libraryAdapter.currentList.filter { it.id in idsToDelete }
-                            for (item in itemsToDelete) {
-                                LibraryManager.deleteItem(this@MainActivity, item)
-                            }
-                            ToastManager.show(
-                                binding.toastContainer,
-                                getString(R.string.items_deleted, idsToDelete.size)
-                            )
-                        }
-                    } else if (selectionType == SelectionType.HISTORY) {
-                        val idsToDelete = historyAdapter.selectedIds.toSet()
-                        for (id in idsToDelete) {
-                            HistoryManager.remove(this, id)
-                        }
-                        ToastManager.show(
-                            binding.toastContainer,
-                            getString(R.string.items_deleted, idsToDelete.size)
-                        )
-                    }
-                    exitSelectionMode()
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
-        }
-
-        binding.btnSelectionShare.setOnClickListener {
-            if (selectionType != SelectionType.LIBRARY) return@setOnClickListener
-            val selectedUris = ArrayList<Uri>()
-            val items = libraryAdapter.currentList.filter { it.id in libraryAdapter.selectedIds }
-            for (item in items) {
-                val pathOrUri = item.contentUri ?: item.filePath ?: continue
-                if (pathOrUri.startsWith("content://")) {
-                    selectedUris.add(Uri.parse(pathOrUri))
-                } else {
-                    val file = File(pathOrUri)
-                    if (file.exists()) {
-                        val uri = androidx.core.content.FileProvider.getUriForFile(
-                            this,
-                            "${packageName}.fileprovider",
-                            file
-                        )
-                        selectedUris.add(uri)
-                    }
-                }
-            }
-            if (selectedUris.isNotEmpty()) {
-                val shareIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                    type = "video/*"
-                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, selectedUris)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                startActivity(Intent.createChooser(shareIntent, getString(R.string.share_file)))
-            }
-        }
-    }
-
-    private fun enterSelectionMode(type: SelectionType, initialId: String) {
-        isSelectionMode = true
-        selectionType = type
-        triggerHaptic(HapticFeedbackConstants.LONG_PRESS)
-
-        binding.headerBar.visibility = View.GONE
-        binding.selectionBar.visibility = View.VISIBLE
-
-        if (type == SelectionType.DOWNLOADS) {
-            binding.btnSelectionShare.visibility = View.GONE
-            downloadAdapter.isSelectionMode = true
-            downloadAdapter.selectedIds.clear()
-            downloadAdapter.selectedIds.add(initialId)
-            downloadAdapter.notifyDataSetChanged()
-            updateSelectionCount(1)
-        } else if (type == SelectionType.LIBRARY) {
-            binding.btnSelectionShare.visibility = View.VISIBLE
-            libraryAdapter.isSelectionMode = true
-            libraryAdapter.selectedIds.clear()
-            libraryAdapter.selectedIds.add(initialId)
-            libraryAdapter.notifyDataSetChanged()
-            updateSelectionCount(1)
-        } else {
-            binding.btnSelectionShare.visibility = View.GONE
-            historyAdapter.isSelectionMode = true
-            historyAdapter.selectedIds.clear()
-            historyAdapter.selectedIds.add(initialId)
-            historyAdapter.notifyDataSetChanged()
-            updateSelectionCount(1)
-        }
-    }
-
-    private fun exitSelectionMode() {
-        isSelectionMode = false
-        selectionType = SelectionType.NONE
-
-        binding.selectionBar.visibility = View.GONE
-        binding.headerBar.visibility = View.VISIBLE
-
-        downloadAdapter.clearSelection()
-        libraryAdapter.isSelectionMode = false
-        libraryAdapter.clearSelection()
-
-        historyAdapter.isSelectionMode = false
-        historyAdapter.clearSelection()
-    }
-
-    private fun updateSelectionCount(count: Int) {
-        binding.tvSelectionTitle.text = getString(R.string.selected_count, count)
-    }
-
-    private fun initSettings() {
-        bindSettingsUi()
-
-        binding.btnThemeAuto.setOnClickListener {
-            changeThemeWithReveal("auto", it)
-        }
-        binding.btnThemeLight.setOnClickListener {
-            changeThemeWithReveal("light", it)
-        }
-        binding.btnThemeDark.setOnClickListener {
-            changeThemeWithReveal("dark", it)
-        }
-
-        binding.btnLangAuto.setOnClickListener { changeLanguage("auto") }
-        binding.btnLangRu.setOnClickListener { changeLanguage("ru") }
-        binding.btnLangEn.setOnClickListener { changeLanguage("en") }
-
-        binding.btnSettingsBrowseFolder.setOnClickListener {
-            if (!acceptSettingsClick()) return@setOnClickListener
-            if (!transferSettingsLocked()) {
-                triggerHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
-                folderPickerLauncher.launch(null)
-            }
-        }
-
-        binding.btnSettingsResetFolder.setOnClickListener {
-            if (!acceptSettingsClick()) return@setOnClickListener
-            if (transferSettingsLocked()) return@setOnClickListener
-            val def = PreferencesManager.defaultDownloadDir()
-            prefs.downloadDir = def
-            binding.tvSettingsDownloadDir.text = def
-            binding.tvFooterPath.text = def
-            settingsApplied()
-        }
-
-        binding.btnSettingsMinusConcurrent.setOnClickListener {
-            if (!acceptSettingsClick()) return@setOnClickListener
-            if (transferSettingsLocked()) return@setOnClickListener
-            if (prefs.concurrentDownloads > 1) {
-                prefs.concurrentDownloads--
-                binding.tvSettingsConcurrentCount.text = prefs.concurrentDownloads.toString()
-                DownloadManager.maxConcurrentDownloads = prefs.concurrentDownloads
-                settingsApplied()
-            }
-        }
-
-        binding.btnSettingsPlusConcurrent.setOnClickListener {
-            if (!acceptSettingsClick()) return@setOnClickListener
-            if (transferSettingsLocked()) return@setOnClickListener
-            if (prefs.concurrentDownloads < 5) {
-                prefs.concurrentDownloads++
-                binding.tvSettingsConcurrentCount.text = prefs.concurrentDownloads.toString()
-                DownloadManager.maxConcurrentDownloads = prefs.concurrentDownloads
-                settingsApplied()
-            }
-        }
-
-        // Default Quality Spinner
-        val qualityValues = listOf("ask", "best", "1080", "720", "480", "360")
-        val qualityLabels = listOf(
-            getString(R.string.quality_ask),
-            getString(R.string.quality_best),
-            "1080p",
-            "720p",
-            "480p",
-            "360p"
-        )
-        val qualityAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, qualityLabels)
-        binding.spDefaultQuality.adapter = qualityAdapter
-        val curIndex = qualityValues.indexOf(prefs.defaultQuality).coerceAtLeast(0)
-        binding.spDefaultQuality.setSelection(curIndex)
-
-        binding.spDefaultQuality.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val chosen = qualityValues[position]
-                if (prefs.defaultQuality != chosen) {
-                    if (bindingSettings || transferSettingsLocked()) return
-                    if (!acceptSettingsClick()) {
-                        binding.spDefaultQuality.setSelection(qualityValues.indexOf(prefs.defaultQuality).coerceAtLeast(0))
-                        return
-                    }
-                    prefs.defaultQuality = chosen
-                    settingsApplied()
-                }
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-
-        // Switches
-        binding.switchPreferMp4.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bindSettingsUi(); return@setOnCheckedChangeListener }
-            prefs.preferMp4 = isChecked
-            settingsApplied()
-            binding.cbDownloadMp4.isChecked = isChecked
-        }
-
-        binding.switchWifiOnly.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bindSettingsUi(); return@setOnCheckedChangeListener }
-            prefs.wifiOnly = isChecked
-            settingsApplied()
-        }
-
-        binding.switchGroupSeries.setOnCheckedChangeListener { _, checked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            prefs.groupSeries = checked
-            settingsApplied()
-        }
-
-        binding.switchAutoPaste.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bindSettingsUi(); return@setOnCheckedChangeListener }
-            prefs.autoPaste = isChecked
-            settingsApplied()
-        }
-
-        binding.switchSwipeDelete.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bindSettingsUi(); return@setOnCheckedChangeListener }
-            prefs.swipeToDelete = isChecked
-            settingsApplied()
-        }
-
-        binding.switchConfirmSwipeDelete.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bindSettingsUi(); return@setOnCheckedChangeListener }
-            prefs.confirmSwipeDelete = isChecked
-            settingsApplied()
-        }
-
-        binding.switchConfirmCancelDownload.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bindSettingsUi(); return@setOnCheckedChangeListener }
-            prefs.confirmCancelDownload = isChecked
-            settingsApplied()
-        }
-
-        binding.switchHapticFeedback.setOnCheckedChangeListener { _, isChecked ->
-            if (bindingSettings) return@setOnCheckedChangeListener
-            if (!acceptSettingsClick()) { bindSettingsUi(); return@setOnCheckedChangeListener }
-            if (isChecked) prefs.hapticFeedback = true
-            settingsApplied()
-            prefs.hapticFeedback = isChecked
-        }
-
-        // Storage buttons
-        binding.btnSettingsClearCache.setOnClickListener {
-            if (clearingCache || !acceptSettingsClick()) return@setOnClickListener
-            triggerHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
-            clearingCache = true
-            lifecycleScope.launch {
-                try {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        FileUtils.clearCache(cacheDir, codeCacheDir)
-                    }
-                    updateCacheSizeDisplay()
-                    ToastManager.show(binding.toastContainer, getString(R.string.cache_cleared))
-                } finally { clearingCache = false }
-            }
-        }
-
-        binding.btnSettingsClearCompleted.setOnClickListener {
-            if (!acceptSettingsClick()) return@setOnClickListener
-            triggerHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
-            DownloadManager.clearFinished()
-            ToastManager.show(binding.toastContainer, getString(R.string.completed_downloads_cleared))
-        }
-
-        binding.btnSettingsClearAllHistory.setOnClickListener {
-            if (!acceptSettingsClick()) return@setOnClickListener
-            triggerHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
-            MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.clear_history)
-                .setMessage(R.string.clear_history_confirm)
-                .setPositiveButton(R.string.clear_history) { _, _ ->
-                    HistoryManager.clear(this)
-                    ToastManager.show(binding.toastContainer, getString(R.string.clear_history))
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
-        }
-
-        binding.btnResetSettings.applyPressEffect()
-        binding.btnResetSettings.setOnClickListener {
-            if (!acceptSettingsClick()) return@setOnClickListener
-            if (transferSettingsLocked() || appearanceBusy) return@setOnClickListener
-            triggerHaptic(HapticFeedbackConstants.CONTEXT_CLICK)
-            MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.reset_defaults)
-                .setMessage(R.string.reset_defaults_confirm)
-                .setPositiveButton(R.string.reset_defaults) { _, _ ->
-                    if (transferSettingsLocked() || appearanceBusy) return@setPositiveButton
-                    captureAppearance(true)
-                    prefs.resetToDefaults()
-                    DownloadManager.maxConcurrentDownloads = prefs.concurrentDownloads
-                    KodikApp.applyTheme(prefs.theme)
-                    KodikApp.updateAppLocale(prefs.language)
-                    binding.tvFooterPath.text = prefs.downloadDir
-                    bindSettingsUi()
-                    binding.root.postDelayed({ if (appearanceBusy) finishAppearance() }, 600)
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .show()
-        }
-
-        // GitHub button
-        binding.btnSettingsGithub.applyPressEffect()
-        binding.btnSettingsGithub.setOnClickListener {
-            if (!acceptSettingsClick()) return@setOnClickListener
-            triggerHaptic(HapticFeedbackConstants.KEYBOARD_TAP)
-            try {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(getString(R.string.github_url)))
-                startActivity(intent)
-            } catch (e: Exception) {
-                Log.w("MainActivity", "Cannot open GitHub", e)
-            }
-        }
-    }
-
-    private fun bindSettingsUi() {
-        bindingSettings = true
-        binding.tvSettingsAppVersion.text = getString(R.string.settings_app_version, BuildConfig.VERSION_NAME)
-        val accentColor = getColorFromAttr(R.attr.app_accent)
-        val normalColor = getColorFromAttr(R.attr.app_text_muted)
-
-        // Theme pills
-        val curTheme = prefs.theme
-        updatePill(binding.btnThemeAuto, curTheme == "auto", accentColor, normalColor)
-        updatePill(binding.btnThemeLight, curTheme == "light", accentColor, normalColor)
-        updatePill(binding.btnThemeDark, curTheme == "dark", accentColor, normalColor)
-
-        // Language pills
-        val curLang = prefs.language
-        updatePill(binding.btnLangAuto, curLang == "auto", accentColor, normalColor)
-        updatePill(binding.btnLangRu, curLang == "ru", accentColor, normalColor)
-        updatePill(binding.btnLangEn, curLang == "en", accentColor, normalColor)
-
-        // Downloads
-        binding.tvSettingsDownloadDir.text = prefs.downloadDir
-        binding.tvSettingsConcurrentCount.text = prefs.concurrentDownloads.toString()
-
-        binding.switchPreferMp4.isChecked = prefs.preferMp4
-        binding.switchGroupSeries.isChecked = prefs.groupSeries
-        binding.switchWifiOnly.isChecked = prefs.wifiOnly
-        binding.switchAutoPaste.isChecked = prefs.autoPaste
-
-        // Gestures
-        binding.switchSwipeDelete.isChecked = prefs.swipeToDelete
-        binding.switchConfirmSwipeDelete.isChecked = prefs.confirmSwipeDelete
-        binding.switchConfirmCancelDownload.isChecked = prefs.confirmCancelDownload
-        binding.switchHapticFeedback.isChecked = prefs.hapticFeedback
-
-        updateCacheSizeDisplay()
-        bindingSettings = false
-        updateSettingsAvailability()
-    }
-
-    private fun updatePill(view: TextView, isActive: Boolean, activeColor: Int, normalColor: Int) {
-        if (isActive) {
-            view.setBackgroundResource(R.drawable.bg_pill_active)
-            view.setTextColor(activeColor)
-        } else {
-            view.setBackgroundResource(R.drawable.bg_pill_inactive)
-            view.setTextColor(normalColor)
-        }
-    }
-
-    private fun updateCacheSizeDisplay() {
-        cacheSizeJob?.cancel()
-        val label = binding.tvSettingsCacheSize
-        cacheSizeJob = lifecycleScope.launch {
-            val size = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { getAppCacheSize() }
-            if (label === binding.tvSettingsCacheSize) {
-                label.text = getString(R.string.cache_size, FileUtils.formatFileSize(size))
-            }
-        }
-    }
-
-    private fun getAppCacheSize(): Long {
-        var size = 0L
-        try {
-            cacheDir?.walkTopDown()?.filter { it.isFile }?.forEach { size += it.length() }
-            codeCacheDir?.walkTopDown()?.filter { it.isFile }?.forEach { size += it.length() }
-        } catch (_: Exception) {}
-        return size
     }
 
     private fun retryHistory(item: HistoryItem, safeName: String) {
@@ -1388,7 +533,7 @@ class MainActivity : AppCompatActivity() {
         val generation = ++resolveGeneration
         resolveJob?.cancel()
         isResolving = true
-        updateSettingsAvailability()
+        settingsTab.updateEnabled()
         binding.btnDownload.isEnabled = false
         binding.tvFindText.setText(R.string.cancel)
         binding.ivFindIcon.setImageResource(R.drawable.ic_close)
@@ -1397,9 +542,7 @@ class MainActivity : AppCompatActivity() {
         switchTab(0)
         resolveJob = lifecycleScope.launch {
             try {
-                val retry = com.shawniks.kodikdown.data.HistoryRetry.resolve(item) { url, translation ->
-                    if (translation != null) client.resolve(url, translation) else catalogClient.resolve(url)
-                }
+                val retry = lookup.retry(item)
                 if (generation != resolveGeneration) return@launch
                 val variant = retry.variant
                 val direct = if (item.isMp4) variant.directMp4 else null
@@ -1429,8 +572,8 @@ class MainActivity : AppCompatActivity() {
             } finally {
                 if (generation == resolveGeneration) {
                     isResolving = false
-                    updateSettingsAvailability()
-                    binding.btnDownload.isEnabled = currentResolved != null
+                    settingsTab.updateEnabled()
+                    binding.btnDownload.isEnabled = lookup.resolved != null
                     binding.tvFindText.setText(R.string.resolve)
                     binding.ivFindIcon.setImageResource(R.drawable.ic_play)
                     binding.pbResolving.visibility = View.GONE
@@ -1490,7 +633,9 @@ class MainActivity : AppCompatActivity() {
         return text.trim()
     }
 
-    private fun extractClipboardText(): String? {
+    private fun extractClipboardText(): String? = readClipboard()?.let(::extractUrlFromText)
+
+    private fun readSystemClipboard(): String? {
         try {
             val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             val clip = clipboard?.primaryClip
@@ -1498,7 +643,7 @@ class MainActivity : AppCompatActivity() {
                 val item = clip.getItemAt(0)
                 val text = item.text?.toString() ?: item.uri?.toString()
                 if (!text.isNullOrEmpty()) {
-                    return extractUrlFromText(text)
+                    return text
                 }
             }
         } catch (e: Exception) {
@@ -1522,7 +667,7 @@ class MainActivity : AppCompatActivity() {
         binding.etUrl.selectAll()
         val pasted =
             try {
-                binding.etUrl.onTextContextMenuItem(android.R.id.paste)
+                binding.etUrl.onTextContextMenuItem(AndroidR.id.paste)
             } catch (e: Exception) {
                 false
             }
@@ -1570,7 +715,7 @@ class MainActivity : AppCompatActivity() {
         val generation = ++resolveGeneration
         resolveJob?.cancel()
         isResolving = true
-        updateSettingsAvailability()
+        settingsTab.updateEnabled()
         binding.btnDownload.isEnabled = false
         binding.tvFindText.text = getString(R.string.cancel)
         binding.ivFindIcon.setImageResource(R.drawable.ic_close)
@@ -1579,21 +724,16 @@ class MainActivity : AppCompatActivity() {
         resolveJob =
             lifecycleScope.launch {
                 try {
-                    val catalog = if (translation == null) catalogClient.lookup(rawUrl) else null
+                    val catalog = if (translation == null) lookup.catalog(rawUrl) else null
                     if (catalog != null) {
                         if (catalog.choices.none { it.episodes.isNotEmpty() }) {
-                            throw java.io.IOException(getString(R.string.catalog_empty))
+                            throw IOException(getString(R.string.catalog_empty))
                         }
-                        val cover = try {
-                            catalogClient.poster(catalog.poster)
-                        } catch (error: CancellationException) {
-                            throw error
-                        } catch (_: java.io.IOException) {
-                            null
-                        }
+                        val cover = lookup.poster(catalog.poster)
                         if (generation != resolveGeneration) return@launch
                         hideResultCard()
                         binding.tvStatus.text = catalog.title
+                        val episodeResolver = lookup
                         CatalogDialog(this@MainActivity, catalog, cover, prefs.defaultQuality.toIntOrNull(), prefs.groupSeries) {
                             choice, episodes, quality, grouped ->
                             if (prefs.wifiOnly && !isWifiConnected()) {
@@ -1610,18 +750,18 @@ class MainActivity : AppCompatActivity() {
                                         downloadDir = prefs.downloadDir, translationTitle = choice.voice,
                                         sourceInput = CatalogClient.normalize(catalog.url),
                                         retryInput = episode.url, series = catalog.title.takeIf { grouped },
-                                        prepare = { catalogClient.resolve(episode.url) },
+                                        prepare = { episodeResolver.resolve(episode.url) },
                                     )
                                 }
                             }
                         }.show()
                         return@launch
                     }
-                    val resolved = if (translation != null) client.resolve(rawUrl, translation) else catalogClient.resolve(rawUrl)
+                    val resolved = lookup.resolve(rawUrl, translation)
                     if (generation == resolveGeneration) {
-                        if (resolvedUrl != rawUrl) nameManuallyEdited = false
-                        resolvedUrl = rawUrl
-                        currentResolved = resolved
+                        if (lookup.resolvedUrl != rawUrl) lookup.nameEdited = false
+                        lookup.resolvedUrl = rawUrl
+                        lookup.resolved = resolved
                         displayResolvedVideo(resolved)
                         binding.tvStatus.text = getString(R.string.hint)
                     }
@@ -1637,8 +777,8 @@ class MainActivity : AppCompatActivity() {
                 } finally {
                     if (generation == resolveGeneration) {
                         isResolving = false
-                        updateSettingsAvailability()
-                        binding.btnDownload.isEnabled = currentResolved != null
+                        settingsTab.updateEnabled()
+                        binding.btnDownload.isEnabled = lookup.resolved != null
                         binding.tvFindText.text = getString(R.string.resolve)
                         binding.ivFindIcon.setImageResource(R.drawable.ic_play)
                         binding.pbResolving.visibility = View.GONE
@@ -1651,9 +791,9 @@ class MainActivity : AppCompatActivity() {
         resolveGeneration++
         resolveJob?.cancel()
         isResolving = false
-        updateSettingsAvailability()
-        currentResolved?.let { populateTranslations(it) }
-        binding.btnDownload.isEnabled = currentResolved != null
+        settingsTab.updateEnabled()
+        lookup.resolved?.let { populateTranslations(it) }
+        binding.btnDownload.isEnabled = lookup.resolved != null
         binding.tvFindText.text = getString(R.string.resolve)
         binding.ivFindIcon.setImageResource(R.drawable.ic_play)
         binding.pbResolving.visibility = View.GONE
@@ -1669,7 +809,7 @@ class MainActivity : AppCompatActivity() {
             binding.tvWarning.visibility = View.GONE
         }
 
-        if (!nameManuallyEdited) {
+        if (!lookup.nameEdited) {
             binding.etFileName.setText(FileUtils.safeFileName(video.title))
         }
 
@@ -1699,11 +839,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun populateTranslations(video: ResolvedVideo) {
         binding.spTranslation.onItemSelectedListener = null
-        selectedTranslation = video.translation ?: video.translations.firstOrNull()
+        lookup.selectedTranslation = video.translation ?: video.translations.firstOrNull()
         if (video.translations.isNotEmpty()) {
             binding.rowTranslation.visibility = View.VISIBLE
             val titles = video.translations.map { it.title }
-            val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, titles)
+            val adapter = ArrayAdapter(this, AndroidR.layout.simple_spinner_dropdown_item, titles)
             binding.spTranslation.adapter = adapter
 
             val targetTranslation = video.translation
@@ -1727,8 +867,8 @@ class MainActivity : AppCompatActivity() {
                         id: Long,
                     ) {
                         val picked = video.translations[pos]
-                        if (currentResolved === video && picked != selectedTranslation) {
-                            startResolving(resolvedUrl, picked)
+                        if (lookup.resolved === video && picked != lookup.selectedTranslation) {
+                            startResolving(lookup.resolvedUrl, picked)
                         }
                     }
 
@@ -1743,7 +883,6 @@ class MainActivity : AppCompatActivity() {
         binding.layoutQualityPills.removeAllViews()
         if (variants.isEmpty()) return
 
-        // Check preferred quality from settings if applicable
         var activeVariant = variants.first()
         val prefQual = prefs.defaultQuality
         if (prefQual != "ask") {
@@ -1756,7 +895,7 @@ class MainActivity : AppCompatActivity() {
             val matched = variants.firstOrNull { it.quality == defaultQuality }
             if (matched != null) activeVariant = matched
         }
-        selectedVariant = activeVariant
+        lookup.selectedVariant = activeVariant
 
         for ((index, variant) in variants.withIndex()) {
             val pill =
@@ -1795,7 +934,7 @@ class MainActivity : AppCompatActivity() {
 
                     setOnClickListener {
                         popBounce()
-                        selectedVariant = variant
+                        lookup.selectedVariant = variant
                         for (i in 0 until binding.layoutQualityPills.childCount) {
                             val child = binding.layoutQualityPills.getChildAt(i) as TextView
                             val childVariant = variants[i]
@@ -1823,7 +962,6 @@ class MainActivity : AppCompatActivity() {
         if (now - lastDownloadClickTime < 800) return
         lastDownloadClickTime = now
 
-        // Check Wi-Fi Only constraint
         if (prefs.wifiOnly && !isWifiConnected()) {
             ToastManager.show(
                 binding.toastContainer,
@@ -1833,9 +971,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val variant = selectedVariant ?: currentResolved?.best ?: return
+        val variant = lookup.selectedVariant ?: lookup.resolved?.best ?: return
         val rawName = binding.etFileName.text.toString().trim()
-        val safeName = FileUtils.safeFileName(rawName.ifEmpty { currentResolved?.title ?: "video" })
+        val safeName = FileUtils.safeFileName(rawName.ifEmpty { lookup.resolved?.title ?: "video" })
         val preferMp4 = binding.cbDownloadMp4.isChecked
 
         val finalUrl =
@@ -1857,7 +995,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var duplicateCheckJob: Job? = null
-    private var duplicateDialog: androidx.appcompat.app.AlertDialog? = null
+    private var duplicateDialog: AlertDialog? = null
 
     private fun confirmExistingDownload(
         safeName: String,
@@ -1867,17 +1005,20 @@ class MainActivity : AppCompatActivity() {
         if (duplicateCheckJob?.isActive == true || duplicateDialog?.isShowing == true) return
         val library = LibraryManager.findExisting(safeName)
         val history = HistoryManager.items.value.filter {
-            it.status == com.shawniks.kodikdown.data.DownloadStatus.FINISHED &&
+            it.status == DownloadStatus.FINISHED &&
                 FileUtils.safeFileName(it.fileName).equals(safeName, ignoreCase = true)
         }
         val directory = prefs.downloadDir
-        val candidates = references + listOfNotNull(library?.let { it.filePath to it.contentUri }) +
-            history.map { it.savedPath to it.contentUri } +
-            if (!directory.startsWith("content://")) listOf(File(directory, "$safeName.mp4").absolutePath to null) else emptyList()
+        val candidates = buildList<Pair<String?, String?>> {
+            addAll(references)
+            library?.let { add(it.filePath to it.contentUri) }
+            addAll(history.map { it.savedPath to it.contentUri })
+            if (!directory.startsWith("content://")) add(File(directory, "$safeName.mp4").absolutePath to null)
+        }
         duplicateCheckJob = lifecycleScope.launch {
-            val existing = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val existing = withContext(Dispatchers.IO) {
                 candidates.distinct().firstOrNull { (path, uri) ->
-                    com.shawniks.kodikdown.data.MediaFiles.exists(this@MainActivity, path, uri)
+                    MediaFiles.exists(this@MainActivity, path, uri)
                 }
             }
             if (existing == null) {
@@ -1904,11 +1045,11 @@ class MainActivity : AppCompatActivity() {
         isMp4: Boolean,
     ) {
         if (isResolving) return
-        val video = currentResolved ?: return
+        val video = lookup.resolved ?: return
         if (variant !in video.variants) return
-        val translationTitle = selectedTranslation?.title
+        val translationTitle = lookup.selectedTranslation?.title
         val downloadDir = prefs.downloadDir
-        val sourceInput = CatalogClient.normalize(resolvedUrl.orEmpty())
+        val sourceInput = CatalogClient.normalize(lookup.resolvedUrl.orEmpty())
         withStoragePermission {
             DownloadManager.enqueueDownload(
                 context = this,
@@ -1945,9 +1086,9 @@ class MainActivity : AppCompatActivity() {
                 )
                 .start()
         }
-        currentResolved = null
-        selectedVariant = null
-        nameManuallyEdited = false
+        lookup.resolved = null
+        lookup.selectedVariant = null
+        lookup.nameEdited = false
     }
 
     private fun openDownloadFolder() {

@@ -4,6 +4,7 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -14,8 +15,8 @@ import com.shawniks.kodikdown.R
 import com.shawniks.kodikdown.data.DownloadItem
 import com.shawniks.kodikdown.data.DownloadStatus
 import com.shawniks.kodikdown.data.PreferencesManager
-import kotlinx.coroutines.*
 import java.util.Locale
+import kotlinx.coroutines.*
 
 class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -38,7 +39,7 @@ class DownloadService : Service() {
     private fun localizedContext(): Context {
         val lang = PreferencesManager(this).language
         if (lang == "auto") return this
-        val config = android.content.res.Configuration(resources.configuration)
+        val config = Configuration(resources.configuration)
         config.setLocale(Locale.forLanguageTag(lang))
         return createConfigurationContext(config)
     }

@@ -1,18 +1,29 @@
 package com.shawniks.kodikdown
 
+import android.app.Notification
+import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import android.test.InstrumentationTestCase
 import android.view.MotionEvent
-import android.view.accessibility.AccessibilityNodeInfo
 import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.view.accessibility.AccessibilityNodeInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.TextView
-import androidx.core.widget.NestedScrollView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.progressindicator.LinearProgressIndicator
+import com.shawniks.kodikdown.data.DownloadStatus
 import com.shawniks.kodikdown.data.HistoryManager
 import com.shawniks.kodikdown.data.PreferencesManager
 import com.shawniks.kodikdown.downloader.DownloadManager
-import java.io.File
+import com.shawniks.kodikdown.downloader.DownloadService
+import com.shawniks.kodikdown.ui.SettingsSaveIndicatorView
+import com.shawniks.kodikdown.util.FileUtils
 import java.net.ServerSocket
 import kotlin.concurrent.thread
 
@@ -40,14 +51,14 @@ class SettingsDeviceTest : InstrumentationTestCase() {
         val original = prefs.getSettings()
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
-        val indicator = activity.findViewById<com.shawniks.kodikdown.ui.SettingsSaveIndicatorView>(R.id.settingsSaveIndicator)
+        val indicator = activity.findViewById<SettingsSaveIndicatorView>(R.id.settingsSaveIndicator)
         try {
             main {
                 activity.findViewById<View>(R.id.tabSettings).performClick()
                 val button = if (prefs.concurrentDownloads < 5) R.id.btnSettingsPlusConcurrent else R.id.btnSettingsMinusConcurrent
                 activity.findViewById<View>(button).performClick()
                 assertEquals(activity.getString(R.string.settings_saving), indicator.contentDescription)
-                assertEquals(0, activity.findViewById<android.view.ViewGroup>(R.id.toastContainer).childCount)
+                assertEquals(0, activity.findViewById<ViewGroup>(R.id.toastContainer).childCount)
                 val github = activity.findViewById<TextView>(R.id.btnSettingsGithub)
                 assertNotNull(github.compoundDrawablesRelative[0])
                 assertEquals("SHAWNiks", activity.getString(R.string.author))
@@ -62,7 +73,7 @@ class SettingsDeviceTest : InstrumentationTestCase() {
             main {
                 // The old pulse's hide callback must not hide the new one.
                 assertEquals(activity.getString(R.string.settings_saved), indicator.contentDescription)
-                assertEquals(0, activity.findViewById<android.view.ViewGroup>(R.id.toastContainer).childCount)
+                assertEquals(0, activity.findViewById<ViewGroup>(R.id.toastContainer).childCount)
             }
             Thread.sleep(650)
             main { assertNull(indicator.contentDescription) }
@@ -80,18 +91,18 @@ class SettingsDeviceTest : InstrumentationTestCase() {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
         fun keyboardVisible(): Boolean {
             var visible = false
-            main { visible = androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView)
-                ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true }
+            main { visible = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                ?.isVisible(WindowInsetsCompat.Type.ime()) == true }
             return visible
         }
         try {
             main {
-                activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 activity.findViewById<View>(R.id.tabDownloader).performClick()
                 val input = activity.findViewById<View>(R.id.etUrl)
                 input.requestFocus()
-                (activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
-                    .showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                    .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
             }
             val openDeadline = System.currentTimeMillis() + 5000
             while (!keyboardVisible() && System.currentTimeMillis() < openDeadline) Thread.sleep(50)
@@ -129,7 +140,7 @@ class SettingsDeviceTest : InstrumentationTestCase() {
         prefs.autoPaste = false
         val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,
             MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
-        main { activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+        main { activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
         var jobId = ""
         val server = ServerSocket(0)
         try {
@@ -147,7 +158,7 @@ class SettingsDeviceTest : InstrumentationTestCase() {
             main {
                 assertFalse(activity.isFinishing)
                 assertEquals("Theme changes must use the corner indicator", 0,
-                    activity.findViewById<android.view.ViewGroup>(R.id.toastContainer).childCount)
+                    activity.findViewById<ViewGroup>(R.id.toastContainer).childCount)
                 assertTrue(activity.findViewById<View>(R.id.btnThemeDark).isEnabled)
                 activity.findViewById<View>(R.id.btnLangEn).performClick()
             }
@@ -155,7 +166,7 @@ class SettingsDeviceTest : InstrumentationTestCase() {
             main {
                 assertEquals("Settings applied", activity.getString(R.string.settings_saved))
                 assertEquals("Language changes must use the corner indicator", 0,
-                    activity.findViewById<android.view.ViewGroup>(R.id.toastContainer).childCount)
+                    activity.findViewById<ViewGroup>(R.id.toastContainer).childCount)
                 assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.viewSettings).visibility)
                 activity.findViewById<View>(R.id.btnLangRu).performClick()
             }
@@ -163,7 +174,7 @@ class SettingsDeviceTest : InstrumentationTestCase() {
             main {
                 assertEquals("Настройки применены", activity.getString(R.string.settings_saved))
                 assertEquals("Language changes must not leave a success toast", 0,
-                    activity.findViewById<android.view.ViewGroup>(R.id.toastContainer).childCount)
+                    activity.findViewById<ViewGroup>(R.id.toastContainer).childCount)
                 activity.findViewById<View>(R.id.btnThemeDark).performClick()
             }
             Thread.sleep(700)
@@ -197,7 +208,7 @@ class SettingsDeviceTest : InstrumentationTestCase() {
                 prefs.confirmCancelDownload = true
                 jobId = DownloadManager.enqueueDownload(activity, "QA progress", "qa-progress",
                     "http://127.0.0.1:${server.localPort}/playlist.m3u8", 360, false,
-                    "Download/KodikDown-QA")
+                    qaDownloadDirectory())
             }
             val deadline = System.currentTimeMillis() + 5000
             while (System.currentTimeMillis() < deadline &&
@@ -205,7 +216,7 @@ class SettingsDeviceTest : InstrumentationTestCase() {
             instrumentation.waitForIdleSync()
             main {
                 val item = DownloadManager.items.value.first { it.id == jobId }
-                assertTrue(HistoryManager.items.value.any { it.id == jobId && it.status == com.shawniks.kodikdown.data.DownloadStatus.DOWNLOADING })
+                assertTrue(HistoryManager.items.value.any { it.id == jobId && it.status == DownloadStatus.DOWNLOADING })
                 HistoryManager.remove(activity, jobId)
                 assertEquals(4, item.fragmentCount)
                 assertEquals(1, item.downloadedFragments)
@@ -216,17 +227,17 @@ class SettingsDeviceTest : InstrumentationTestCase() {
                 activity.findViewById<View>(R.id.tabDownloader).performClick()
             }
             Thread.sleep(1200)
-            val manager = instrumentation.targetContext.getSystemService(android.app.NotificationManager::class.java)
+            val manager = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
             val notificationDeadline = System.currentTimeMillis() + 3000
-            var notification: android.app.Notification? = null
+            var notification: Notification? = null
             while (notification == null && System.currentTimeMillis() < notificationDeadline) {
                 notification = manager.activeNotifications.firstOrNull {
-                    it.id == com.shawniks.kodikdown.downloader.DownloadService.NOTIFICATION_ID
+                    it.id == DownloadService.NOTIFICATION_ID
                 }?.notification
                 if (notification == null) Thread.sleep(60)
             }
             assertNotNull("Download notification must be visible immediately", notification)
-            assertTrue(notification!!.extras.getString(android.app.Notification.EXTRA_TEXT).orEmpty().contains("25%"))
+            assertTrue(notification!!.extras.getString(Notification.EXTRA_TEXT).orEmpty().contains("25%"))
             assertTrue(notification.actions.isNullOrEmpty())
             assertTrue(HistoryManager.items.value.any { it.id == jobId })
             main {
@@ -246,11 +257,12 @@ class SettingsDeviceTest : InstrumentationTestCase() {
             var height = 0
             main {
                 val row = activity.findViewById<RecyclerView>(R.id.rvDownloads).getChildAt(0)
+                assertTrue("Swipe must stay inside the QA app", activity.hasWindowFocus())
                 row.getLocationOnScreen(location)
                 width = row.width
                 height = row.height
             }
-            val now = android.os.SystemClock.uptimeMillis()
+            val now = SystemClock.uptimeMillis()
             for (step in 0..12) {
                 val action = when (step) {
                     0 -> MotionEvent.ACTION_DOWN
@@ -278,6 +290,7 @@ class SettingsDeviceTest : InstrumentationTestCase() {
                 val deadline = System.currentTimeMillis() + 2500
                 while (System.currentTimeMillis() < deadline) {
                     val button = instrumentation.uiAutomation.rootInActiveWindow
+                        ?.takeIf { it.packageName == activity.packageName }
                         ?.findAccessibilityNodeInfosByText(text)
                         ?.firstOrNull { it.isClickable && it.className.toString().contains("Button") }
                     if (button != null) return button
@@ -298,7 +311,7 @@ class SettingsDeviceTest : InstrumentationTestCase() {
                 .performAction(AccessibilityNodeInfo.ACTION_CLICK)
             val deadlineAfterCancel = System.currentTimeMillis() + 3000
             while (System.currentTimeMillis() < deadlineAfterCancel && DownloadManager.isActive(jobId)) Thread.sleep(50)
-            assertEquals(com.shawniks.kodikdown.data.DownloadStatus.CANCELLED,
+            assertEquals(DownloadStatus.CANCELLED,
                 DownloadManager.items.value.first { it.id == jobId }.status)
         } finally {
             server.close()
@@ -306,6 +319,9 @@ class SettingsDeviceTest : InstrumentationTestCase() {
                 DownloadManager.cancelDownload(jobId)
                 val cleanupDeadline = System.currentTimeMillis() + 3000
                 while (DownloadManager.isActive(jobId) && System.currentTimeMillis() < cleanupDeadline) Thread.sleep(30)
+                DownloadManager.items.value.firstOrNull { it.id == jobId }?.contentUri?.let {
+                    FileUtils.deleteFile(instrumentation.targetContext, it)
+                }
                 DownloadManager.removeDownload(jobId)
                 HistoryManager.remove(instrumentation.targetContext, jobId)
             }

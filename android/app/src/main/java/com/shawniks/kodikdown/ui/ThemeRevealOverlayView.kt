@@ -6,8 +6,9 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Rect
 import android.graphics.Path
+import android.graphics.Rect
+import android.graphics.Region
 import android.os.Build
 import android.util.AttributeSet
 import android.view.View
@@ -117,7 +118,7 @@ class ThemeRevealOverlayView @JvmOverloads constructor(
             canvas.clipOutPath(clipPath)
         } else {
             @Suppress("DEPRECATION")
-            canvas.clipPath(clipPath, android.graphics.Region.Op.DIFFERENCE)
+            canvas.clipPath(clipPath, Region.Op.DIFFERENCE)
         }
 
         destination.set(0, 0, width, height)

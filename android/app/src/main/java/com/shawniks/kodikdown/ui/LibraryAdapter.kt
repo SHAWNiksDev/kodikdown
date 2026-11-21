@@ -27,8 +27,9 @@ class LibraryAdapter(
 
     var isSelectionMode: Boolean = false
         set(value) {
+            if (field == value) return
             field = value
-            notifyDataSetChanged()
+            notifyItemRangeChanged(0, itemCount)
         }
 
     val selectedIds: MutableSet<String> = mutableSetOf()
@@ -36,21 +37,26 @@ class LibraryAdapter(
     fun selectAll() {
         selectedIds.clear()
         currentList.forEach { selectedIds.add(it.id) }
-        notifyDataSetChanged()
+        notifyItemRangeChanged(0, itemCount)
     }
 
     fun clearSelection() {
         selectedIds.clear()
-        notifyDataSetChanged()
+        notifyItemRangeChanged(0, itemCount)
     }
 
-    fun toggleSelection(id: String) {
+    private fun toggleSelection(id: String) {
         if (selectedIds.contains(id)) {
             selectedIds.remove(id)
         } else {
             selectedIds.add(id)
         }
-        notifyDataSetChanged()
+        refreshRow(id)
+    }
+
+    fun refreshRow(id: String) {
+        val position = currentList.indexOfFirst { it.id == id }
+        if (position >= 0) notifyItemChanged(position)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): LibraryViewHolder {

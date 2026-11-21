@@ -1,8 +1,40 @@
 import java.util.Properties
+import javax.inject.Inject
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+abstract class PrepareBrandResources : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sourceDirectory: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @get:Inject
+    abstract val fileSystem: FileSystemOperations
+
+    @TaskAction
+    fun prepare() {
+        fileSystem.sync {
+            from(sourceDirectory) {
+                include("*.png")
+                into("drawable-nodpi")
+            }
+            into(outputDirectory)
+        }
+    }
+}
+
+androidComponents.onVariants { variant ->
+    val variantName = variant.name.replaceFirstChar(Char::uppercaseChar)
+    val brands = tasks.register<PrepareBrandResources>("prepare${variantName}BrandResources") {
+        sourceDirectory.set(rootProject.layout.projectDirectory.dir("../src/kodikdown/gui/brands"))
+    }
+    variant.sources.res?.addGeneratedSourceDirectory(brands, PrepareBrandResources::outputDirectory)
 }
 
 val signingProperties = Properties().apply {
@@ -16,6 +48,7 @@ val releaseStorePassword = signingValue("storePassword", "KODIKDOWN_STORE_PASSWO
 val releaseKeyPassword = signingValue("keyPassword", "KODIKDOWN_KEY_PASSWORD")
 val releaseSigningReady = listOf(releaseStore, releaseAlias, releaseStorePassword, releaseKeyPassword)
     .all { !it.isNullOrBlank() }
+val deviceQa = providers.gradleProperty("kodikdownDeviceQa").orNull == "true"
 
 android {
     namespace = "com.shawniks.kodikdown"
@@ -58,6 +91,7 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            if (deviceQa) applicationIdSuffix = ".deviceqa"
         }
         create("releaseSmoke") {
             initWith(getByName("release"))
@@ -82,7 +116,6 @@ android {
         buildConfig = true
         viewBinding = true
     }
-    sourceSets.getByName("main").res.srcDir(rootProject.file("../src/kodikdown/gui/brands"))
 }
 
 tasks.matching { it.name == "packageRelease" }.configureEach {

@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -63,7 +64,7 @@ class KodikClient(private val client: OkHttpClient = defaultHttpClient()) {
                     val resolved = withTimeout(90_000) { resolveOn(host, embed, translation) }
                     preferredHost = host
                     return@withContext resolved
-                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                } catch (e: TimeoutCancellationException) {
                     lastError = IOException("Player host timed out: $host", e)
                 } catch (e: CancellationException) {
                     throw e

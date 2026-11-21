@@ -15,6 +15,10 @@ import androidx.core.content.FileProvider
 import com.shawniks.kodikdown.R
 import com.shawniks.kodikdown.data.MediaFiles
 import java.io.File
+import java.io.FileNotFoundException
+import java.io.IOException
+import java.io.OutputStream
+import java.util.Locale
 import java.util.regex.Pattern
 import kotlinx.coroutines.CancellationException
 
@@ -53,15 +57,29 @@ object FileUtils {
             "lpt7",
             "lpt8",
             "lpt9",
+            "com¹", "com²", "com³", "lpt¹", "lpt²", "lpt³",
         )
 
     fun safeFileName(raw: String, fallback: String = "video"): String {
         var cleaned = ILLEGAL_CHARS.matcher(raw).replaceAll("_").trim(' ', '.')
         cleaned = TEMPLATE_CHARS.matcher(cleaned).replaceAll("_")
         cleaned = cleaned.replace(Regex("\\s+"), " ")
-        if (cleaned.length > 120) {
-            cleaned = cleaned.substring(0, 120)
+        var end = 0
+        var bytes = 0
+        while (end < cleaned.length) {
+            val codePoint = cleaned.codePointAt(end)
+            val width = Character.charCount(codePoint)
+            val encodedWidth = when {
+                codePoint <= 0x7f -> 1
+                codePoint <= 0x7ff -> 2
+                width == 1 -> 3
+                else -> 4
+            }
+            if (end + width > 120 || bytes + encodedWidth > 200) break
+            bytes += encodedWidth
+            end += width
         }
+        cleaned = cleaned.substring(0, end)
         cleaned = MEDIA_SUFFIX_RE.matcher(cleaned).replaceAll("").trim(' ', '.')
         if (cleaned.isEmpty() || cleaned.all { it == '_' }) {
             return fallback
@@ -96,7 +114,7 @@ object FileUtils {
             root !in setOf("Download", "Movies", "DCIM") ||
                 relative.split('/').any { it == "." || it == ".." }
         ) {
-            throw java.io.IOException("Choose this folder using the folder picker in Settings")
+            throw IOException("Choose this folder using the folder picker in Settings")
         }
         return relative
     }
@@ -110,7 +128,7 @@ object FileUtils {
         isCancelled: () -> Boolean = { false },
     ): Pair<String, Uri> {
         val fileName = "${safeFileName(baseFileName)}.mp4"
-        fun copyTo(out: java.io.OutputStream) {
+        fun copyTo(out: OutputStream) {
             sourceTempFile.inputStream().use { input ->
                 val buffer = ByteArray(128 * 1024)
                 while (true) {
@@ -137,11 +155,11 @@ object FileUtils {
                     parent,
                     "video/mp4",
                     fileName,
-                ) ?: throw java.io.IOException("Could not create video in the selected folder")
+                ) ?: throw IOException("Could not create video in the selected folder")
             MediaFiles.setPending(document.toString(), true)
             try {
                 (context.contentResolver.openOutputStream(document)
-                        ?: throw java.io.IOException("Could not open the selected folder"))
+                        ?: throw IOException("Could not open the selected folder"))
                     .use { copyTo(it) }
                 return Pair(document.toString(), document)
             } catch (e: Exception) {
@@ -164,15 +182,15 @@ object FileUtils {
                 } else MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
             val uri =
                 context.contentResolver.insert(collection, values)
-                    ?: throw java.io.IOException("Could not create video in public storage")
+                    ?: throw IOException("Could not create video in public storage")
             try {
                 (context.contentResolver.openOutputStream(uri)
-                        ?: throw java.io.IOException("Could not open video output"))
+                        ?: throw IOException("Could not open video output"))
                     .use { copyTo(it) }
                 values.clear()
                 values.put(MediaStore.MediaColumns.IS_PENDING, 0)
                 if (context.contentResolver.update(uri, values, null, null) != 1) {
-                    throw java.io.IOException("Could not publish downloaded video")
+                    throw IOException("Could not publish downloaded video")
                 }
                 // MediaStore may choose a different name to avoid overwriting an existing video.
                 val actualName =
@@ -186,8 +204,8 @@ object FileUtils {
             }
         }
         val directory = File(Environment.getExternalStorageDirectory(), relativeSubDir)
-        if (!directory.isDirectory && !directory.mkdirs())
-            throw java.io.IOException("Could not create download folder")
+        if (!directory.mkdirs() && !directory.isDirectory)
+            throw IOException("Could not create download folder")
         var target = File(directory, fileName)
         var index = 2
         while (!target.createNewFile()) {
@@ -260,19 +278,13 @@ object FileUtils {
                 else -> "Download/KodikDown"
             }
 
-        val dir = File(targetFolder)
-        if (!dir.exists()) {
-            dir.mkdirs()
-        }
         val storageDir = File(Environment.getExternalStorageDirectory(), relativeSubDir)
-        if (!storageDir.exists()) {
-            storageDir.mkdirs()
-        }
+        val canOpenFolder = storageDir.mkdirs() || storageDir.isDirectory
 
         // 1. Try DocumentsContract folder URI with mime "vnd.android.document/directory"
         val possibleDocIds =
-            listOf(
-                "primary:$relativeSubDir",
+            listOfNotNull(
+                "primary:$relativeSubDir".takeIf { canOpenFolder || Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q },
                 if (isMovies) "primary:Movies" else "primary:Download",
                 "primary:",
             )
@@ -307,7 +319,7 @@ object FileUtils {
         // 3. Fallback: FileProvider
         try {
             val uri =
-                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", dir)
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", storageDir)
             val intent =
                 Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(uri, "vnd.android.document/directory")
@@ -342,11 +354,11 @@ object FileUtils {
             }
         }
         return DocumentsContract.createDocument(resolver, parent, DocumentsContract.Document.MIME_TYPE_DIR, name)
-            ?: throw java.io.IOException("Could not create series folder")
+            ?: throw IOException("Could not create series folder")
     }
 
     fun openFile(context: Context, savedPathOrUri: String) {
-        com.shawniks.kodikdown.data.MediaFiles.withAvailable(context, savedPathOrUri) {
+        MediaFiles.withAvailable(context, savedPathOrUri) {
             openFileUnchecked(context, savedPathOrUri)
         }
     }
@@ -370,7 +382,7 @@ object FileUtils {
                         } else {
                             // Might be a public path stored via MediaStore; query MediaStore or
                             // Downloads
-                            throw java.io.FileNotFoundException("Video file no longer exists")
+                            throw FileNotFoundException("Video file no longer exists")
                         }
                     }
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -387,7 +399,7 @@ object FileUtils {
     }
 
     fun shareFile(context: Context, savedPathOrUri: String) {
-        com.shawniks.kodikdown.data.MediaFiles.withAvailable(context, savedPathOrUri) {
+        MediaFiles.withAvailable(context, savedPathOrUri) {
             shareFileUnchecked(context, savedPathOrUri)
         }
     }
@@ -425,7 +437,7 @@ object FileUtils {
         val digitGroups =
             (Math.log10(bytes.toDouble()) / Math.log10(1024.0)).toInt().coerceIn(0, units.size - 1)
         val value = bytes / Math.pow(1024.0, digitGroups.toDouble())
-        return String.format(java.util.Locale.US, "%.1f %s", value, units[digitGroups])
+        return String.format(Locale.US, "%.1f %s", value, units[digitGroups])
     }
 
     fun deleteFile(context: Context, pathOrUri: String): Boolean {

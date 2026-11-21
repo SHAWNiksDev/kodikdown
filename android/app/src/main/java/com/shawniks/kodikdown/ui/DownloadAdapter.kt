@@ -1,22 +1,19 @@
 package com.shawniks.kodikdown.ui
 
 import android.content.Context
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.shawniks.kodikdown.R
 import com.shawniks.kodikdown.data.DownloadItem
 import com.shawniks.kodikdown.data.DownloadStatus
+import com.shawniks.kodikdown.data.MediaFiles
 import com.shawniks.kodikdown.databinding.ItemDownloadBinding
 import com.shawniks.kodikdown.ui.AnimationExtensions.applyPressEffect
-import com.shawniks.kodikdown.util.FileUtils
-import java.io.File
 
 class DownloadAdapter(
     private val onCancelClicked: (DownloadItem) -> Unit,
@@ -29,16 +26,30 @@ class DownloadAdapter(
     var isSelectionMode = false
     val selectedIds = mutableSetOf<String>()
 
+    fun refreshRow(id: String) {
+        val position = currentList.indexOfFirst { it.id == id }
+        if (position >= 0) notifyItemChanged(position)
+    }
+
+    fun refreshAvailability(changed: Set<MediaFiles.Reference>) {
+        if (changed.isEmpty()) return
+        currentList.forEachIndexed { index, item ->
+            if (item.isFinished && MediaFiles.Reference(item.savedPath, item.contentUri) in changed) {
+                notifyItemChanged(index)
+            }
+        }
+    }
+
     fun selectAll() {
         selectedIds.clear()
         selectedIds.addAll(currentList.filter { it.isTerminal }.map { it.id })
-        notifyDataSetChanged()
+        notifyItemRangeChanged(0, itemCount)
     }
 
     fun clearSelection() {
         selectedIds.clear()
         isSelectionMode = false
-        notifyDataSetChanged()
+        notifyItemRangeChanged(0, itemCount)
     }
 
     object DiffCallback : DiffUtil.ItemCallback<DownloadItem>() {
@@ -67,7 +78,7 @@ class DownloadAdapter(
 
         fun bind(item: DownloadItem) {
             val context = binding.root.context
-            val available = com.shawniks.kodikdown.data.MediaFiles.isAvailable(item.savedPath, item.contentUri)
+            val available = MediaFiles.isAvailable(item.savedPath, item.contentUri)
             val protected = !item.isTerminal
 
             binding.tvTitle.text = item.title

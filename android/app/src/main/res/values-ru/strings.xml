@@ -87,6 +87,7 @@
     <string name="copy_link">Копировать ссылку</string>
     <string name="link_copied">Ссылка скопирована в буфер</string>
     <string name="file_deleted">Видео удалено</string>
+    <string name="file_delete_failed">Не удалось удалить видео</string>
     <string name="video_count">%1$d видео</string>
     <string name="total_size">Всего %1$s</string>
     <string name="storage_permission_required">Разрешите доступ к хранилищу для сохранения видео или выберите папку в настройках.</string>

@@ -3,14 +3,16 @@ package com.shawniks.kodikdown.downloader
 import android.media.MediaCodec
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import androidx.annotation.OptIn
 import androidx.media3.common.util.MediaFormatUtil
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.muxer.Mp4Muxer
 import androidx.media3.muxer.Muxer
 import java.io.File
 import java.nio.ByteBuffer
 
 /** Preserve composition timestamps on Android 7.0 as well as newer devices. */
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@OptIn(UnstableApi::class)
 internal class Mp4Writer(file: File, compatibility: Boolean) {
     private val framework = if (compatibility) null else
         MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)

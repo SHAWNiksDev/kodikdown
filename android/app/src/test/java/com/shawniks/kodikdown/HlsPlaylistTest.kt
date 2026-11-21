@@ -31,6 +31,12 @@ class HlsPlaylistTest {
     }
 
     @Test
+    fun utf8BomIsNotTreatedAsASegment() {
+        val media = HlsPlaylist.parse(base, "\uFEFF#EXTM3U\nclip.ts\n#EXT-X-ENDLIST")
+        assertEquals("https://cdn.example/path/clip.ts", media.segments.single().url)
+    }
+
+    @Test
     fun byteRangesUsePreviousEndForTheSameFile() {
         val media =
             HlsPlaylist.parse(
@@ -47,6 +53,11 @@ class HlsPlaylistTest {
             base,
             "#EXTM3U\n#EXT-X-BYTERANGE:10@0\none.ts\n#EXT-X-BYTERANGE:5\ntwo.ts\n#EXT-X-ENDLIST",
         )
+    }
+
+    @Test(expected = IOException::class)
+    fun byteRangeCannotContinueAfterAnUnrangedSegment() {
+        HlsPlaylist.parse(base, "#EXTM3U\nvideo.ts\n#EXT-X-BYTERANGE:5\nvideo.ts\n#EXT-X-ENDLIST")
     }
 
     @Test(expected = IOException::class)

@@ -3,29 +3,34 @@ package com.shawniks.kodikdown.downloader
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.os.Build
 import com.shawniks.kodikdown.kodik.KodikClient
 import com.shawniks.kodikdown.net.readResponse
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.net.URI
 import java.nio.ByteBuffer
-import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
+internal class DownloadHttpException(val code: Int, resource: String) : IOException("$resource HTTP $code")
+
 class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpClient().newBuilder()
-    .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-    .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS).build()) {
+    .connectTimeout(8, TimeUnit.SECONDS)
+    .readTimeout(8, TimeUnit.SECONDS).build()) {
     companion object {
         private const val CONCURRENT_FRAGMENTS = 8
         private const val BUFFER_SIZE = 128 * 1024
@@ -54,6 +59,7 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
         onProgress: (Long, Long?, Long, Long?) -> Unit,
         onNetworkWait: (Boolean) -> Unit = {},
         onProcessing: () -> Unit = {},
+        referer: String? = null,
     ) =
         withContext(Dispatchers.IO) {
             val part = File("${targetFile.absolutePath}.part")
@@ -62,7 +68,7 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
                 var validator: String? = null
                 retryNetwork(onNetworkWait) {
                     val offset = part.takeIf { it.exists() }?.length() ?: 0L
-                    val builder = request(url)
+                    val builder = request(url, referer)
                     if (offset > 0) {
                         builder.header("Range", "bytes=$offset-")
                         validator?.let { builder.header("If-Range", it) }
@@ -70,7 +76,7 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
                     client.readResponse(builder.build()) { response ->
                         if (response.code == 416 && offset > 0 &&
                             response.header("Content-Range") == "bytes */$offset") return@readResponse
-                        if (!response.isSuccessful) throw IOException("Direct download HTTP ${response.code}")
+                        if (!response.isSuccessful) throw DownloadHttpException(response.code, "Direct download")
                         val append = response.code == 206 && offset > 0
                         if (append && response.header("Content-Range")?.startsWith("bytes $offset-") != true)
                             throw IOException("Invalid resume byte range")
@@ -82,7 +88,7 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
                                 ?: throw IOException("Invalid resume resource length")
                             else body.contentLength().takeIf { it >= 0 }
                         body.byteStream().buffered(BUFFER_SIZE).use { input ->
-                            java.io.FileOutputStream(part, append).buffered(BUFFER_SIZE).use { output ->
+                            FileOutputStream(part, append).buffered(BUFFER_SIZE).use { output ->
                                 val buffer = ByteArray(BUFFER_SIZE)
                                 while (true) {
                                     checkCancelled(isCancelled)
@@ -127,15 +133,13 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
             val muxed = File("${targetFile.absolutePath}.mux.part")
             val fragments = File("${targetFile.absolutePath}.fragments")
             try {
-                if (!fragments.mkdirs()) throw IOException("Could not create fragment cache")
+                if (!fragments.mkdirs() && !fragments.isDirectory) throw IOException("Could not create fragment cache")
                 val master = loadText(manifestUrl, onNetworkWait, referer)
-                val mediaUrl =
-                    HlsPlaylist.selectVariant(manifestUrl, master, quality) ?: manifestUrl
-                val text = if (mediaUrl == manifestUrl) master else loadText(mediaUrl, onNetworkWait, referer)
-                val playlist = HlsPlaylist.parse(mediaUrl, text)
-                val bytesWritten = AtomicLong(0)
+                val variant = HlsPlaylist.selectVariant(master.url, master.text, quality?.takeIf { it > 0 })
+                val media = if (variant == null) master else loadText(variant, onNetworkWait, referer)
+                val playlist = HlsPlaylist.parse(media.url, media.text)
+                var bytesWritten = 0L
                 val progress = Progress(onProgress)
-                var completedFragments = 0
                 onFragmentProgress(0, playlist.segments.size)
                 part.outputStream().buffered(BUFFER_SIZE).use { output ->
                     playlist.init?.let {
@@ -143,24 +147,26 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
                         init.inputStream().use { input -> input.copyTo(output, BUFFER_SIZE) }
                         init.delete()
                     }
-                    // Stream fragments to disk, then concatenate in playlist order.
-                    // Structured cancellation joins sibling calls before cache cleanup.
-                    for ((batchIndex, batch) in playlist.segments.chunked(CONCURRENT_FRAGMENTS).withIndex()) {
-                        currentCoroutineContext().ensureActive()
-                        checkCancelled(isCancelled)
-                        coroutineScope {
-                            val downloads =
-                                batch.mapIndexed { index, segment -> async {
-                                    loadSegment(segment, File(fragments, "$batchIndex-$index"), isCancelled, onNetworkWait, referer)
-                                } }
-                            for (download in downloads) {
-                                val fragment = download.await()
-                                val size = fragment.length()
-                                fragment.inputStream().use { input -> input.copyTo(output, BUFFER_SIZE) }
-                                fragment.delete()
-                                onFragmentProgress(++completedFragments, playlist.segments.size)
-                                progress.report(bytesWritten.addAndGet(size), null)
-                            }
+                    coroutineScope {
+                        val downloads = ArrayDeque<Deferred<File>>()
+                        fun launchFragment(index: Int) {
+                            downloads.addLast(async {
+                                loadSegment(playlist.segments[index], File(fragments, "$index"),
+                                    isCancelled, onNetworkWait, referer)
+                            })
+                        }
+                        val count = playlist.segments.size
+                        val window = minOf(CONCURRENT_FRAGMENTS, count)
+                        repeat(window, ::launchFragment)
+                        for (index in 0 until count) {
+                            checkCancelled(isCancelled)
+                            val fragment = downloads.removeFirst().await()
+                            bytesWritten += fragment.length()
+                            fragment.inputStream().use { input -> input.copyTo(output, BUFFER_SIZE) }
+                            fragment.delete()
+                            if (index + window < count) launchFragment(index + window)
+                            onFragmentProgress(index + 1, count)
+                            progress.report(bytesWritten, null)
                         }
                     }
                 }
@@ -179,10 +185,12 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
             }
         }
 
-    private suspend fun loadText(url: String, onNetworkWait: (Boolean) -> Unit, referer: String?): String =
+    private data class Manifest(val url: String, val text: String)
+
+    private suspend fun loadText(url: String, onNetworkWait: (Boolean) -> Unit, referer: String?): Manifest =
         retryNetwork(onNetworkWait) { client.readResponse(request(url, referer).build()) { response ->
-            if (!response.isSuccessful) throw IOException("HLS manifest HTTP ${response.code}")
-            response.body?.string() ?: throw IOException("Empty HLS manifest")
+            if (!response.isSuccessful) throw DownloadHttpException(response.code, "HLS manifest")
+            Manifest(response.request.url.toString(), response.body?.string() ?: throw IOException("Empty HLS manifest"))
         } }
 
     private suspend fun loadSegment(
@@ -200,7 +208,7 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
                 builder.header("Range", "bytes=${it.offset}-${it.offset + it.length - 1}")
             }
             client.readResponse(builder.build()) { response ->
-                if (!response.isSuccessful) throw IOException("Segment HTTP ${response.code}")
+                if (!response.isSuccessful) throw DownloadHttpException(response.code, "Segment")
                 if (segment.range != null && response.code != 206)
                     throw IOException("Server ignored the HLS byte range")
                 segment.range?.let { range ->
@@ -239,7 +247,7 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
                 return result
             } catch (e: IOException) {
                 // Missing/denied streams belong to quality fallback, not reconnect retries.
-                if (attempt == 5 || Regex("HTTP (?:400|401|403|404|410)\\b").containsMatchIn(e.message.orEmpty())) throw e
+                if (attempt == 5 || (e as? DownloadHttpException)?.code in setOf(400, 401, 403, 404, 410)) throw e
                 onNetworkWait(true)
                 delay(minOf(1000L * (attempt + 1), 4000L))
             }
@@ -266,7 +274,7 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
     }
 
     internal suspend fun remuxToMp4(input: File, output: File,
-        compatibility: Boolean = android.os.Build.VERSION.SDK_INT < 25, isCancelled: () -> Boolean) {
+        compatibility: Boolean = Build.VERSION.SDK_INT < 25, isCancelled: () -> Boolean) {
         val extractor = MediaExtractor()
         var muxer: Mp4Writer? = null
         try {
