@@ -5,24 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.6.0] - 2026-11-23
 
 ### Русский
 
 - Android сохраняет прямые ссылки HLS с одним расширением `.mp4`.
 - Android скрывает клавиатуру перед переключением на другую вкладку.
 - AniDUB снова отдаёт списки серий на ПК и Android после обновления плеера.
-
-### English
-
-- Android uses a single `.mp4` extension when saving direct HLS links.
-- Android dismisses the keyboard before switching away from the download tab.
-- Desktop and Android read episode lists from the updated AniDUB player.
-
-## [4.6.0] - 2026-11-23
-
-### Русский
-
 - Для Linux x86_64 доступен AppImage. В нём уже есть Python и Qt, а для обработки HLS и DASH используется системный FFmpeg.
 - CLI показывает серии по ссылке на страницу аниме. Укажите `--list-episodes`, затем выберите серию через `--episode` и при необходимости плеер с озвучкой через `--source`.
 - На ПК файл появляется в папке загрузок после успешной обработки. Ошибка или отмена больше не оставляет там видео с готовым именем. Загрузки из двух окон сохраняются в одной истории без перезаписи чужих записей.
@@ -36,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### English
 
+- Android uses a single `.mp4` extension when saving direct HLS links.
+- Android dismisses the keyboard before switching away from the download tab.
+- Desktop and Android read episode lists from the updated AniDUB player.
 - Linux x86_64 now has an AppImage with Python and Qt included. It uses system FFmpeg for HLS and DASH processing.
 - The CLI accepts anime pages. Run `--list-episodes`, then use `--episode` and optionally `--source` to choose an episode, player and voice-over.
 - Desktop downloads move to the destination after processing succeeds. Separate windows can add entries to the same history without overwriting each other's changes.
