@@ -406,6 +406,16 @@ def test_failed_postprocessing_does_not_publish_a_video(tmp_path: Path, monkeypa
     assert not list(tmp_path.glob(".kodikdown-*"))
 
 
+def test_fragment_marker_in_the_title_is_not_a_partial_file(tmp_path: Path) -> None:
+    target = tmp_path / "Show.part-Frag 2"
+    video = tmp_path / f"{target.name}.mp4"
+    video.write_bytes(b"finished")
+
+    downloader = Downloader(tmp_path)
+    assert not downloader._remove_partials(target)
+    assert downloader._pick_result(target) == video.resolve()
+
+
 def test_cancel_cleans_up_outside_the_exception_handler(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -40,9 +40,14 @@ def verify(repository: Path, tools: Path, tag: str) -> None:
     manifest = subprocess.check_output([tools / "aapt", "dump", "badging", apk], text=True)
     if not manifest.startswith("package: name='com.shawniks.kodikdown' "):
         raise ValueError("The APK must use the production application ID.")
-    version = re.search(r"versionName='([^']+)'", manifest.partition("\n")[0])
-    if version is None or f"v{version[1]}" != tag:
+    package = manifest.partition("\n")[0]
+    version = re.search(r"versionName='(\d+)\.(\d+)\.(\d+)'", package)
+    if version is None or f"v{'.'.join(version.groups())}" != tag:
         raise ValueError(f"The APK version does not match release tag {tag}.")
+    major, minor, patch = map(int, version.groups())
+    code = re.search(r"versionCode='(\d+)'", package)
+    if code is None or int(code[1]) != major * 10_000 + minor * 100 + patch:
+        raise ValueError(f"The APK version code does not match release tag {tag}.")
     if "application-debuggable" in manifest:
         raise ValueError("The APK is debuggable.")
     signature = subprocess.check_output(

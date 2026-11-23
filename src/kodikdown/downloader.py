@@ -415,9 +415,7 @@ class Downloader:
         produced = [
             path
             for path in _target_files(target_base)
-            if path.is_file()
-            and _MEDIA_SUFFIX_RE.search(path.name)
-            and _PARTIAL_MARKER not in path.name
+            if path.is_file() and _MEDIA_SUFFIX_RE.fullmatch(path.name[len(target_base.name) :])
         ]
         if not produced:
             return None
@@ -478,7 +476,8 @@ class Downloader:
         """Delete leftovers; returns True when something is still locked."""
         blocked = False
         for path in _target_files(target_base):
-            if path.suffix.lower() not in _PARTIAL_SUFFIXES and _PARTIAL_MARKER not in path.name:
+            suffix = path.name[len(target_base.name) :]
+            if path.suffix.lower() not in _PARTIAL_SUFFIXES and _PARTIAL_MARKER not in suffix:
                 continue
             try:
                 path.unlink()
