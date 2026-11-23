@@ -186,6 +186,7 @@ class CatalogClient(private val kodik: KodikClient) {
         val host = url.host.orEmpty().lowercase()
         val path = url.path.orEmpty()
         val id = path.substringAfterLast('/')
+        val extension = id.substringAfterLast('.', "").lowercase()
         val wrappers = Regex("/cdn-iframe/([0-9]+)(?:/([0-9]+))?(?:/([0-9]+))?").matchEntire(path)
         return when {
             host in GO_HOSTS && path.matches(Regex("/player/videos/[0-9]+")) && url.fragment != null -> {
@@ -222,8 +223,11 @@ class CatalogClient(private val kodik: KodikClient) {
             wrappers != null && (host.endsWith(".cdnvideohub.com") || host in setOf("animego.me", "animego.org")) ->
                 cvhEpisode(wrappers.groupValues[1], wrappers.groupValues[3].toIntOrNull() ?: 1,
                     wrappers.groupValues[2].toIntOrNull(), url.getQueryParameter("dubbing"))
-            path.endsWith(".mp4", true) -> requireVideo(id, listOf(StreamVariant(0, "$url", "mp4")))
-            path.endsWith(".m3u8", true) -> requireVideo(id, listOf(StreamVariant(0, "$url")))
+            extension == "mp4" || extension == "m3u8" -> {
+                val title = id.substringBeforeLast('.').ifBlank { "video" }
+                val kind = if (extension == "mp4") "mp4" else "hls"
+                requireVideo(title, listOf(StreamVariant(0, "$url", kind)))
+            }
             else -> kodik.resolve(raw)
         }
     }

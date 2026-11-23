@@ -6,6 +6,8 @@ import android.util.Log
 import com.shawniks.kodikdown.data.*
 import com.shawniks.kodikdown.downloader.DownloadManager
 import com.shawniks.kodikdown.downloader.HlsDownloader
+import com.shawniks.kodikdown.kodik.CatalogClient
+import com.shawniks.kodikdown.kodik.KodikClient
 import com.shawniks.kodikdown.util.FileUtils
 import java.io.File
 import java.net.ServerSocket
@@ -19,6 +21,17 @@ import kotlinx.coroutines.flow.first
 
 @Suppress("DEPRECATION")
 class ReliabilityDeviceTest : InstrumentationTestCase() {
+    fun testDirectMediaTitlesOmitTheExtension(): Unit = runBlocking {
+        val catalog = CatalogClient(KodikClient())
+        for ((extension, kind) in listOf("MP4" to "mp4", "m3u8" to "hls")) {
+            val url = "https://example.com/episode.2.$extension?token=a%2Bb"
+            val video = catalog.resolve(url)
+            assertEquals("episode.2", video.title)
+            assertEquals(kind, video.best.kind)
+            assertEquals(url, video.best.url)
+        }
+    }
+
     fun testLargeHlsFragmentStreamsToDiskAndCleansTemporaryFiles(): Unit = runBlocking {
         val context = instrumentation.targetContext
         val output = File(context.cacheDir, "qa-large-fragment.mp4")
