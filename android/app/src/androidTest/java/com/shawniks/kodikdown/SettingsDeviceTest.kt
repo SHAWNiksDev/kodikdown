@@ -89,6 +89,8 @@ class SettingsDeviceTest : InstrumentationTestCase() {
         prefs.autoPaste = false
         val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
+        val input = activity.findViewById<View>(R.id.etUrl)
+        val keyboard = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         fun keyboardVisible(): Boolean {
             var visible = false
             main { visible = ViewCompat.getRootWindowInsets(activity.window.decorView)
@@ -99,13 +101,18 @@ class SettingsDeviceTest : InstrumentationTestCase() {
             main {
                 activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 activity.findViewById<View>(R.id.tabDownloader).performClick()
-                val input = activity.findViewById<View>(R.id.etUrl)
                 input.requestFocus()
-                (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
-                    .showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
             }
+            var showRequested = false
             val openDeadline = System.currentTimeMillis() + 5000
-            while (!keyboardVisible() && System.currentTimeMillis() < openDeadline) Thread.sleep(50)
+            while (!keyboardVisible() && System.currentTimeMillis() < openDeadline) {
+                main {
+                    if (!showRequested && input.hasWindowFocus() && keyboard.isActive(input)) {
+                        showRequested = keyboard.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                    }
+                }
+                Thread.sleep(50)
+            }
             assertTrue("Keyboard must be visible before checking tab dismissal", keyboardVisible())
             main { activity.findViewById<View>(R.id.tabSettings).performClick() }
             val closeDeadline = System.currentTimeMillis() + 5000
