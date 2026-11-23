@@ -104,8 +104,8 @@ class SettingsDeviceTest : InstrumentationTestCase() {
                 input.requestFocus()
             }
             var showRequested = false
-            val openDeadline = System.currentTimeMillis() + 5000
-            while (!keyboardVisible() && System.currentTimeMillis() < openDeadline) {
+            val openDeadline = SystemClock.elapsedRealtime() + 5000
+            while (!keyboardVisible() && SystemClock.elapsedRealtime() < openDeadline) {
                 main {
                     if (!showRequested && input.hasWindowFocus() && keyboard.isActive(input)) {
                         showRequested = keyboard.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
@@ -114,9 +114,12 @@ class SettingsDeviceTest : InstrumentationTestCase() {
                 Thread.sleep(50)
             }
             assertTrue("Keyboard must be visible before checking tab dismissal", keyboardVisible())
-            main { activity.findViewById<View>(R.id.tabSettings).performClick() }
-            val closeDeadline = System.currentTimeMillis() + 5000
-            while (keyboardVisible() && System.currentTimeMillis() < closeDeadline) Thread.sleep(50)
+            main {
+                assertTrue(activity.findViewById<View>(R.id.tabSettings).performClick())
+                assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.viewSettings).visibility)
+            }
+            val closeDeadline = SystemClock.elapsedRealtime() + 5000
+            while (keyboardVisible() && SystemClock.elapsedRealtime() < closeDeadline) Thread.sleep(50)
             assertFalse("Keyboard obscures settings after switching tabs", keyboardVisible())
         } finally { main { prefs.saveSettings(original); activity.finish() } }
     }

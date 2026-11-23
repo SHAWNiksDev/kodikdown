@@ -255,7 +255,9 @@ class DubPlayerPage(HTMLParser):
         elif tag == "option" and self._inside_playlist:
             if (value := fields.get("value")) and re.fullmatch(r"/s\d+/[\da-f]{24,64}", value):
                 self.episode_paths.append(value)
-        elif tag == "source" and fields.get("id") == "vsource":
+        elif tag == "video" and fields.get("id") == "hls-video":
+            self.manifest = fields.get("data-stream-src") or self.manifest
+        elif tag == "source" and fields.get("id") == "vsource" and self.manifest is None:
             self.manifest = fields.get("src")
 
     def handle_endtag(self, tag: str) -> None:
@@ -426,7 +428,11 @@ class MediaClient:
             manifest = urlsplit(urljoin(referer, player.manifest))
             params = parse_qs(manifest.query, keep_blank_values=True)
             paths = player.episode_paths or params.get("v", [])
-            if not paths or not manifest.path.endswith("/vid.php"):
+            if (
+                not paths
+                or not manifest.path.endswith("/vid.php")
+                or not re.fullmatch(r"player\d+\.ladonyvesna2005\.info", manifest.hostname or "")
+            ):
                 continue
             episodes = []
             for number, path in enumerate(paths, start=1):

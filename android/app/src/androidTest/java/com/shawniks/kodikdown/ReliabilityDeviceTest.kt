@@ -21,6 +21,16 @@ import kotlinx.coroutines.flow.first
 
 @Suppress("DEPRECATION")
 class ReliabilityDeviceTest : InstrumentationTestCase() {
+    fun testAniDubReadsBothPlayerLayouts() {
+        val expected = "vid.php?v=%2Fs9%2Fepisode&lang=ru"
+        assertEquals(expected, CatalogClient.dubManifest(
+            """<video id="hls-video" data-stream-src="vid.php?v=%2Fs9%2Fepisode&amp;lang=ru"></video>"""
+        ))
+        assertEquals(expected, CatalogClient.dubManifest(
+            """<source id="vsource" src="vid.php?v=%2Fs9%2Fepisode&amp;lang=ru">"""
+        ))
+    }
+
     fun testDirectMediaTitlesOmitTheExtension(): Unit = runBlocking {
         val catalog = CatalogClient(KodikClient())
         for ((extension, kind) in listOf("MP4" to "mp4", "m3u8" to "hls")) {

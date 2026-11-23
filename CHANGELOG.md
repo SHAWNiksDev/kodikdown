@@ -7,8 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Русский
+
 - Android сохраняет прямые ссылки HLS с одним расширением `.mp4`.
+- Android скрывает клавиатуру перед переключением на другую вкладку.
+- AniDUB снова отдаёт списки серий на ПК и Android после обновления плеера.
+
+### English
+
 - Android uses a single `.mp4` extension when saving direct HLS links.
+- Android dismisses the keyboard before switching away from the download tab.
+- Desktop and Android read episode lists from the updated AniDUB player.
 
 ## [4.6.0] - 2026-11-23
 

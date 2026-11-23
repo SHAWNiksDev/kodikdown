@@ -153,8 +153,7 @@ class CatalogClient(private val kodik: KodikClient) {
         val embed = tags(page, "iframe").mapNotNull { it["src"] }.map { URI(url).resolve(it).toString() }
             .firstOrNull { isDubPlayer(Uri.parse(it).host.orEmpty()) } ?: return fromPage(url, page, emptyList())
         val player = text(embed, referer = url)
-        val manifest = tags(player, "source").firstOrNull { it["id"] == "vsource" }?.get("src")
-            ?: return fromPage(url, page, emptyList())
+        val manifest = dubManifest(player) ?: return fromPage(url, page, emptyList())
         val endpoint = Uri.parse(URI(embed).resolve(manifest).toString())
         if (!isDubPlayer(endpoint.host.orEmpty()) || endpoint.path?.endsWith("/vid.php") != true) {
             return fromPage(url, page, emptyList())
@@ -290,6 +289,11 @@ class CatalogClient(private val kodik: KodikClient) {
         private fun isDubPlayer(host: String) = host.matches(Regex("player[0-9]+\\.ladonyvesna2005\\.info"))
         private fun voiceKey(value: String) = value.lowercase().filter { it.isLetterOrDigit() }
         private fun decode(value: String) = Html.fromHtml(value, Html.FROM_HTML_MODE_COMPACT).toString()
+
+        internal fun dubManifest(player: String): String? =
+            tags(player, "video").firstOrNull { it["id"] == "hls-video" }
+                ?.get("data-stream-src")?.takeIf(String::isNotBlank)
+                ?: tags(player, "source").firstOrNull { it["id"] == "vsource" }?.get("src")
 
         private fun tags(document: String, tag: String): List<Map<String, String>> {
             val attr = Regex("""([a-zA-Z0-9-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")

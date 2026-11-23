@@ -454,6 +454,10 @@ class MainActivity : AppCompatActivity() {
             tabBackStack.addLast(previousIndex)
         }
 
+        if (index != 0) {
+            WindowInsetsControllerCompat(window, currentFocus ?: binding.root)
+                .hide(WindowInsetsCompat.Type.ime())
+        }
         val tabViews = listOf(
             binding.viewDownloader,
             binding.viewLibrary,
@@ -472,7 +476,6 @@ class MainActivity : AppCompatActivity() {
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) refreshVisibleFiles()
         updateTabUi(index)
         if (index != 0) {
-            WindowInsetsControllerCompat(window, binding.root).hide(WindowInsetsCompat.Type.ime())
             binding.etUrl.clearFocus()
             binding.etFileName.clearFocus()
         }
