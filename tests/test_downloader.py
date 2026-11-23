@@ -391,6 +391,21 @@ def test_monitor_stays_quiet_right_after_a_real_snapshot(tmp_path: Path) -> None
     assert [snapshot.downloaded for snapshot in snapshots] == [10]
 
 
+def test_failed_postprocessing_does_not_publish_a_video(tmp_path: Path, monkeypatch) -> None:
+    def transfer(self, target, url, referer):
+        target.with_suffix(".mp4").write_bytes(b"unfinished video")
+        raise DownloadFailed("postprocessing failed")
+
+    monkeypatch.setattr(Downloader, "_transfer", transfer)
+    downloader = Downloader(tmp_path)
+
+    with pytest.raises(DownloadFailed, match="postprocessing failed"):
+        downloader.download_blocking("https://cdn/video.m3u8", "clip", "https://cdn/")
+
+    assert not (tmp_path / "clip.mp4").exists()
+    assert not list(tmp_path.glob(".kodikdown-*"))
+
+
 def test_cancel_cleans_up_outside_the_exception_handler(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

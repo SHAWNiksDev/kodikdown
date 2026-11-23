@@ -41,8 +41,10 @@ object HistoryManager {
                 }
                 command.transform?.let { transform ->
                     val updated = transform(_items.value)
-                    _items.value = updated
-                    saveToDisk(command.context, updated)
+                    if (updated != _items.value) {
+                        _items.value = updated
+                        saveToDisk(command.context, updated)
+                    }
                 }
             }
         }
@@ -85,30 +87,6 @@ object HistoryManager {
         recordOrUpdate(context, entry)
     }
 
-    fun updateStatus(
-        context: Context,
-        id: String,
-        status: DownloadStatus,
-        savedPath: String? = null,
-        contentUri: String? = null,
-        fileSize: Long? = null,
-        error: String? = null,
-    ) {
-        mutate(context) { list ->
-            list.map { item ->
-                if (item.id != id) item
-                else
-                    item.copy(
-                        status = status,
-                        savedPath = savedPath ?: item.savedPath,
-                        contentUri = contentUri ?: item.contentUri,
-                        fileSize = fileSize ?: item.fileSize,
-                        errorMessage = error,
-                    )
-            }
-        }
-    }
-
     fun recordOrUpdate(context: Context, item: HistoryItem) {
         mutate(context) { list ->
             val old = list.firstOrNull { it.id == item.id }
@@ -142,7 +120,12 @@ object HistoryManager {
             val list = mutableListOf<HistoryItem>()
 
             for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
+                val obj = array.optJSONObject(i) ?: continue
+                val id = obj.optString("id")
+                val title = obj.optString("title")
+                val fileName = obj.optString("fileName")
+                val url = obj.optString("url")
+                if (id.isBlank() || title.isBlank() || fileName.isBlank() || url.isBlank()) continue
                 val statusStr = obj.optString("status", DownloadStatus.FINISHED.name)
                 val status =
                     try {
@@ -169,11 +152,11 @@ object HistoryManager {
 
                 list.add(
                     HistoryItem(
-                        id = obj.getString("id"),
-                        title = obj.getString("title"),
-                        fileName = obj.getString("fileName"),
-                        url = obj.getString("url"),
-                        quality = obj.getInt("quality"),
+                        id = id,
+                        title = title,
+                        fileName = fileName,
+                        url = url,
+                        quality = obj.optInt("quality", 0),
                         sourceInput = if (obj.has("sourceInput") && !obj.isNull("sourceInput")) obj.getString("sourceInput") else null,
                         retryInput = obj.optString("retryInput").takeIf { it.isNotBlank() },
                         series = obj.optString("series").takeIf { it.isNotBlank() },

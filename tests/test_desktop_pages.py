@@ -353,6 +353,27 @@ def test_history_failed_atomic_write_keeps_previous_file(tmp_path, monkeypatch):
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_separate_windows_keep_each_others_history(tmp_path):
+    path = tmp_path / "history.json"
+    first = HistoryStore(path)
+    second = HistoryStore(path)
+    try:
+        first.put(HistoryEntry("first", "One", "One", SOURCE, 720, 1))
+        second.put(HistoryEntry("second", "Two", "Two", SOURCE, 480, 2))
+        first.flush()
+        second.flush()
+        first.remove({"first"}, set())
+        first.flush()
+        restored = HistoryStore(path)
+        try:
+            assert [entry.id for entry in restored.entries] == ["second"]
+        finally:
+            restored.close()
+    finally:
+        first.close()
+        second.close()
+
+
 def test_stepper_changes_once_and_other_settings_revert_during_cooldown(window):
     window.open_settings()
     page = window.settings_page

@@ -8,7 +8,9 @@ __pycache__/
 !docs/**/*.png
 !docs/**/*.jpg
 !src/kodikdown/gui/brands/*.png
+!packaging/appimage/kodikdown.png
 .venv/
+.work/
 venv/
 dist/
 build/
@@ -33,12 +35,9 @@ android/keystore.properties
 *.apk
 !packaging/kodikdown-android.apk
 
-# Local tooling, credentials and device QA evidence stay on the developer machine.
-/.agents/
-/.codex/
-/.aws/
 .env
 .env.*
+/.aws/
 *.pem
 *.key
 /docs/*-validation.md

@@ -1,7 +1,7 @@
 package com.shawniks.kodikdown.downloader
 
 import java.io.IOException
-import java.net.URI
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /** Parse the supported HLS subset explicitly; never save unsupported data as a successful video. */
 object HlsPlaylist {
@@ -11,7 +11,9 @@ object HlsPlaylist {
 
     data class Media(val init: Segment?, val segments: List<Segment>)
 
-    private fun resolve(base: String, path: String): String = URI(base).resolve(path).toString()
+    private fun resolve(base: String, path: String): String =
+        base.toHttpUrlOrNull()?.resolve(path)?.toString()
+            ?: throw IOException("Invalid HLS URL")
 
     fun selectVariant(base: String, text: String, quality: Int? = null): String? {
         val lines = playlistLines(text).toList()
@@ -39,8 +41,11 @@ object HlsPlaylist {
         if (variants.isEmpty() && hasSeparateAudio) {
             throw IOException("HLS with a separate audio track is not supported on Android")
         }
-        val eligible = if (quality == null) variants else variants.filter { it.first <= quality }
-        return (eligible.maxByOrNull { it.second } ?: variants.minByOrNull { it.first })?.third
+        val measured = variants.filter { it.first > 0 }
+        if (quality == null || measured.isEmpty()) return variants.maxByOrNull { it.second }?.third
+        val height = measured.map { it.first }.filter { it <= quality }.maxOrNull()
+            ?: measured.minOf { it.first }
+        return measured.filter { it.first == height }.maxByOrNull { it.second }?.third
     }
 
     fun parse(base: String, text: String): Media {

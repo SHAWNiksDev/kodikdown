@@ -19,14 +19,21 @@
 | Platform | File | Installation |
 | --- | --- | --- |
 | **Windows 10/11 x64** | [Download EXE](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-windows-x86_64.exe) | Open the file |
-| **Linux x64** | [Download for Linux](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64) | Make the file executable |
+| **Linux x64** | [AppImage](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64.AppImage) · [standalone binary](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64) | Make the file executable |
 | **Android 7.0+** | [Download APK](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-android.apk) | Open the APK on your phone |
 
-> **Upgrading from Android builds older than 4.5.0.** If Android reports a signature conflict, uninstall the old app and install the new APK. This clears app settings and history. Videos in shared storage stay on the device.
+On Android, install 4.6.0 over the official 4.5.0 APK to keep your history and settings. If Android reports a signature conflict with an older or test build, uninstall it before upgrading. Uninstalling clears app settings and history. Videos in shared storage stay on your device.
 
-On Linux, run `chmod +x kodikdown-linux-x86_64` followed by `./kodikdown-linux-x86_64`. To process HLS on desktop, install **FFmpeg** and check that `ffmpeg -version` runs. On Windows, you can install it with `winget install --id Gyan.FFmpeg -e`.
+The Linux AppImage includes Python and Qt. It targets x86_64 distributions with glibc 2.35 or newer, including Ubuntu 22.04 and Debian 12. Open a terminal in the download folder.
 
-Get command-line builds and checksums from the [release page](https://github.com/SHAWNiksDev/kodikdown/releases/latest).
+```bash
+chmod +x kodikdown-linux-x86_64.AppImage
+./kodikdown-linux-x86_64.AppImage
+```
+
+If FUSE is unavailable, run `APPIMAGE_EXTRACT_AND_RUN=1 ./kodikdown-linux-x86_64.AppImage`. For HLS and DASH processing on desktop, install **FFmpeg** and check it with `ffmpeg -version`. On Windows, you can install it with `winget install --id Gyan.FFmpeg -e`.
+
+Find command-line builds and `SHA256SUMS` on the [release page](https://github.com/SHAWNiksDev/kodikdown/releases/latest). On Linux, put the download and checksum file in the same folder and run `sha256sum -c --ignore-missing SHA256SUMS`.
 
 ## Download episodes
 
@@ -75,12 +82,14 @@ python -m pip install .
 kodikdown
 kodikdown-cli download "<player-link>" -q 720 -o "./Videos"
 kodikdown-cli download "<player-link>" --list-qualities
+kodikdown-cli download "<anime-page>" --list-episodes
+kodikdown-cli download "<anime-page>" --episode 3 --source 2 -q 720
 kodikdown-cli download --help
 ```
 
 Look for `-cli` in the filenames of packaged command-line builds.
 
-The CLI downloads one episode per command. Concurrent downloads with the same name use filename suffixes such as `(2)` and `(3)`.
+The CLI downloads one episode per command. Use the number from `--list-episodes` with `--source` to select a player and voice-over. By default, the CLI selects the first source that has the requested episode. Downloads with the same name use filename suffixes such as `(2)` and `(3)`.
 
 </details>
 
@@ -99,13 +108,22 @@ pyinstaller packaging/kodikdown-cli.spec --noconfirm
 
 In PowerShell, set the test environment variable with `$env:QT_QPA_PLATFORM="offscreen"`. PyInstaller puts the binaries in `dist/`.
 
+Run `bash packaging/build_appimage.sh` on Linux x86_64 with the Python environment active. The script downloads and verifies the packaging tools. To support Ubuntu 22.04, build on Ubuntu 22.04 as GitHub Actions does.
+
 Android builds require JDK 17, Android SDK 35 and Build Tools 35.0.0. Set `ANDROID_HOME` or use `android/local.properties` to point Gradle at the SDK.
 
 ```bash
 bash android/build.sh
 ```
 
-For testing on a personal phone, pass `-PkodikdownDeviceQa=true` to `assembleDebug` and `assembleDebugAndroidTest`. The `.deviceqa` suffix keeps the test APKs and their data separate from the installed app.
+Use the separate `.deviceqa` package when testing on a personal phone. These commands install it and run the checks over ADB.
+
+```bash
+cd android
+./gradlew -PkodikdownDeviceQa=true installDebug installDebugAndroidTest
+adb shell am instrument -w \
+  com.shawniks.kodikdown.deviceqa.test/android.test.InstrumentationTestRunner
+```
 
 The desktop app and CLI live in `src/kodikdown/`. The Android app lives in `android/app/`. Gradle copies the shared player icons from `src/kodikdown/gui/brands/` at build time.
 

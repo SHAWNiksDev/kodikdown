@@ -31,6 +31,12 @@ class HlsPlaylistTest {
     }
 
     @Test
+    fun queryOnlyReferencesKeepThePlaylistPath() {
+        val media = HlsPlaylist.parse(base, "#EXTM3U\n?token=segment\n#EXT-X-ENDLIST")
+        assertEquals("https://cdn.example/path/playlist.m3u8?token=segment", media.segments.single().url)
+    }
+
+    @Test
     fun utf8BomIsNotTreatedAsASegment() {
         val media = HlsPlaylist.parse(base, "\uFEFF#EXTM3U\nclip.ts\n#EXT-X-ENDLIST")
         assertEquals("https://cdn.example/path/clip.ts", media.segments.single().url)
@@ -83,6 +89,18 @@ class HlsPlaylistTest {
         val text =
             "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=1280x720\nhd.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=400000,RESOLUTION=640x360\nsd.m3u8"
         assertEquals("https://cdn.example/path/sd.m3u8", HlsPlaylist.selectVariant(base, text, 360))
+    }
+
+    @Test
+    fun selectedResolutionTakesPriorityOverBitrate() {
+        val text = """
+            #EXTM3U
+            #EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=640x360
+            high-bitrate-sd.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=1280x720
+            hd.m3u8
+        """.trimIndent()
+        assertEquals("https://cdn.example/path/hd.m3u8", HlsPlaylist.selectVariant(base, text, 720))
     }
 
     @Test(expected = IOException::class)

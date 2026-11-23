@@ -34,6 +34,7 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
     companion object {
         private const val CONCURRENT_FRAGMENTS = 8
         private const val BUFFER_SIZE = 128 * 1024
+        private val fullTail = Regex("bytes (\\d+)-(\\d+)/(\\d+)")
         // Shared by every transfer: memory/socket use does not multiply by queue size.
         private val fragmentSlots = Semaphore(CONCURRENT_FRAGMENTS)
     }
@@ -67,26 +68,37 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
             try {
                 var validator: String? = null
                 retryNetwork(onNetworkWait) {
-                    val offset = part.takeIf { it.exists() }?.length() ?: 0L
-                    val builder = request(url, referer)
+                    val offset = if (validator != null) part.length() else 0L
+                    val builder = request(url, referer).header("Accept-Encoding", "identity")
                     if (offset > 0) {
                         builder.header("Range", "bytes=$offset-")
-                        validator?.let { builder.header("If-Range", it) }
+                        builder.header("If-Range", checkNotNull(validator))
                     }
                     client.readResponse(builder.build()) { response ->
-                        if (response.code == 416 && offset > 0 &&
-                            response.header("Content-Range") == "bytes */$offset") return@readResponse
+                        if (response.code == 416 && offset > 0) {
+                            validator = null
+                            throw IOException("MP4 resource no longer matches the partial download")
+                        }
                         if (!response.isSuccessful) throw DownloadHttpException(response.code, "Direct download")
                         val append = response.code == 206 && offset > 0
-                        if (append && response.header("Content-Range")?.startsWith("bytes $offset-") != true)
-                            throw IOException("Invalid resume byte range")
-                        validator = response.header("ETag") ?: response.header("Last-Modified")
+                        val etag = response.header("ETag")
+                        val receivedValidator = etag?.takeUnless { it.startsWith("W/") }
+                            ?: response.header("Last-Modified")
                         val body = response.body ?: throw IOException("Empty response body")
                         var written = if (append) offset else 0L
-                        val total = if (response.code == 206)
-                            response.header("Content-Range")?.substringAfter('/')?.toLongOrNull()
-                                ?: throw IOException("Invalid resume resource length")
-                            else body.contentLength().takeIf { it >= 0 }
+                        val total = if (response.code == 206) {
+                            val range = fullTail.matchEntire(response.header("Content-Range").orEmpty())
+                            val start = range?.groupValues?.get(1)?.toLongOrNull()
+                            val end = range?.groupValues?.get(2)?.toLongOrNull()
+                            val length = range?.groupValues?.get(3)?.toLongOrNull()
+                            if (start != offset || end == null || length == null || end < offset ||
+                                end != length - 1 || (append && receivedValidator != null && receivedValidator != validator)) {
+                                validator = null
+                                throw IOException("Invalid resume byte range")
+                            }
+                            length
+                        } else body.contentLength().takeIf { it >= 0 }
+                        validator = receivedValidator ?: if (append) validator else null
                         body.byteStream().buffered(BUFFER_SIZE).use { input ->
                             FileOutputStream(part, append).buffered(BUFFER_SIZE).use { output ->
                                 val buffer = ByteArray(BUFFER_SIZE)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import gc
+import os
 import re
 import threading
 import time
@@ -10,6 +11,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from glob import escape as glob_escape
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import yt_dlp
 
@@ -53,11 +55,26 @@ class DownloadSource:
 def fallback_sources_for(
     resolved: ResolvedVideo, quality: int, prefer_mp4: bool
 ) -> tuple[DownloadSource, ...]:
-    return tuple(
-        DownloadSource(v.download_url(prefer_mp4), v.quality, v.download_referer(prefer_mp4))
-        for v in resolved.variants
-        if v.quality < quality
-    )
+    sources: list[DownloadSource] = []
+    for variant in resolved.variants:
+        if variant.quality < quality:
+            sources.append(
+                DownloadSource(
+                    variant.download_url(prefer_mp4),
+                    variant.quality,
+                    variant.download_referer(prefer_mp4),
+                )
+            )
+        if (
+            prefer_mp4
+            and variant.quality <= quality
+            and variant.direct_mp4 not in (None, variant.url)
+        ):
+            reported_quality = variant.quality if variant.quality < quality else None
+            sources.append(
+                DownloadSource(variant.url, reported_quality, variant.download_referer(False))
+            )
+    return tuple(sources)
 
 
 @dataclass(frozen=True)
@@ -150,10 +167,7 @@ def unique_target(directory: Path, stem: str) -> Path:
 
 
 def _existing_media(target_base: Path) -> bool:
-    if not target_base.parent.exists():
-        return False
-    pattern = f"{glob_escape(target_base.name)}.*"
-    return any(path.is_file() for path in target_base.parent.glob(pattern))
+    return any(path.is_file() or path.is_symlink() for path in _target_files(target_base))
 
 
 def _target_files(target_base: Path) -> Iterator[Path]:
@@ -226,7 +240,6 @@ class Downloader:
         self._monitor_stop = threading.Event()
         self._monitor: threading.Thread | None = None
 
-    # -- control -----------------------------------------------------------
     def cancel(self) -> None:
         self._cancel_event.set()
 
@@ -241,7 +254,6 @@ class Downloader:
             self.cancel()
             raise
 
-    # -- the actual work ---------------------------------------------------
     def download_blocking(self, url: str, title: str, referer: str) -> Path:
         if self.cancelled:
             raise DownloadCancelled
@@ -254,43 +266,52 @@ class Downloader:
 
         stem = safe_filename(self._filename or title)
         try:
-            target_base = unique_target(self.output_dir, stem)
+            destination = unique_target(self.output_dir, stem)
         except OSError as exc:
             raise DownloadFailed(f"could not reserve a file in {self.output_dir}: {exc}") from exc
         try:
-            self._start_monitor(target_base)
-            cancelled = False
-            failure: str | None = None
-            try:
-                self._transfer_with_retries(target_base, url, referer)
-            except (DownloadCancelled, KeyboardInterrupt):
-                self.cancel()
-                cancelled = True
-            except DownloadFailed as exc:
-                failure = str(exc)
-            finally:
-                self._stop_monitor()
-
-            # Leave the handler before cleanup so traceback cycles release files on Windows.
-            if cancelled or self.cancelled:
-                self._cleanup_cancelled(target_base)
-                raise DownloadCancelled
-
-            if failure is not None:
-                self._cleanup_cancelled(target_base)
-                raise DownloadFailed(failure)
-            produced = self._pick_result(target_base)
-            if produced is None or produced.stat().st_size == 0:
-                self._cleanup_cancelled(target_base)
-                detail = self._logger.last_error or "no video file was written"
-                raise DownloadFailed(f"download finished without a file: {detail}")
-            return produced
+            with TemporaryDirectory(
+                prefix=".kodikdown-", dir=self.output_dir, ignore_cleanup_errors=True
+            ) as directory:
+                staged = Path(directory) / destination.name
+                produced = self._download_to(staged, url, referer)
+                target = destination.parent / produced.name
+                if target.exists() or target.is_symlink():
+                    raise DownloadFailed(f"the destination already exists: {target}")
+                os.replace(produced, target)
+                return target.resolve()
+        except OSError as exc:
+            raise DownloadFailed(f"could not write to {self.output_dir}: {exc}") from exc
         finally:
-            # Hold the name through cancellation cleanup: a new transfer must not
-            # resume files that the cancelled worker is about to delete.
-            release_target(target_base)
+            release_target(destination)
 
-    # -- progress monitor --------------------------------------------------
+    def _download_to(self, target_base: Path, url: str, referer: str) -> Path:
+        self._start_monitor(target_base)
+        cancelled = False
+        failure: str | None = None
+        try:
+            self._transfer_with_retries(target_base, url, referer)
+        except (DownloadCancelled, KeyboardInterrupt):
+            self.cancel()
+            cancelled = True
+        except DownloadFailed as exc:
+            failure = str(exc)
+        finally:
+            self._stop_monitor()
+
+        # Windows may keep a file open until yt-dlp's exception is collected.
+        if cancelled or self.cancelled:
+            self._cleanup_cancelled(target_base)
+            raise DownloadCancelled
+        if failure is not None:
+            self._cleanup_cancelled(target_base)
+            raise DownloadFailed(failure)
+        produced = self._pick_result(target_base)
+        if produced is None or produced.stat().st_size == 0:
+            detail = self._logger.last_error or "no video file was written"
+            raise DownloadFailed(f"download finished without a file: {detail}")
+        return produced
+
     def _start_monitor(self, target_base: Path) -> None:
         if self._listener is None:
             return
@@ -356,6 +377,11 @@ class Downloader:
                 except DownloadFailed as exc:
                     if self.cancelled:
                         raise DownloadCancelled from exc
+                    # A failed postprocessor can leave a file with a video extension.
+                    # Remove it before retrying, or yt-dlp could accept it as complete.
+                    for path in _target_files(target_base):
+                        if _MEDIA_SUFFIX_RE.search(path.name):
+                            path.unlink()
                     unavailable = any(
                         marker in str(exc).lower() for marker in ("403", "404", "not found")
                     )
@@ -417,7 +443,6 @@ class Downloader:
         message = re.sub(r"\s+", " ", message)
         return message[:400] if message else "yt-dlp failed"
 
-    # -- yt-dlp plumbing ---------------------------------------------------
     def _options(self, target_base: Path, referer: str) -> dict[str, object]:
         return {
             "format": "best/bestvideo+bestaudio",
@@ -548,10 +573,6 @@ def _mtime(path: Path) -> float:
     with contextlib.suppress(OSError):
         return path.stat().st_mtime
     return 0.0
-
-
-def _as_int(value: object) -> int:
-    return int(value) if isinstance(value, (int, float)) else 0
 
 
 def _as_float(value: object) -> float | None:

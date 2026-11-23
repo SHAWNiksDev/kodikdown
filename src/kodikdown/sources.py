@@ -298,7 +298,7 @@ class MediaClient:
             raise PageStructureError(response.url.host) from exc
 
     async def lookup(
-        self, raw: str, translation: Translation | None = None
+        self, raw: str, translation: Translation | None = None, *, include_poster: bool = True
     ) -> Series | ResolvedVideo:
         url = web_url(raw)
         site = _site(url)
@@ -307,7 +307,7 @@ class MediaClient:
         series = await self.catalog(url, *site)
         request = EpisodeRequest.from_url(url)
         if request is None:
-            if series.poster_url:
+            if include_poster and series.poster_url:
                 series = replace(series, poster=await self._poster(series.poster_url))
             return series
         for choice in series.choices:

@@ -7,6 +7,7 @@ import json
 import math
 import os
 import tempfile
+import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, replace
@@ -16,6 +17,7 @@ from typing import TypedDict, Unpack
 from PySide6.QtCore import QObject, QRunnable, Signal
 
 from kodikdown.downloader import is_pending_output
+from kodikdown.output_locks import release, try_reserve
 
 
 @dataclass(frozen=True)
@@ -56,10 +58,17 @@ class HistoryEntry:
             allowed["prefer_mp4"] = False
         if type(allowed.get("file_size", 0)) is not int or allowed.get("file_size", 0) < 0:
             allowed["file_size"] = 0
-        entry = cls(**allowed)
-        if entry.status in ("queued", "downloading", "assembling"):
-            entry = replace(entry, status="interrupted", error="")
-        return entry
+        return cls(**allowed)
+
+
+def _read_history(path: Path) -> dict[str, HistoryEntry]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return {}
+    if not isinstance(raw, list):
+        return {}
+    return {entry.id: entry for item in raw if (entry := HistoryEntry.from_json(item))}
 
 
 class HistoryChanges(TypedDict, total=False):
@@ -74,19 +83,16 @@ class HistoryStore:
     def __init__(self, path: Path, on_error: Callable[[str], None] | None = None) -> None:
         self.path = path
         self._on_error = on_error
-        self._entries: dict[str, HistoryEntry] = {}
         self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kodikdown-history")
         self._pending: Future[None] | None = None
         self._closed = False
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(raw, list):
-                for item in raw:
-                    entry = HistoryEntry.from_json(item)
-                    if entry is not None:
-                        self._entries[entry.id] = entry
-        except (OSError, ValueError):
-            pass
+            self._entries = _read_history(path)
+        except OSError:
+            self._entries = {}
+        for identifier, entry in self._entries.items():
+            if entry.status in ("queued", "downloading", "assembling"):
+                self._entries[identifier] = replace(entry, status="interrupted", error="")
 
     @property
     def entries(self) -> tuple[HistoryEntry, ...]:
@@ -99,8 +105,9 @@ class HistoryStore:
         self.put_many((entry,))
 
     def put_many(self, entries: Iterable[HistoryEntry]) -> None:
-        self._entries.update((entry.id, entry) for entry in entries)
-        self._save()
+        updates = {entry.id: entry for entry in entries}
+        self._entries.update(updates)
+        self._save(updates, set())
 
     def update(self, identifier: str, **changes: Unpack[HistoryChanges]) -> None:
         old = self.get(identifier)
@@ -110,22 +117,38 @@ class HistoryStore:
                 self.put(updated)
 
     def remove(self, identifiers: set[str], protected: set[str]) -> None:
-        for identifier in identifiers - protected:
+        removed = identifiers - protected
+        for identifier in removed:
             self._entries.pop(identifier, None)
-        self._save()
+        self._save({}, removed)
 
     def clear(self, protected: set[str]) -> None:
         self.remove(set(self._entries), protected)
 
-    def _save(self) -> None:
-        if self._closed:
+    def _save(self, updates: dict[str, HistoryEntry], removed: set[str]) -> None:
+        if self._closed or not (updates or removed):
             return
-        payload = json.dumps([asdict(entry) for entry in self.entries], ensure_ascii=False)
-        self._pending = self._writer.submit(self._write, payload)
+        self._pending = self._writer.submit(self._write, updates, removed)
         self._pending.add_done_callback(self._written)
 
-    def _write(self, payload: str) -> None:
+    def _write(self, updates: dict[str, HistoryEntry], removed: set[str]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + 5
+        while not try_reserve(self.path):
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Could not lock {self.path}")
+            time.sleep(0.05)
+        try:
+            entries = _read_history(self.path)
+            entries.update(updates)
+            for identifier in removed:
+                entries.pop(identifier, None)
+            ordered = sorted(entries.values(), key=lambda entry: entry.created, reverse=True)
+            self._replace_file(json.dumps([asdict(entry) for entry in ordered], ensure_ascii=False))
+        finally:
+            release(self.path)
+
+    def _replace_file(self, payload: str) -> None:
         descriptor, temporary = tempfile.mkstemp(
             dir=self.path.parent, prefix=".history-", suffix=".tmp"
         )

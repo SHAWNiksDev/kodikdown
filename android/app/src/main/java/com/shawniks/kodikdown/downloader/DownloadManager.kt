@@ -86,7 +86,6 @@ object DownloadManager {
             updateItem(item.id) {
                 it.copy(status = DownloadStatus.FAILED, errorMessage = e.message)
             }
-            HistoryManager.updateStatus(app, item.id, DownloadStatus.FAILED, error = e.message)
             return item.id
         }
         val job =
@@ -106,22 +105,15 @@ object DownloadManager {
                         }
                     }
                 } catch (e: CancellationException) {
-                    updateItem(item.id) { it.copy(status = DownloadStatus.CANCELLED) }
-                    HistoryManager.updateStatus(app, item.id, DownloadStatus.CANCELLED)
                     throw e
                 } catch (e: Exception) {
+                    currentCoroutineContext().ensureActive()
                     updateItem(item.id) {
                         it.copy(
                             status = DownloadStatus.FAILED,
                             errorMessage = e.message ?: "Download failed",
                         )
                     }
-                    HistoryManager.updateStatus(
-                        app,
-                        item.id,
-                        DownloadStatus.FAILED,
-                        error = e.message,
-                    )
                 }
             }
         activeJobs[item.id] = job
@@ -129,11 +121,6 @@ object DownloadManager {
             if (cause is CancellationException) {
                 updateItem(item.id) {
                     if (it.isTerminal) it else it.copy(status = DownloadStatus.CANCELLED)
-                }
-                if (
-                    _items.value.firstOrNull { it.id == item.id }?.status != DownloadStatus.FINISHED
-                ) {
-                    HistoryManager.updateStatus(app, item.id, DownloadStatus.CANCELLED)
                 }
             }
             activeJobs.remove(item.id)
@@ -208,9 +195,7 @@ object DownloadManager {
                         )
                     }
                 }
-                val processing = {
-                    updateItem(item.id) { it.copy(status = DownloadStatus.ASSEMBLING) }
-                }
+                val processing = { enterAssembly(item.id) }
                 suspend fun downloadHls() = downloader.downloadHls(
                     source.url,
                     tempFile,
@@ -263,9 +248,7 @@ object DownloadManager {
                 }
             }
             currentCoroutineContext().ensureActive()
-            updateItem(item.id) {
-                it.copy(status = DownloadStatus.ASSEMBLING, speedBytesPerSec = 0, etaSeconds = null)
-            }
+            enterAssembly(item.id)
             val (path, uri) =
                 FileUtils.saveToPublicStorage(context, tempFile, item.fileName, downloadDir, item.series) {
                     item.id in cancelledItems
@@ -279,12 +262,19 @@ object DownloadManager {
                 )
             }
             val finished = _items.value.firstOrNull { it.id == item.id } ?: item
-            HistoryManager.recordFromDownload(context, finished)
             LibraryManager.record(context, finished)
         } finally {
             tempFile.delete()
             File("${tempFile.absolutePath}.part").delete()
             File("${tempFile.absolutePath}.mux.part").delete()
+        }
+    }
+
+    @Synchronized
+    private fun enterAssembly(id: String) {
+        if (id in cancelledItems) throw CancellationException("Download cancelled")
+        updateItem(id) {
+            it.copy(status = DownloadStatus.ASSEMBLING, speedBytesPerSec = 0, etaSeconds = null)
         }
     }
 

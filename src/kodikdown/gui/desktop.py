@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import subprocess
 import sys
@@ -10,8 +9,6 @@ from pathlib import Path
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
-
-logger = logging.getLogger(__name__)
 
 
 def _child_env() -> dict[str, str]:
@@ -22,6 +19,8 @@ def _child_env() -> dict[str, str]:
     so restore whatever was there before it started.
     """
     env = os.environ.copy()
+    if not getattr(sys, "frozen", False):
+        return env
     original = env.pop("LD_LIBRARY_PATH_ORIG", None)
     if original is not None:
         env["LD_LIBRARY_PATH"] = original
@@ -47,10 +46,20 @@ def open_path(path: Path) -> bool:
     """Open a file (or folder) with the desktop's default application."""
     if not path.exists():
         return False
+    return _open_local(path)
+
+
+def _open_local(path: Path) -> bool:
+    if sys.platform == "win32":
+        try:
+            os.startfile(path)
+        except OSError:
+            return False
+        return True
+    if getattr(sys, "frozen", False) and sys.platform == "linux":
+        return _spawn(["xdg-open", str(path)]) or _spawn(["gio", "open", str(path)])
     if QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
         return True
-    if sys.platform == "win32":
-        return _spawn(["cmd", "/c", "start", "", str(path)])
     if sys.platform == "darwin":
         return _spawn(["open", str(path)])
     return _spawn(["xdg-open", str(path)]) or _spawn(["gio", "open", str(path)])
@@ -59,13 +68,7 @@ def open_path(path: Path) -> bool:
 def open_directory(path: Path) -> bool:
     if not path.is_dir():
         return False
-    if QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
-        return True
-    if sys.platform == "win32":
-        return _spawn(["explorer", str(path)])
-    if sys.platform == "darwin":
-        return _spawn(["open", str(path)])
-    return _spawn(["xdg-open", str(path)]) or _spawn(["gio", "open", str(path)])
+    return _open_local(path)
 
 
 def reveal_path(path: Path) -> bool:

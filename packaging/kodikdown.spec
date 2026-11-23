@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(SPECPATH).resolve().parent  # noqa: F821 - injected by PyInstaller
 NAME = os.environ.get("KODIKDOWN_BUILD_NAME", "kodikdown").strip() or "kodikdown"
+ONEDIR = os.environ.get("KODIKDOWN_ONEDIR") == "1"
 
 EXCLUDED_QT = [
     "PySide6.Qt3DAnimation",
@@ -83,11 +84,22 @@ pyz = PYZ(a.pure)  # noqa: F821 - injected by PyInstaller
 exe = EXE(  # noqa: F821 - injected by PyInstaller
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
+    [] if ONEDIR else a.binaries,
+    [] if ONEDIR else a.datas,
+    exclude_binaries=ONEDIR,
     name=NAME,
     strip=sys.platform == "linux",
     upx=False,
     console=False,
     icon=str(ROOT / "docs" / "app.ico") if sys.platform == "win32" else None,
 )
+
+if ONEDIR:
+    coll = COLLECT(  # noqa: F821 - injected by PyInstaller
+        exe,
+        a.binaries,
+        a.datas,
+        name=NAME,
+        strip=sys.platform == "linux",
+        upx=False,
+    )

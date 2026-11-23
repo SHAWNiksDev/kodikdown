@@ -57,22 +57,28 @@ jobs:
       - run: pytest
 
   package:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
       - run: pip install -e '.[dev]'
       - run: pyinstaller packaging/kodikdown.spec --noconfirm
       - run: pyinstaller packaging/kodikdown-cli.spec --noconfirm
+      - run: bash packaging/build_appimage.sh
       - run: test -x dist/kodikdown
       - run: dist/kodikdown-cli --version
+      - run: APPIMAGE_EXTRACT_AND_RUN=1 dist/kodikdown-linux-x86_64.AppImage --version
       - uses: actions/upload-artifact@v4
         with:
           name: kodikdown-linux-preview
           if-no-files-found: error
-          path: dist/kodikdown
+          path: |
+            dist/kodikdown
+            dist/kodikdown-cli
+            dist/kodikdown-linux-x86_64.AppImage
 
   android:
     runs-on: ubuntu-latest

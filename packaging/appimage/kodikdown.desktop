@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=KodikDown
+Comment=Download episodes from supported video players
+Comment[ru]=Скачать серии из поддерживаемых плееров
+Exec=kodikdown %u
+Icon=kodikdown
+Categories=AudioVideo;Video;
+Terminal=false

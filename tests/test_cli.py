@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 from kodikdown.cli import app
 
 PAGE_URL = "https://mock.local/video/91873/060cab655974d46835b3f4405807acc2/720p"
+ANIME_URL = "https://yani.tv/catalog/item/test-series"
 
 
 def _mock_resolve(
@@ -143,7 +144,7 @@ def test_cli_format_helpers() -> None:
 def test_gui_command_invokes_launch_gui(monkeypatch) -> None:
     launched = False
 
-    def fake_launch() -> None:
+    def fake_launch(url: str | None = None) -> None:
         nonlocal launched
         launched = True
 
@@ -248,3 +249,45 @@ def test_download_with_custom_filename(
     )
     assert result.exit_code == 0
     assert download_called is True
+    assert "\r" not in result.stderr
+
+
+@respx.mock
+def test_catalog_cli_lists_and_resolves_episodes() -> None:
+    respx.get("https://api.yani.tv/anime/test-series").respond(
+        json={"response": {"anime_id": 42, "title": "Test Series", "poster": {"medium": "/art"}}}
+    )
+    respx.get("https://api.yani.tv/anime/42/videos").respond(
+        json={
+            "response": [
+                {
+                    "iframe_url": "https://cdn.example/episode-1.mp4",
+                    "number": 1,
+                    "data": {"player": "Player", "dubbing": "Studio A"},
+                },
+                {
+                    "iframe_url": "https://cdn.example/episode-2.mp4",
+                    "number": 2,
+                    "data": {"player": "Player", "dubbing": "Studio B"},
+                },
+            ]
+        }
+    )
+    runner = CliRunner()
+    listed = runner.invoke(app, ["download", ANIME_URL, "--list-episodes"])
+    assert listed.exit_code == 0
+    assert listed.stdout.splitlines() == [
+        "Test Series",
+        "1. Player / Studio A (1)",
+        "2. Player / Studio B (2)",
+    ]
+    selected = runner.invoke(
+        app, ["download", ANIME_URL, "--episode", "2", "--source", "2", "--print-url"]
+    )
+    assert selected.exit_code == 0
+    assert selected.stdout.strip() == "https://cdn.example/episode-2.mp4"
+    missing = runner.invoke(
+        app, ["download", ANIME_URL, "--episode", "2", "--source", "1", "--print-url"]
+    )
+    assert missing.exit_code == 3
+    assert not missing.stdout

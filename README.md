@@ -19,14 +19,21 @@
 | Платформа | Файл | Установка |
 | --- | --- | --- |
 | **Windows 10/11 x64** | [Скачать EXE](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-windows-x86_64.exe) | Откройте файл |
-| **Linux x64** | [Скачать для Linux](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64) | Дайте файлу право на запуск |
+| **Linux x64** | [AppImage](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64.AppImage) · [обычная сборка](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64) | Дайте файлу право на запуск |
 | **Android 7.0+** | [Скачать APK](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-android.apk) | Откройте APK на телефоне |
 
-> **Обновление Android со сборок до 4.5.0.** Если Android сообщает о конфликте подписей, удалите старую версию и установите новый APK. История и настройки сбросятся, а видео в общей папке останутся.
+На Android установите 4.6.0 поверх официального APK 4.5.0, чтобы сохранить историю и настройки. Если Android сообщает о конфликте подписей со старой или тестовой сборкой, для установки потребуется удалить её. При удалении сбрасываются настройки и история, а видео в общей папке остаются.
 
-На Linux запустите `chmod +x kodikdown-linux-x86_64`, затем `./kodikdown-linux-x86_64`. Для обработки HLS на ПК установите **FFmpeg** и проверьте командой `ffmpeg -version`, что программа доступна. В PowerShell можно установить FFmpeg командой `winget install --id Gyan.FFmpeg -e`.
+На Linux AppImage запускается без установки Python и Qt. Сборка рассчитана на Linux x86_64 с glibc 2.35 или новее, включая Ubuntu 22.04 и Debian 12. Откройте терминал в папке со скачанным файлом.
 
-Консольные сборки и контрольные суммы доступны в [релизе](https://github.com/SHAWNiksDev/kodikdown/releases/latest).
+```bash
+chmod +x kodikdown-linux-x86_64.AppImage
+./kodikdown-linux-x86_64.AppImage
+```
+
+Если FUSE недоступен, запустите `APPIMAGE_EXTRACT_AND_RUN=1 ./kodikdown-linux-x86_64.AppImage`. Для обработки HLS и DASH на ПК установите **FFmpeg** и проверьте его командой `ffmpeg -version`. В PowerShell можно использовать `winget install --id Gyan.FFmpeg -e`.
+
+Консольные сборки и файл `SHA256SUMS` доступны на [странице релиза](https://github.com/SHAWNiksDev/kodikdown/releases/latest). В Linux скачанный файл можно проверить командой `sha256sum -c --ignore-missing SHA256SUMS` в папке с обоими файлами.
 
 ## Как скачать серии
 
@@ -75,12 +82,14 @@ python -m pip install .
 kodikdown
 kodikdown-cli download "<ссылка-на-плеер>" -q 720 -o "./Videos"
 kodikdown-cli download "<ссылка-на-плеер>" --list-qualities
+kodikdown-cli download "<страница-аниме>" --list-episodes
+kodikdown-cli download "<страница-аниме>" --episode 3 --source 2 -q 720
 kodikdown-cli download --help
 ```
 
 В именах готовых консольных сборок есть `-cli`.
 
-CLI скачивает одну серию за вызов. При одновременной загрузке файлов с одинаковым именем новые файлы получают суффиксы `(2)`, `(3)` и так далее.
+CLI скачивает одну серию за вызов. Номер `--source` берётся из списка `--list-episodes` и соответствует паре «плеер и озвучка». По умолчанию выбирается первый источник, у которого есть нужная серия. Для одинаковых имён файлов используются суффиксы `(2)`, `(3)` и так далее.
 
 </details>
 
@@ -99,13 +108,22 @@ pyinstaller packaging/kodikdown-cli.spec --noconfirm
 
 В PowerShell задайте переменную для тестов через `$env:QT_QPA_PLATFORM="offscreen"`. Готовые сборки PyInstaller появятся в `dist/`.
 
+Для сборки AppImage выполните `bash packaging/build_appimage.sh` на Linux x86_64 с активным Python-окружением. Скрипт скачает и проверит инструменты сборки. Чтобы поддержать Ubuntu 22.04, собирайте на Ubuntu 22.04, как в GitHub Actions.
+
 Для Android нужны JDK 17, Android SDK 35 и Build Tools 35.0.0. Укажите путь к SDK через `ANDROID_HOME` или `android/local.properties`.
 
 ```bash
 bash android/build.sh
 ```
 
-Для проверок на личном телефоне добавьте `-PkodikdownDeviceQa=true` к задачам `assembleDebug` и `assembleDebugAndroidTest`. Суффикс `.deviceqa` отделяет тестовые APK и их данные от установленного приложения.
+Для проверок на личном телефоне используйте отдельный пакет с суффиксом `.deviceqa`. Следующие команды устанавливают тестовую сборку и запускают проверки через ADB.
+
+```bash
+cd android
+./gradlew -PkodikdownDeviceQa=true installDebug installDebugAndroidTest
+adb shell am instrument -w \
+  com.shawniks.kodikdown.deviceqa.test/android.test.InstrumentationTestRunner
+```
 
 Код ПК и CLI находится в `src/kodikdown/`, код Android в `android/app/`. Иконки источников общие. Gradle копирует их из `src/kodikdown/gui/brands/` при сборке.
 

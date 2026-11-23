@@ -70,6 +70,7 @@ class ReliabilityDeviceTest : InstrumentationTestCase() {
         val data = instrumentation.context.assets.open("resume.mp4").use { it.readBytes() }
         val server = ServerSocket(0)
         val ranges = CopyOnWriteArrayList<String>()
+        val validators = CopyOnWriteArrayList<String>()
         val referers = CopyOnWriteArrayList<String>()
         val waits = CopyOnWriteArrayList<Boolean>()
         val output = File(instrumentation.targetContext.cacheDir, "qa-resume.mp4")
@@ -84,6 +85,9 @@ class ReliabilityDeviceTest : InstrumentationTestCase() {
                             ranges.add(line!!)
                             offset = line!!.substringAfter("bytes=").substringBefore('-').toInt()
                         }
+                        if (line!!.startsWith("If-Range:", ignoreCase = true)) {
+                            validators.add(line!!.substringAfter(':').trim())
+                        }
                         if (line!!.startsWith("Referer:", ignoreCase = true)) {
                             referers.add(line!!.substringAfter(':').trim())
                         }
@@ -91,7 +95,7 @@ class ReliabilityDeviceTest : InstrumentationTestCase() {
                     val header = if (index == 0) "HTTP/1.1 200 OK\r\nContent-Length: ${data.size}\r\n"
                         else "HTTP/1.1 206 Partial Content\r\nContent-Length: ${data.size-offset}\r\nContent-Range: bytes $offset-${data.size-1}/${data.size}\r\n"
                     val stream = socket.getOutputStream()
-                    stream.write((header + "Connection: close\r\n\r\n").toByteArray())
+                    stream.write((header + "ETag: \"fixture-v1\"\r\nConnection: close\r\n\r\n").toByteArray())
                     if (index == 0) stream.write(data, 0, data.size / 2)
                     else stream.write(data, offset, data.size-offset)
                     stream.flush()
@@ -104,6 +108,7 @@ class ReliabilityDeviceTest : InstrumentationTestCase() {
                 output, { false }, { _, _, _, _ -> }, onNetworkWait = { waits.add(it) }, referer = referer)
             assertEquals(1, ranges.size)
             assertTrue(ranges[0].contains("bytes=${data.size/2}-"))
+            assertEquals(listOf("\"fixture-v1\""), validators)
             assertTrue(waits.contains(true))
             assertEquals(listOf(referer, referer), referers)
             assertTrue(data.contentEquals(output.readBytes()))

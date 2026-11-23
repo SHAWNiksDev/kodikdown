@@ -5,10 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.6.0] - 2026-11-23
 
 ### Русский
 
+- Для Linux x86_64 доступен AppImage. В нём уже есть Python и Qt, а для обработки HLS и DASH используется системный FFmpeg.
+- CLI показывает серии по ссылке на страницу аниме. Укажите `--list-episodes`, затем выберите серию через `--episode` и при необходимости плеер с озвучкой через `--source`.
+- На ПК файл появляется в папке загрузок после успешной обработки. Ошибка или отмена больше не оставляет там видео с готовым именем. Загрузки из двух окон сохраняются в одной истории без перезаписи чужих записей.
+- Если прямой MP4 недоступен, ПК пробует HLS в том же качестве. Android проверяет идентификатор файла при возобновлении MP4 и выбирает в HLS разрешение ближе к запрошенному.
+- APK подписан тем же ключом, что и 4.5.0. Обновление поверх официальной сборки сохраняет настройки и историю.
 - Сборки для ПК занимают меньше места. Windows скрывает служебный файл блокировки в папке загрузок.
 - ПК резервирует имена файлов между процессами. ОС освобождает блокировки после завершения процесса. Повтор из истории ищет дубликат в папке нужного сериала.
 - Android корректно скачивает HLS с относительными ссылками после редиректов и передаёт `Referer` при прямой загрузке MP4. Отмена дожидается закрытия сетевых операций перед удалением временных файлов.
@@ -17,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### English
 
+- Linux x86_64 now has an AppImage with Python and Qt included. It uses system FFmpeg for HLS and DASH processing.
+- The CLI accepts anime pages. Run `--list-episodes`, then use `--episode` and optionally `--source` to choose an episode, player and voice-over.
+- Desktop downloads move to the destination after processing succeeds. Separate windows can add entries to the same history without overwriting each other's changes.
+- Desktop can try HLS at the same quality when direct MP4 is unavailable. Android checks file identity before resuming an MP4 and selects an HLS variant closer to the requested resolution.
+- The Android APK uses the 4.5.0 signing key, so updating the official app keeps history and settings.
 - Desktop builds are smaller. Windows hides the download lock file in File Explorer.
 - Desktop reserves output names across processes. The OS releases the locks when a process exits. History retries look for duplicates in the episode's own series folder.
 - Android resolves relative HLS links after redirects and sends the `Referer` for direct MP4 downloads. Cancellation waits for network readers to close before removing partial files.
@@ -299,6 +309,9 @@ player lookup was reworked for the signed API Kodik uses today.
 - Rewritten to talk to the Kodik API directly, with a terminal interface
   instead of a headless Chromium
 
+[4.6.0]: https://github.com/SHAWNiksDev/kodikdown/compare/v4.5.0...v4.6.0
+[4.5.0]: https://github.com/SHAWNiksDev/kodikdown/compare/v4.0.0...v4.5.0
+[4.0.0]: https://github.com/SHAWNiksDev/kodikdown/compare/v3.5.0...v4.0.0
 [3.5.0]: https://github.com/SHAWNiksDev/kodikdown/compare/v3.0.1...v3.5.0
 [3.0.1]: https://github.com/SHAWNiksDev/kodikdown/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/SHAWNiksDev/kodikdown/compare/v2.2.2...v3.0.0
