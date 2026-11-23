@@ -63,7 +63,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
+      - name: Install Linux build and GUI test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 xvfb xdotool
       - run: pip install -e '.[dev]'
       - run: pyinstaller packaging/kodikdown.spec --noconfirm
       - run: pyinstaller packaging/kodikdown-cli.spec --noconfirm
@@ -71,6 +75,7 @@ jobs:
       - run: test -x dist/kodikdown
       - run: dist/kodikdown-cli --version
       - run: APPIMAGE_EXTRACT_AND_RUN=1 dist/kodikdown-linux-x86_64.AppImage --version
+      - run: APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a bash packaging/check_linux_gui.sh dist/kodikdown-linux-x86_64.AppImage
       - uses: actions/upload-artifact@v4
         with:
           name: kodikdown-linux-preview

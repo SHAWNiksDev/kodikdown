@@ -26,7 +26,8 @@ jobs:
       - name: Install Linux build and GUI test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 xvfb xdotool
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 xvfb xdotool
       - run: pip install -e '.[dev]'
       - name: Check the release version
         run: python -c 'import os; from kodikdown import __version__; assert os.environ["GITHUB_REF_NAME"] == f"v{__version__}"'
@@ -47,19 +48,8 @@ jobs:
           test "$(dist/kodikdown-linux-x86_64 --version)" = "$expected"
           image=dist/kodikdown-linux-x86_64.AppImage
           test "$(APPIMAGE_EXTRACT_AND_RUN=1 "$image" --version)" = "$expected"
-          APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=xcb xvfb-run -a bash -eu -c '
-            "$1" &
-            app=$!
-            trap "kill $app 2>/dev/null || true; wait $app 2>/dev/null || true" EXIT
-            for ((attempt = 0; attempt < 60; attempt++)); do
-              kill -0 "$app"
-              if xdotool search --onlyvisible --name "^KodikDown$" >/dev/null; then
-                exit 0
-              fi
-              sleep 1
-            done
-            exit 1
-          ' test-appimage "$image"
+          xvfb-run -a bash packaging/check_linux_gui.sh dist/kodikdown-linux-x86_64
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a bash packaging/check_linux_gui.sh "$image"
       - uses: actions/upload-artifact@v4
         with:
           name: kodikdown-linux
