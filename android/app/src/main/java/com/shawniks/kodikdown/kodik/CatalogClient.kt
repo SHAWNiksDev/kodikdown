@@ -64,7 +64,9 @@ class CatalogClient(private val kodik: KodikClient) {
         return when {
             host.yummyHost() && (path == "/catalog/item/$slug" || path == "/anime/$slug") ->
                 yummyCatalog(raw, slug)
-            host in LIBRIA_HOSTS && (path == "/anime/releases/release/$slug" || path == "/release/$slug") ->
+            host.removePrefix("www.") in LIBRIA_HOSTS && path in setOf(
+                "/anime/releases/$slug", "/anime/releases/release/$slug", "/release/$slug",
+            ) ->
                 libriaCatalog(raw, slug)
             else -> null
         }

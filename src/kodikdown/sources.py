@@ -129,7 +129,7 @@ def _site(url: str) -> tuple[str, str] | None:
         if match:
             return "go", match[2]
     if host.removeprefix("www.") in LIBRIA_HOSTS:
-        match = re.fullmatch(r"/(?:anime/releases/release|release)/([\w-]+)(?:\.html)?", path)
+        match = re.fullmatch(r"/(?:anime/releases/(?:release/)?|release/)([\w-]+)(?:\.html)?", path)
         if match:
             return "libria", match[1]
     if re.fullmatch(r"/(?:[\w-]+/)*\d+-[\w-]+\.html", path) and any(

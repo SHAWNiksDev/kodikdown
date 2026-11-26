@@ -15,6 +15,30 @@ async def test_direct_video_decodes_title_without_changing_the_stream_url() -> N
     assert video.best.url == url
 
 
+@pytest.mark.parametrize("prefix", ("anime/releases", "anime/releases/release", "release"))
+@respx.mock
+async def test_aniliberty_accepts_current_and_older_release_links(prefix: str) -> None:
+    respx.get("https://aniliberty.top/api/v1/anime/releases/sample-series").respond(
+        json={
+            "name": {"main": "Sample Series"},
+            "episodes": [
+                {
+                    "id": "fdc390c0-b5a9-4143-8695-9f1f77533b85",
+                    "ordinal": 1,
+                    "hls_720": "https://cdn.example/episode.m3u8",
+                }
+            ],
+        }
+    )
+    async with MediaClient() as client:
+        catalog = await client.lookup(
+            f"https://www.aniliberty.top/{prefix}/sample-series", include_poster=False
+        )
+    assert isinstance(catalog, Series)
+    assert catalog.title == "Sample Series"
+    assert catalog.choices[0].episodes[0].number == "1"
+
+
 @pytest.mark.parametrize(
     "player_tag",
     [

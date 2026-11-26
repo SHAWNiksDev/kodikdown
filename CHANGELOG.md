@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - После изменения ссылки в окне загрузки скрывается предыдущий результат. На Android незавершённый поиск по старой ссылке отменяется.
 - Если запись истории на ПК временно не удалась, изменения будут записаны при следующем сохранении.
 - Android отклоняет HLS-плейлисты из одних ключевых кадров и плейлисты с несовместимой разметкой сегментов.
+- ПК и Android распознают новый формат ссылок AniLiberty.
 
 ### English
 
@@ -28,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Editing a link hides the previous result. On Android, it also cancels a lookup for the old link.
 - Desktop history retries unsaved changes the next time it saves.
 - Android rejects keyframe-only HLS playlists and unsupported segment layouts.
+- Desktop and Android recognize the new AniLiberty release URLs.
 
 ## [4.6.0] - 2026-11-23
 
