@@ -157,4 +157,23 @@
     <string name="catalog_empty">На этой странице нет серий для загрузки</string>
     <string name="catalog_link_hint">Вставьте ссылку на аниме или плеер</string>
     <string name="all_series_folders">Все папки сериалов</string>
+    <string name="queue_actions">Очередь</string>
+    <string name="download_paused">На паузе</string>
+    <string name="pause_all">Приостановить все</string>
+    <string name="resume_all">Продолжить все</string>
+    <string name="retry_failed">Повторить неудачные</string>
+    <string name="pause_download">Пауза</string>
+    <string name="resume_download">Продолжить</string>
+    <string name="prioritize_download">В начало очереди</string>
+    <string name="favorites">Избранное</string>
+    <string name="favorites_empty">Пока нет избранных сериалов</string>
+    <string name="save_favorite">В избранное</string>
+    <string name="favorite_saved">Сохранено в избранном</string>
+    <string name="favorite_source_missing">Этот плеер или озвучка недоступны. Выберите другой вариант.</string>
+    <string name="player_fullscreen">На весь экран</string>
+    <string name="player_exit_fullscreen">Выйти из полноэкранного режима</string>
+    <string name="player_external">Во внешнем плеере</string>
+    <string name="player_error">Не удалось воспроизвести видео. Попробуйте открыть его во внешнем плеере.</string>
+    <string name="player_speed">Скорость воспроизведения</string>
+    <string name="player_position">Позиция воспроизведения</string>
 </resources>

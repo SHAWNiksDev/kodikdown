@@ -60,6 +60,8 @@ object HlsPlaylist {
                     throw IOException("Encrypted HLS is not supported on Android")
                 line == "#EXT-X-DISCONTINUITY" ->
                     throw IOException("HLS discontinuities are not supported on Android")
+                line == "#EXT-X-I-FRAMES-ONLY" ->
+                    throw IOException("HLS playlists with only keyframes are not supported on Android")
                 line.startsWith("#EXT-X-STREAM-INF:") ->
                     throw IOException("Expected an HLS media playlist")
                 line.startsWith("#EXT-X-MAP:") -> {
@@ -68,11 +70,14 @@ object HlsPlaylist {
                             ?: throw IOException("Missing HLS init segment URL")
                     val range = Regex("BYTERANGE=\"([^\"]+)\"").find(line)?.groupValues?.get(1)
                     val parsed = Segment(resolve(base, uri), range?.let { parseRange(it, 0) })
-                    if (init != null && init != parsed)
+                    if (segments.isNotEmpty() && init != parsed)
                         throw IOException("Changing HLS init segments are not supported")
                     init = parsed
                 }
-                line.startsWith("#EXT-X-BYTERANGE:") -> pendingRange = line.substringAfter(':')
+                line.startsWith("#EXT-X-BYTERANGE:") -> {
+                    if (pendingRange != null) throw IOException("HLS segment has multiple byte ranges")
+                    pendingRange = line.substringAfter(':')
+                }
                 line == "#EXT-X-ENDLIST" -> ended = true
                 line.isNotEmpty() && !line.startsWith("#") -> {
                     val url = resolve(base, line)

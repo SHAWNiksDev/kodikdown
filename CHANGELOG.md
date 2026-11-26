@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.7.0] - 2026-11-26
+
+### Русский
+
+- На ПК и Android очередь сохраняется между запусками. Загрузки можно поставить на паузу, поднять в очереди и повторить после ошибки. Если источник позволяет проверить частичный файл, загрузка продолжится с сохранённого места.
+- Избранное запоминает плеер, озвучку и качество. При открытии сериала выделяются серии, которых ещё нет в библиотеке или очереди.
+- Скачанные видео открываются во встроенном плеере с перемоткой, настройкой скорости, полноэкранным режимом и сохранением позиции. Есть кнопка для внешнего плеера.
+- В библиотеке и истории на ПК появился поиск по названию, сериалу и озвучке.
+- CLI учитывает сохранённое качество и предпочтение MP4. Для отдельных загрузок добавлен флаг `--no-mp4`.
+- После изменения ссылки в окне загрузки скрывается предыдущий результат. На Android незавершённый поиск по старой ссылке отменяется.
+- Если запись истории на ПК временно не удалась, изменения будут записаны при следующем сохранении.
+- Android отклоняет HLS-плейлисты из одних ключевых кадров и плейлисты с несовместимой разметкой сегментов.
+
+### English
+
+- The desktop and Android queues survive restarts. Pause, prioritize and retry downloads, and resume partial files when the source can be verified.
+- Favorites remember the player, voice-over and quality. Opening a favorite selects episodes that are missing from the library and queue.
+- Watch downloaded videos in the built-in player with seeking, playback speed, full screen and a saved playback position. An external player is also available.
+- Search the desktop library and history by title, series, or voice-over.
+- The CLI uses saved quality and MP4 preferences and accepts `--no-mp4` for individual downloads.
+- Editing a link hides the previous result. On Android, it also cancels a lookup for the old link.
+- Desktop history retries unsaved changes the next time it saves.
+- Android rejects keyframe-only HLS playlists and unsupported segment layouts.
+
 ## [4.6.0] - 2026-11-23
 
 ### Русский
@@ -315,6 +339,7 @@ player lookup was reworked for the signed API Kodik uses today.
 - Rewritten to talk to the Kodik API directly, with a terminal interface
   instead of a headless Chromium
 
+[4.7.0]: https://github.com/SHAWNiksDev/kodikdown/compare/v4.6.0...v4.7.0
 [4.6.0]: https://github.com/SHAWNiksDev/kodikdown/compare/v4.5.0...v4.6.0
 [4.5.0]: https://github.com/SHAWNiksDev/kodikdown/compare/v4.0.0...v4.5.0
 [4.0.0]: https://github.com/SHAWNiksDev/kodikdown/compare/v3.5.0...v4.0.0

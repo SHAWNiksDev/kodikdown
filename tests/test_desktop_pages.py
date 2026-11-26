@@ -11,9 +11,12 @@ from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QMessageBox
 from kodikdown.config import ConfigStore, Settings
 from kodikdown.downloader import ProgressSnapshot, release_target, unique_target
 from kodikdown.gui.appearance import AppearanceOverlay
+from kodikdown.gui.favorites import Favorites
 from kodikdown.gui.main_window import MainWindow
-from kodikdown.gui.media_store import HistoryEntry, HistoryStore, MediaScan
+from kodikdown.gui.media_store import HistoryEntry, HistoryStore, MediaFile, MediaScan
+from kodikdown.i18n import t
 from kodikdown.kodik.models import ResolvedVideo, StreamVariant, Translation
+from kodikdown.sources import Choice, Episode, EpisodeRequest, Series
 
 SOURCE = '<iframe src="https://kodikplayer.com/video/42/abcdef0123456789/720p"></iframe>'
 
@@ -51,6 +54,7 @@ def window(qtbot, tmp_path):
 
 def enqueue(window, monkeypatch):
     monkeypatch.setattr(window.downloads.pool, "start", lambda task: None)
+    window.url_edit.setText(SOURCE)
     window._url_in_use = SOURCE
     window._on_resolved(window._request_id, video())
     window._on_download()
@@ -334,6 +338,66 @@ def test_history_persists_original_input_and_recovers_interrupted_jobs(tmp_path)
         restored.close()
 
 
+def test_paused_download_can_be_restored_and_resumed(window, monkeypatch, qtbot):
+    identifier, job = enqueue(window, monkeypatch)
+    monkeypatch.setattr(window.downloads.pool, "tryTake", lambda _: True)
+    window._pause_job(identifier)
+    assert job.status == "paused"
+    assert not window._transfers_busy()
+    window.history.flush()
+    window._quit_requested = True
+    assert window.close()
+
+    restored = MainWindow(window.store, window.settings)
+    qtbot.addWidget(restored)
+    try:
+        pending = restored.downloads.jobs[identifier]
+        assert pending.status == "paused"
+        assert pending.directory == job.directory
+        starts = []
+        monkeypatch.setattr(restored.downloads.pool, "start", starts.append)
+        restored._resume_all()
+        assert starts == [pending.task]
+        assert restored.history.get(identifier).status == "queued"
+        assert pending.task.job_id == identifier
+    finally:
+        for pending in restored.downloads.jobs.values():
+            pending.finished = True
+        restored._quit_requested = True
+        restored.close()
+
+
+def test_favorite_remembers_quality_and_selects_only_missing_episodes(window, monkeypatch):
+    url = "https://yani.tv/catalog/item/sample"
+    choice = Choice("Kodik", "Studio", (Episode("1", SOURCE), Episode("2", SOURCE)))
+    series = Series(url, "Sample", (choice,))
+    window.series_picker.set_series(series, 480, True)
+    window._save_favorite()
+    (favorite,) = Favorites(window.store.path.parent).entries()
+    assert (favorite.player, favorite.voice, favorite.quality) == ("Kodik", "Studio", 480)
+
+    saved = window.store.path.parent / "episode.mp4"
+    saved.write_bytes(b"downloaded video")
+    window.library.put(
+        HistoryEntry(
+            "one",
+            "Episode",
+            "Episode",
+            url,
+            480,
+            10,
+            path=str(saved),
+            retry_input=EpisodeRequest("1", "Kodik", "Studio").link(url),
+        )
+    )
+    monkeypatch.setattr(window.resolver, "resolve", lambda *_: None)
+    window._open_favorite(favorite)
+    window._on_catalog_ready(window._request_id, series)
+    picker = window.series_picker
+    assert picker.quality.currentData() == 480
+    assert [episode.number for episode in picker.selected(choice)] == ["2"]
+
+
 def test_history_failed_atomic_write_keeps_previous_file(tmp_path, monkeypatch):
     store = HistoryStore(tmp_path / "history.json")
     first = HistoryEntry("first", "One", "One", SOURCE, 720, 1, status="finished")
@@ -351,6 +415,67 @@ def test_history_failed_atomic_write_keeps_previous_file(tmp_path, monkeypatch):
     store.close()
     assert store.path.read_bytes() == previous
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_history_retries_failed_changes_on_next_save(tmp_path, monkeypatch):
+    store = HistoryStore(tmp_path / "history.json")
+    old = HistoryEntry("old", "Old", "Old", SOURCE, 720, 1)
+    first = HistoryEntry("first", "One", "One", SOURCE, 720, 2)
+    second = HistoryEntry("second", "Two", "Two", SOURCE, 480, 3)
+    try:
+        store.put(old)
+        store.flush()
+
+        def fail(*args):
+            raise OSError("disk full")
+
+        with monkeypatch.context() as patch:
+            patch.setattr("kodikdown.gui.media_store.os.replace", fail)
+            store.remove({old.id}, set())
+            store.put(first)
+            with pytest.raises(OSError):
+                store.flush()
+
+        store.put(second)
+        store.flush()
+        restored = HistoryStore(store.path)
+        try:
+            assert [entry.id for entry in restored.entries] == [second.id, first.id]
+        finally:
+            restored.close()
+    finally:
+        store.close()
+
+
+def test_media_search_matches_series_and_voice_and_drops_hidden_selection(window):
+    entries = (
+        HistoryEntry(
+            "a", "Series 01", "Series 01", SOURCE, 720, 1, series="Космос", translation="Studio A"
+        ),
+        HistoryEntry(
+            "b", "Series 02", "Series 02", SOURCE, 480, 2, series="Космос", translation="Studio B"
+        ),
+    )
+    window.history_page.set_history(entries, {}, set())
+    window.library_page.set_files(
+        tuple(MediaFile(e.id, e.title, 16, e.created, e.series, e.translation) for e in entries)
+    )
+
+    for page in (window.history_page, window.library_page):
+        group = page.table.topLevelItem(0)
+        assert not group.isExpanded()
+        group.child(0).setSelected(True)
+        page.search.setText(f"{entries[0].series.upper()} studio B")
+        group = page.table.topLevelItem(0)
+        assert group.isExpanded()
+        assert group.childCount() == 1
+        assert group.child(0).text(0) == "Series 02"
+        assert not page.selected_ids()
+        assert not page.delete_button.isEnabled()
+        page.search.setText("пусто")
+        assert page.empty.text() == t("media_no_matches")
+        page.search.clear()
+        assert not page.table.topLevelItem(0).isExpanded()
 
 
 def test_separate_windows_keep_each_others_history(tmp_path):

@@ -80,7 +80,7 @@ _CATALOG: dict[str, Translations] = {
         "save": "Save",
         "close": "Close",
         "settings_saved": "Settings saved",
-        "quit_with_downloads": "There are {count} unfinished downloads. Quit and cancel them?",
+        "quit_with_downloads": "{count} unfinished downloads will stay in the queue. Quit?",
         "folder_missing": "Folder does not exist",
         "folder_not_created": "Could not create the folder: {detail}",
         "folder_open_failed": "Could not open the folder: {detail}",
@@ -175,7 +175,7 @@ _CATALOG: dict[str, Translations] = {
         "save": "Сохранить",
         "close": "Закрыть",
         "settings_saved": "Настройки сохранены",
-        "quit_with_downloads": "Осталось незавершённых загрузок: {count}. Выйти и отменить их?",
+        "quit_with_downloads": "В очереди сохранится незавершённых загрузок: {count}. Выйти?",
         "folder_missing": "Папка не существует",
         "folder_not_created": "Не удалось создать папку: {detail}",
         "folder_open_failed": "Не удалось открыть папку: {detail}",
@@ -235,7 +235,9 @@ _CATALOG["en"].update(
         "history_empty": (
             "Your downloads will appear here. History is kept after you close the app."
         ),
-        "library_empty": "No videos in the selected download folder yet.",
+        "library_empty": "No downloaded videos yet.",
+        "media_search": "Search by title, series, or voice-over",
+        "media_no_matches": "No videos match your search.",
         "video_count": "Videos: {count}",
         "history_queued": "Queued",
         "history_downloading": "Downloading",
@@ -307,7 +309,9 @@ _CATALOG["ru"].update(
         "history_empty": (
             "Здесь появятся ваши загрузки. История сохраняется после закрытия приложения."
         ),
-        "library_empty": "В выбранной папке загрузок пока нет видео.",
+        "library_empty": "Скачанных видео пока нет.",
+        "media_search": "Поиск по названию, сериалу или озвучке",
+        "media_no_matches": "По этому запросу ничего не найдено.",
         "video_count": "Видео: {count}",
         "history_queued": "В очереди",
         "history_downloading": "Загрузка",
@@ -356,6 +360,25 @@ _CATALOG["en"].update(
         "remove_downloads_confirm": (
             "Remove the selected download records ({count})? Video files will be kept."
         ),
+        "queue_actions": "Queue",
+        "history_paused": "Paused",
+        "pause_all": "Pause all",
+        "resume_all": "Resume all",
+        "retry_failed": "Retry failed downloads",
+        "pause_download": "Pause",
+        "resume_download": "Resume",
+        "prioritize_download": "Move to the front",
+        "favorites": "Favorites",
+        "favorites_empty": "No favorite series yet",
+        "save_favorite": "Save to favorites",
+        "favorite_saved": "Series saved to favorites",
+        "favorite_source_missing": "This player or voice-over is unavailable. Choose another.",
+        "external_player": "Open externally",
+        "player_fullscreen": "Full screen",
+        "player_position": "Playback position",
+        "player_speed": "Playback speed",
+        "player_exit_fullscreen": "Exit full screen",
+        "player_error": "Could not play this file. Try opening it in an external player.",
     }
 )
 _CATALOG["ru"].update(
@@ -367,6 +390,25 @@ _CATALOG["ru"].update(
         "remove_downloads_confirm": (
             "Убрать записи выбранных загрузок ({count})? Видео останутся на диске."
         ),
+        "queue_actions": "Очередь",
+        "history_paused": "На паузе",
+        "pause_all": "Приостановить все",
+        "resume_all": "Продолжить все",
+        "retry_failed": "Повторить неудачные",
+        "pause_download": "Пауза",
+        "resume_download": "Продолжить",
+        "prioritize_download": "В начало очереди",
+        "favorites": "Избранное",
+        "favorites_empty": "Пока нет избранных сериалов",
+        "save_favorite": "В избранное",
+        "favorite_saved": "Сериал сохранён в избранном",
+        "favorite_source_missing": "Этот плеер или озвучка недоступны. Выберите другой вариант.",
+        "external_player": "Открыть во внешнем плеере",
+        "player_fullscreen": "На весь экран",
+        "player_position": "Позиция воспроизведения",
+        "player_speed": "Скорость воспроизведения",
+        "player_exit_fullscreen": "Выйти из полноэкранного режима",
+        "player_error": "Не удалось воспроизвести файл. Попробуйте открыть его во внешнем плеере.",
     }
 )
 

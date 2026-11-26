@@ -360,6 +360,9 @@ class DownloadRow(QFrame):
     folder_requested = Signal(str)
     remove_requested = Signal(str)
     selection_requested = Signal(str)
+    pause_requested = Signal(str)
+    resume_requested = Signal(str)
+    priority_requested = Signal(str)
 
     def __init__(
         self,
@@ -410,6 +413,11 @@ class DownloadRow(QFrame):
         top.addWidget(self.title_label, 1)
         top.addWidget(self.status_icon)
         top.addWidget(self.badge)
+        self.actions_button = QPushButton("…")
+        self.actions_button.setObjectName("icon")
+        self.actions_button.setFixedSize(QSize(28, 28))
+        self.actions_button.clicked.connect(self._queue_menu)
+        top.addWidget(self.actions_button)
         top.addWidget(self.cancel_button)
 
         self.bar = ProgressBar()
@@ -441,6 +449,8 @@ class DownloadRow(QFrame):
         self._palette = palette
         self.cancel_button.setIcon(icon("close", palette.text_muted, 16))
         self.cancel_button.setToolTip(t("remove") if self._terminal else t("cancel"))
+        self.actions_button.setToolTip(t("queue_actions"))
+        self.actions_button.setAccessibleName(t("queue_actions"))
         self.open_button.setText(t("open_file"))
         self.open_button.setIcon(icon("play", palette.accent, 14))
         self.folder_button.setText(t("open_folder"))
@@ -489,6 +499,7 @@ class DownloadRow(QFrame):
         if snapshot.source != "monitor":
             self._assembling = snapshot.stage in {"processing", "finished"}
         self.cancel_button.setVisible(not self._assembling)
+        self.actions_button.setVisible(not self._assembling)
         if self._assembling:
             self.bar.set_busy()
             self.detail.setText(t("stage_processing"))
@@ -531,6 +542,7 @@ class DownloadRow(QFrame):
         self.detail.setText(t("saved_to", path=path))
         self.detail.setProperty("state", "success")
         self._finish()
+        self.actions_button.hide()
         self.status_icon.setPixmap(icon("check", self._palette.success, 16).pixmap(16, 16))
         self.status_icon.show()
         FadeMixin.fade_in(self.status_icon, duration=220)
@@ -547,6 +559,7 @@ class DownloadRow(QFrame):
         self.detail.setProperty("state", "")
         self.bar.reset()
         self._finish()
+        self.actions_button.hide()
         self.status_icon.setPixmap(icon("close", self._palette.text_muted, 16).pixmap(16, 16))
         self.status_icon.show()
         self._restyle()
@@ -559,6 +572,7 @@ class DownloadRow(QFrame):
         self.detail.setProperty("state", "error")
         self.bar.reset()
         self._finish()
+        self.actions_button.show()
         self.status_icon.setPixmap(icon("warning", self._palette.danger, 16).pixmap(16, 16))
         self.status_icon.show()
         FadeMixin.fade_in(self.status_icon, duration=220)
@@ -581,6 +595,42 @@ class DownloadRow(QFrame):
     def mark_cancelling(self) -> None:
         self._stage = "cancelling"
         self.detail.setText(t("cancelling"))
+        self.actions_button.hide()
+
+    def mark_paused(self) -> None:
+        self._stage = "history_paused"
+        self._last_snapshot = None
+        self.bar.reset()
+        self.detail.setText(t(self._stage))
+        self.actions_button.show()
+
+    def reset_for_queue(self) -> None:
+        self._terminal = self._assembling = False
+        self._outcome = ""
+        self._last_snapshot = None
+        self.setProperty("state", "active")
+        self.setProperty("selected", False)
+        self.setToolTip("")
+        self.status_icon.hide()
+        self.detail.setProperty("state", "")
+        self.cancel_button.setToolTip(t("cancel"))
+        self.mark_queued()
+        self._restyle()
+
+    def _queue_menu(self) -> None:
+        menu = QMenu(self)
+        if self._outcome == "failed":
+            menu.addAction(t("download_again"), lambda: self.resume_requested.emit(self.job_id))
+        elif self._stage == "history_paused":
+            menu.addAction(t("resume_download"), lambda: self.resume_requested.emit(self.job_id))
+        else:
+            menu.addAction(t("pause_download"), lambda: self.pause_requested.emit(self.job_id))
+            if self._stage in ("starting", "queued"):
+                menu.addAction(
+                    t("prioritize_download"), lambda: self.priority_requested.emit(self.job_id)
+                )
+        menu.exec(self.actions_button.mapToGlobal(self.actions_button.rect().bottomLeft()))
+        menu.deleteLater()
 
     def _finish(self) -> None:
         self._terminal = True

@@ -43,6 +43,7 @@ def _brand(name: str, *, player: bool = False) -> QIcon:
 
 class SeriesPicker(QFrame):
     download_requested = Signal()
+    favorite_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -63,7 +64,13 @@ class SeriesPicker(QFrame):
         self.info_toggle.setCheckable(True)
         self.info_toggle.setChecked(True)
         self.info_toggle.toggled.connect(self._toggle_info)
-        layout.addWidget(self.info_toggle, alignment=Qt.AlignmentFlag.AlignLeft)
+        shortcuts = QHBoxLayout()
+        shortcuts.addWidget(self.info_toggle)
+        self.favorite = QPushButton()
+        self.favorite.clicked.connect(self.favorite_requested.emit)
+        shortcuts.addWidget(self.favorite)
+        shortcuts.addStretch(1)
+        layout.addLayout(shortcuts)
         self.info = QFrame()
         info = QHBoxLayout(self.info)
         info.setContentsMargins(0, 0, 0, 0)
@@ -135,6 +142,7 @@ class SeriesPicker(QFrame):
         self.hide()
 
     def retranslate(self) -> None:
+        self.favorite.setText(t("save_favorite"))
         for label, key in zip(self.labels, ("player", "translation", "quality"), strict=True):
             label.setText(t(key))
         self.episode_label.setText(t("episodes"))
@@ -184,6 +192,10 @@ class SeriesPicker(QFrame):
         self._refresh_unavailable()
         self.show()
 
+    def clear(self) -> None:
+        self.series = None
+        self.hide()
+
     def _toggle_info(self, expanded: bool) -> None:
         self.info_toggle.setText(t("hide_details" if expanded else "show_details"))
         self.info.setVisible(
@@ -224,6 +236,25 @@ class SeriesPicker(QFrame):
 
     def selected(self, choice: Choice) -> list[Episode]:
         return [episode for episode in choice.episodes if episode.number in self._checked]
+
+    def select_source(self, player: str, voice: str) -> bool:
+        index = self.player.findText(player)
+        if index < 0:
+            return False
+        self.player.setCurrentIndex(index)
+        index = self.voice.findData(voice)
+        if index < 0:
+            return False
+        self.voice.setCurrentIndex(index)
+        return True
+
+    def select_episodes(self, numbers: set[str]) -> None:
+        self.episodes.blockSignals(True)
+        for index in range(self.episodes.count()):
+            item = self.episodes.item(index)
+            item.setSelected(item.text() in numbers)
+        self.episodes.blockSignals(False)
+        self._on_episodes_changed()
 
     def _refresh_episodes(self) -> None:
         choice = self.choice()

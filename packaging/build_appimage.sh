@@ -15,11 +15,12 @@ export TMPDIR="$stage"
 
 fetch() {
     local url=$1 digest=$2 target=$3
-    if ! printf '%s  %s\n' "$digest" "$target" | sha256sum --check --status; then
-        curl -fsSL --retry 3 "$url" -o "$stage/download"
-        printf '%s  %s\n' "$digest" "$stage/download" | sha256sum --check --status
-        mv -- "$stage/download" "$target"
+    if [[ -f "$target" ]] && printf '%s  %s\n' "$digest" "$target" | sha256sum --check --status; then
+        return
     fi
+    curl -fsSL --connect-timeout 15 --max-time 120 --retry 3 "$url" -o "$stage/download"
+    printf '%s  %s\n' "$digest" "$stage/download" | sha256sum --check
+    mv -- "$stage/download" "$target"
 }
 
 tool="$work/appimagetool"

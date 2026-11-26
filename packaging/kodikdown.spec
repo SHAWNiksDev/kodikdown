@@ -26,8 +26,6 @@ EXCLUDED_QT = [
     "PySide6.QtDesigner",
     "PySide6.QtGraphs",
     "PySide6.QtHelp",
-    "PySide6.QtMultimedia",
-    "PySide6.QtMultimediaWidgets",
     "PySide6.QtNfc",
     "PySide6.QtPdf",
     "PySide6.QtPdfWidgets",

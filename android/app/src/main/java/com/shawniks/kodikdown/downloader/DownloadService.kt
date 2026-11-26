@@ -61,7 +61,7 @@ class DownloadService : Service() {
         wakeLock?.acquire(10 * 60 * 1000L)
         scope.launch {
             DownloadManager.items.collect { items ->
-                val stage = items.filter { !it.isTerminal }.joinToString { "${it.id}:${it.status}:${it.waitingForNetwork}" }
+                val stage = items.filter { it.isWorking }.joinToString { "${it.id}:${it.status}:${it.waitingForNetwork}" }
                 if (stage != lastStage) {
                     lastStage = stage
                     render(items)
@@ -72,19 +72,19 @@ class DownloadService : Service() {
             while (isActive) {
                 delay(1000)
                 val items = DownloadManager.items.value
-                if (items.any { !it.isTerminal } && wakeLock?.isHeld == false) wakeLock?.acquire(10 * 60 * 1000L)
+                if (items.any { it.isWorking } && wakeLock?.isHeld == false) wakeLock?.acquire(10 * 60 * 1000L)
                 render(items)
             }
         }
     }
 
     private fun render(items: List<DownloadItem>) {
-        val active = items.filter { !it.isTerminal }
+        val active = items.filter { it.isWorking }
         if (active.isEmpty()) {
             if (stopJob?.isActive != true) {
                 stopJob = scope.launch {
                     delay(750)
-                    if (DownloadManager.items.value.none { !it.isTerminal }) stopSelfResult(startId)
+                    if (DownloadManager.items.value.none { it.isWorking }) stopSelfResult(startId)
                 }
             }
             return

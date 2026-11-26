@@ -158,4 +158,24 @@
     <string name="catalog_empty">No downloadable episodes on this page</string>
     <string name="catalog_link_hint">Paste an anime page or player link</string>
     <string name="all_series_folders">All series folders</string>
+    <string name="queue_actions">Queue</string>
+    <string name="download_paused">Paused</string>
+    <string name="pause_all">Pause all</string>
+    <string name="resume_all">Resume all</string>
+    <string name="retry_failed">Retry failed downloads</string>
+    <string name="pause_download">Pause</string>
+    <string name="resume_download">Resume</string>
+    <string name="prioritize_download">Move to the front</string>
+    <string name="favorites">Favorites</string>
+    <string name="favorites_empty">No favorite series yet</string>
+    <string name="save_favorite">Save to favorites</string>
+    <string name="favorite_saved">Saved to favorites</string>
+    <string name="favorite_source_missing">This player or voice-over is unavailable. Choose another.</string>
+    <string name="player_fullscreen">Full screen</string>
+    <string name="player_exit_fullscreen">Exit full screen</string>
+    <string name="player_external">Open externally</string>
+    <string name="player_error">Could not play this video. Try opening it in an external player.</string>
+    <string name="player_speed">Playback speed</string>
+    <string name="player_position">Playback position</string>
+    <string name="player_time" translatable="false">%1$s / %2$s</string>
 </resources>

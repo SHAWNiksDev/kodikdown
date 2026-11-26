@@ -10,7 +10,7 @@ from decimal import Decimal
 from html.parser import HTMLParser
 from itertools import pairwise
 from typing import Any
-from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 from anime_dl_core import CvhPlayer, extract_async, supports
@@ -508,7 +508,7 @@ class MediaClient:
         kind = _player_kind(url) if url else None
         if kind in {"mp4", "m3u8", "mpd"}:
             path = urlsplit(url).path
-            name = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+            name = unquote(path.rsplit("/", 1)[-1].rsplit(".", 1)[0])
             return ResolvedVideo(name or None, (StreamVariant(0, url, kind),))
         if kind not in WEB_PLAYERS:
             return await self.kodik.resolve(raw, translation)

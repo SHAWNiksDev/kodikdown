@@ -58,7 +58,7 @@ internal class SettingsTab(
     }
 
     fun transfersLocked(): Boolean =
-        isResolving() || DownloadManager.items.value.any { !it.isTerminal }
+        isResolving() || DownloadManager.items.value.any { it.isWorking }
 
     fun updateEnabled() {
         val unlocked = !transfersLocked()

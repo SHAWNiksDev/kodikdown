@@ -6,6 +6,15 @@ import respx
 from kodikdown.sources import MediaClient, Series
 
 
+async def test_direct_video_decodes_title_without_changing_the_stream_url() -> None:
+    url = "https://cdn.example/Episode%202.MP4?token=a%2Bb"
+    async with MediaClient() as client:
+        video = await client.resolve_player(url)
+
+    assert video.title == "Episode 2"
+    assert video.best.url == url
+
+
 @pytest.mark.parametrize(
     "player_tag",
     [

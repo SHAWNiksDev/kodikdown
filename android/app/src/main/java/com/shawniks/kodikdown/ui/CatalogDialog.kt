@@ -17,7 +17,9 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.shawniks.kodikdown.R
+import com.shawniks.kodikdown.data.FavoriteSeries
 import com.shawniks.kodikdown.kodik.Catalog
+import com.shawniks.kodikdown.kodik.CatalogClient
 import com.shawniks.kodikdown.kodik.CatalogChoice
 import com.shawniks.kodikdown.kodik.CatalogEpisode
 
@@ -27,6 +29,10 @@ class CatalogDialog(
     private val poster: ByteArray?,
     private val defaultQuality: Int?,
     private val groupSeries: Boolean,
+    private val preferMp4: Boolean,
+    private val favorite: FavoriteSeries?,
+    private val savedEpisodes: Set<String>,
+    private val saveFavorite: (FavoriteSeries) -> Unit,
     private val enqueue: (CatalogChoice, List<CatalogEpisode>, Int, Boolean) -> Unit,
 ) {
     fun show() {
@@ -72,6 +78,8 @@ class CatalogDialog(
             isChecked = groupSeries
         }
         content.addView(group)
+        val favoriteButton = Button(context).apply { setText(R.string.save_favorite) }
+        content.addView(favoriteButton)
         val count = TextView(context).apply { setPadding(0, dp(8), 0, 0) }
         content.addView(count)
         val selectAll = Button(context)
@@ -83,6 +91,9 @@ class CatalogDialog(
         var choices = emptyList<CatalogChoice>()
         var choice: CatalogChoice? = null
         val selected = linkedSetOf<String>()
+        val favoriteChoice = favorite?.let { saved ->
+            catalog.choices.firstOrNull { it.player == saved.player && it.voice == saved.voice }
+        }
         val dialog = MaterialAlertDialogBuilder(context).setTitle(catalog.title).setView(scroll)
             .setNegativeButton(AndroidR.string.cancel, null)
             .setPositiveButton(R.string.download, null)
@@ -97,9 +108,17 @@ class CatalogDialog(
         }
 
         fun showEpisodes(index: Int) {
-            choice = choices.getOrNull(index)
+            val next = choices.getOrNull(index)
+            if (next != choice) {
+                selected.clear()
+                if (next == favoriteChoice && next != null) {
+                    selected.addAll(next.episodes.filterNot { it.url in savedEpisodes }.map { it.number })
+                } else {
+                    next?.episodes?.firstOrNull()?.let { selected.add(it.number) }
+                }
+            }
+            choice = next
             val entries = choice?.episodes.orEmpty()
-            if (entries.none { it.number in selected }) entries.firstOrNull()?.let { selected.add(it.number) }
             episodes.removeAllViews()
             entries.forEach { episode ->
                 episodes.addView(CheckBox(context).apply {
@@ -118,13 +137,19 @@ class CatalogDialog(
             val oldVoice = choice?.voice
             choices = catalog.choices.filter { it.player == players.getOrNull(index) }
             voice.items(choices.map { it.voice.ifBlank { "—" } })
-            val next = choices.indexOfFirst { it.voice == oldVoice }.coerceAtLeast(0)
+            val next = choices.indexOfFirst { it.voice == (oldVoice ?: favorite?.voice) }.coerceAtLeast(0)
             voice.setSelection(next)
             showEpisodes(next)
         }
 
         player.onPick(::showVoices)
         voice.onPick(::showEpisodes)
+        favoriteButton.setOnClickListener {
+            val current = choice ?: return@setOnClickListener
+            saveFavorite(FavoriteSeries(CatalogClient.normalize(catalog.url), catalog.title,
+                current.player, current.voice, heights[quality.selectedItemPosition], group.isChecked, preferMp4))
+            favoriteButton.setText(R.string.favorite_saved)
+        }
         selectAll.setOnClickListener {
             val boxes = (0 until episodes.childCount).map { episodes.getChildAt(it) as CheckBox }
             val checked = boxes.any { !it.isChecked }
@@ -140,7 +165,12 @@ class CatalogDialog(
                 dialog.dismiss()
             }
         }
-        showVoices(0)
+        val playerIndex = players.indexOf(favorite?.player).coerceAtLeast(0)
+        player.setSelection(playerIndex)
+        showVoices(playerIndex)
+        if (favorite != null && favoriteChoice == null) {
+            content.addView(TextView(context).apply { setText(R.string.favorite_source_missing) }, 0)
+        }
         dialog.show()
     }
 

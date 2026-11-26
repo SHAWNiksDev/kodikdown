@@ -102,8 +102,9 @@ def download(
         bool, typer.Option("--print-url", help="Print the direct manifest URL and exit.")
     ] = False,
     as_mp4: Annotated[
-        bool, typer.Option("--mp4", help="Prefer a plain MP4 file over the HLS stream.")
-    ] = False,
+        bool | None,
+        typer.Option("--mp4/--no-mp4", help="Override the saved preference for plain MP4 files."),
+    ] = None,
     filename: Annotated[
         str | None,
         typer.Option(
@@ -170,16 +171,25 @@ def download(
             typer.echo(f"{index}. {item.title}")
         return
 
-    variant = resolved.pick(quality)
-    stream_url = variant.download_url(as_mp4)
+    preferred_quality = quality
+    if preferred_quality is None and settings.default_quality != "ask":
+        preferred_quality = int(settings.default_quality)
+    prefer_mp4 = settings.prefer_mp4 if as_mp4 is None else as_mp4
+    variant = resolved.pick(preferred_quality)
+    stream_url = variant.download_url(prefer_mp4)
     if print_url:
         typer.echo(stream_url)
         return
 
-    if quality is not None and variant.quality and variant.quality != quality:
+    if preferred_quality is not None and variant.quality and variant.quality != preferred_quality:
         available = ", ".join(f"{v.quality}p" for v in resolved.variants)
         typer.echo(
-            t("cli_quality_fallback", wanted=quality, picked=variant.quality, list=available)
+            t(
+                "cli_quality_fallback",
+                wanted=preferred_quality,
+                picked=variant.quality,
+                list=available,
+            )
         )
 
     try:
@@ -224,11 +234,11 @@ def download(
         listener=_cli_progress,
         concurrent_fragments=max(8, settings.concurrent_downloads * 4),
         filename=title,
-        fallback_sources=fallback_sources_for(resolved, variant.quality, as_mp4),
+        fallback_sources=fallback_sources_for(resolved, variant.quality, prefer_mp4),
     )
 
     try:
-        path = downloader.download_blocking(stream_url, title, variant.download_referer(as_mp4))
+        path = downloader.download_blocking(stream_url, title, variant.download_referer(prefer_mp4))
     except (KeyboardInterrupt, DownloadCancelled):
         downloader.cancel()
         clear_progress()

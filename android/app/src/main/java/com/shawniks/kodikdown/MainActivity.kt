@@ -2,8 +2,6 @@ package com.shawniks.kodikdown
 
 import android.Manifest
 import android.R as AndroidR
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -41,6 +39,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.shawniks.kodikdown.data.DownloadStatus
+import com.shawniks.kodikdown.data.FavoriteSeries
+import com.shawniks.kodikdown.data.Favorites
 import com.shawniks.kodikdown.data.HistoryItem
 import com.shawniks.kodikdown.data.HistoryManager
 import com.shawniks.kodikdown.data.LibraryManager
@@ -57,6 +57,7 @@ import com.shawniks.kodikdown.ui.AnimationExtensions.popBounce
 import com.shawniks.kodikdown.ui.CatalogDialog
 import com.shawniks.kodikdown.ui.DownloadLookup
 import com.shawniks.kodikdown.ui.MediaTabs
+import com.shawniks.kodikdown.ui.PlayerActivity
 import com.shawniks.kodikdown.ui.SettingsTab
 import com.shawniks.kodikdown.ui.ToastManager
 import com.shawniks.kodikdown.util.FileUtils
@@ -86,6 +87,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var renderedConfiguration: Configuration
 
     private var resolveJob: Job? = null
+    private var resolvingUrl: String? = null
     private var isResolving = false
     private var resolveGeneration = 0
     private var fileChecks: Job? = null
@@ -172,7 +174,7 @@ class MainActivity : AppCompatActivity() {
         settingsTab = SettingsTab(this, prefs, { binding }, { isResolving },
             { folderPickerLauncher.launch(null) }, ::triggerHaptic, ::getColorFromAttr)
         mediaTabs = MediaTabs(this, prefs, { binding }, ::triggerHaptic,
-            settingsTab::updateEnabled, ::requestHistoryRetry, { writeClipboard(it) })
+            settingsTab::updateEnabled, ::requestHistoryRetry, { writeClipboard(it) }, ::canResumeDownloads)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, R.anim.no_anim, R.anim.no_anim)
@@ -214,6 +216,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!prefs.wifiOnly || isWifiConnected()) DownloadManager.resumePending(this)
         LibraryManager.refresh(this, prefs.downloadDir)
         fileChecks?.cancel()
         refreshVisibleFiles()
@@ -264,7 +267,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val hasActive = DownloadManager.items.value.any { !it.isTerminal }
+        val hasActive = DownloadManager.items.value.any { it.isWorking }
         if (hasActive) {
             MaterialAlertDialogBuilder(this)
                 .setMessage(R.string.quit_with_downloads)
@@ -318,6 +321,9 @@ class MainActivity : AppCompatActivity() {
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     binding.btnClearUrl.visibility =
                         if (s.isNullOrEmpty()) View.GONE else View.VISIBLE
+                    val url = s.toString().trim()
+                    if (resolvingUrl?.let { it != url } == true) cancelResolving()
+                    if (lookup.resolved != null && url != lookup.resolvedUrl) hideResultCard()
                 }
 
                 override fun afterTextChanged(s: Editable?) {}
@@ -326,7 +332,6 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnClearUrl.setOnClickListener {
             binding.etUrl.setText("")
-            hideResultCard()
             binding.tvStatus.text = getString(R.string.hint)
         }
 
@@ -338,6 +343,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnPaste.setOnClickListener { handlePaste() }
+        binding.btnFavorites.setOnClickListener { showFavorites() }
         binding.btnFind.setOnClickListener { onFindClicked() }
 
         binding.etFileName.addTextChangedListener(
@@ -419,6 +425,12 @@ class MainActivity : AppCompatActivity() {
         val caps = cm.getNetworkCapabilities(activeNet) ?: return false
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
             caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
+    private fun canResumeDownloads(): Boolean {
+        if (!prefs.wifiOnly || isWifiConnected()) return true
+        ToastManager.show(binding.toastContainer, getString(R.string.wifi_only_warning), isError = true)
+        return false
     }
 
     override fun onDestroy() {
@@ -596,9 +608,10 @@ class MainActivity : AppCompatActivity() {
             }
         if (!text.isNullOrEmpty()) {
             val cleaned = extractUrlFromText(text)
+            if (cleaned.isEmpty()) return
             binding.etUrl.setText(cleaned)
             binding.etUrl.setSelection(cleaned.length)
-            onFindClicked()
+            startResolving(cleaned)
         }
     }
 
@@ -714,9 +727,36 @@ class MainActivity : AppCompatActivity() {
         startResolving(url)
     }
 
-    private fun startResolving(rawUrl: String, translation: Translation? = null) {
+    private fun showFavorites() {
+        val favorites = Favorites(this)
+        val entries = favorites.entries()
+        if (entries.isEmpty()) {
+            ToastManager.show(binding.toastContainer, getString(R.string.favorites_empty))
+            return
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.favorites)
+            .setItems(entries.map { it.title }.toTypedArray()) { _, index ->
+                val item = entries[index]
+                MaterialAlertDialogBuilder(this)
+                    .setTitle(item.title)
+                    .setPositiveButton(R.string.resolve) { _, _ ->
+                        binding.etUrl.setText(item.url)
+                        binding.etUrl.setSelection(item.url.length)
+                        startResolving(item.url, favorite = item)
+                    }
+                    .setNeutralButton(R.string.delete) { _, _ -> favorites.remove(item) }
+                    .setNegativeButton(R.string.cancel, null)
+                    .show()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun startResolving(rawUrl: String, translation: Translation? = null, favorite: FavoriteSeries? = null) {
         val generation = ++resolveGeneration
         resolveJob?.cancel()
+        resolvingUrl = rawUrl
         isResolving = true
         settingsTab.updateEnabled()
         binding.btnDownload.isEnabled = false
@@ -737,7 +777,19 @@ class MainActivity : AppCompatActivity() {
                         hideResultCard()
                         binding.tvStatus.text = catalog.title
                         val episodeResolver = lookup
-                        CatalogDialog(this@MainActivity, catalog, cover, prefs.defaultQuality.toIntOrNull(), prefs.groupSeries) {
+                        val knownEpisodes = buildSet {
+                            addAll(LibraryManager.items.value.mapNotNull { it.retryInput })
+                            addAll(HistoryManager.items.value.filter {
+                                it.status == DownloadStatus.FINISHED && MediaFiles.isAvailable(it.savedPath, it.contentUri)
+                            }.mapNotNull { it.retryInput })
+                            addAll(DownloadManager.items.value.filter { !it.isTerminal }.mapNotNull { it.retryInput })
+                        }
+                        val preferMp4 = favorite?.preferMp4 ?: prefs.preferMp4
+                        CatalogDialog(this@MainActivity, catalog, cover,
+                            favorite?.quality ?: prefs.defaultQuality.toIntOrNull(),
+                            favorite?.grouped ?: prefs.groupSeries, preferMp4, favorite, knownEpisodes,
+                            Favorites(this@MainActivity)::save,
+                        ) {
                             choice, episodes, quality, grouped ->
                             if (prefs.wifiOnly && !isWifiConnected()) {
                                 ToastManager.show(binding.toastContainer, getString(R.string.wifi_only_warning), isError = true)
@@ -749,7 +801,7 @@ class MainActivity : AppCompatActivity() {
                                     val name = listOf(title, choice.voice).filter { it.isNotBlank() }.joinToString(" · ")
                                     DownloadManager.enqueueDownload(
                                         context = this@MainActivity, title = name, fileName = name,
-                                        url = episode.url, quality = quality, isMp4 = prefs.preferMp4,
+                                        url = episode.url, quality = quality, isMp4 = preferMp4,
                                         downloadDir = prefs.downloadDir, translationTitle = choice.voice,
                                         sourceInput = CatalogClient.normalize(catalog.url),
                                         retryInput = episode.url, series = catalog.title.takeIf { grouped },
@@ -779,6 +831,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 } finally {
                     if (generation == resolveGeneration) {
+                        resolvingUrl = null
                         isResolving = false
                         settingsTab.updateEnabled()
                         binding.btnDownload.isEnabled = lookup.resolved != null
@@ -793,6 +846,7 @@ class MainActivity : AppCompatActivity() {
     private fun cancelResolving() {
         resolveGeneration++
         resolveJob?.cancel()
+        resolvingUrl = null
         isResolving = false
         settingsTab.updateEnabled()
         lookup.resolved?.let { populateTranslations(it) }
@@ -960,7 +1014,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onDownloadClicked() {
-        if (isResolving) return
+        if (isResolving || binding.etUrl.text.toString().trim() != lookup.resolvedUrl) return
+        val video = lookup.resolved ?: return
         val now = System.currentTimeMillis()
         if (now - lastDownloadClickTime < 800) return
         lastDownloadClickTime = now
@@ -974,9 +1029,9 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val variant = lookup.selectedVariant ?: lookup.resolved?.best ?: return
+        val variant = lookup.selectedVariant ?: video.best
         val rawName = binding.etFileName.text.toString().trim()
-        val safeName = FileUtils.safeFileName(rawName.ifEmpty { lookup.resolved?.title ?: "video" })
+        val safeName = FileUtils.safeFileName(rawName.ifEmpty { video.title })
         val preferMp4 = binding.cbDownloadMp4.isChecked
 
         val finalUrl =
@@ -993,7 +1048,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         confirmExistingDownload(safeName) {
-            startDownloadExecution(variant, safeName, finalUrl, isMp4)
+            if (lookup.resolved === video && !isResolving) {
+                startDownloadExecution(video, variant, safeName, finalUrl, isMp4)
+            }
         }
     }
 
@@ -1032,7 +1089,7 @@ class MainActivity : AppCompatActivity() {
                 .setTitle(R.string.already_downloaded_title)
                 .setMessage(getString(R.string.already_downloaded_message, safeName))
                 .setPositiveButton(R.string.play) { _, _ ->
-                    (existing.second ?: existing.first)?.let { FileUtils.openFile(this@MainActivity, it) }
+                    (existing.second ?: existing.first)?.let { PlayerActivity.open(this@MainActivity, it, safeName) }
                 }
                 .setNegativeButton(R.string.download_again) { _, _ -> proceed() }
                 .setNeutralButton(R.string.cancel, null)
@@ -1042,14 +1099,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startDownloadExecution(
+        video: ResolvedVideo,
         variant: StreamVariant,
         safeName: String,
         finalUrl: String,
         isMp4: Boolean,
     ) {
-        if (isResolving) return
-        val video = lookup.resolved ?: return
-        if (variant !in video.variants) return
         val translationTitle = lookup.selectedTranslation?.title
         val downloadDir = prefs.downloadDir
         val sourceInput = CatalogClient.normalize(lookup.resolvedUrl.orEmpty())
@@ -1074,23 +1129,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hideResultCard() {
-        if (binding.cardResult.visibility == View.VISIBLE) {
-            binding.cardResult
-                .animate()
-                .alpha(0f)
-                .translationY(-dpToPx(10).toFloat())
-                .setDuration(200)
-                .setListener(
-                    object : AnimatorListenerAdapter() {
-                        override fun onAnimationEnd(animation: Animator) {
-                            binding.cardResult.visibility = View.GONE
-                        }
-                    }
-                )
-                .start()
-        }
+        binding.cardResult.animate().cancel()
+        binding.cardResult.visibility = View.GONE
+        binding.btnDownload.isEnabled = false
         lookup.resolved = null
+        lookup.resolvedUrl = ""
         lookup.selectedVariant = null
+        lookup.selectedTranslation = null
         lookup.nameEdited = false
     }
 

@@ -45,5 +45,6 @@ class KodikApp : Application() {
         applyTheme(prefs.theme)
         updateAppLocale(prefs.language)
         DownloadManager.maxConcurrentDownloads = prefs.concurrentDownloads
+        DownloadManager.restore(this)
     }
 }

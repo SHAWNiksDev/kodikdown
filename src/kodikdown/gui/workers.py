@@ -150,6 +150,29 @@ class EpisodeDownload:
             return await client.resolve_episode(self.title, self.choice, self.episode)
 
 
+@dataclass(frozen=True)
+class SavedDownload:
+    link: str
+    voice: str
+    quality: int | None
+    prefer_mp4: bool
+
+    async def resolve(self) -> ResolvedVideo:
+        async with MediaClient() as client:
+            resolved = await client.lookup(self.link, include_poster=False)
+            if isinstance(resolved, Series):
+                raise NoStreamsError()
+            if resolved.translations and self.voice:
+                track = next(
+                    (item for item in resolved.translations if item.title == self.voice), None
+                )
+                if track is None:
+                    raise NoStreamsError()
+                if track != resolved.translation:
+                    return await client.resolve_player(self.link, track)
+            return resolved
+
+
 class DownloadTask(QRunnable):
     """Runs one blocking yt-dlp transfer inside the Qt thread pool.
 
@@ -169,7 +192,8 @@ class DownloadTask(QRunnable):
         socket_timeout: float = 15.0,
         signals: DownloadSignals | None = None,
         fallback_sources: tuple[DownloadSource, ...] = (),
-        episode: EpisodeDownload | None = None,
+        episode: EpisodeDownload | SavedDownload | None = None,
+        resume_id: str | None = None,
     ) -> None:
         super().__init__()
         self.job_id = job_id
@@ -180,6 +204,7 @@ class DownloadTask(QRunnable):
         self._socket_timeout = socket_timeout
         self._cancel_event = threading.Event()
         self._episode = episode
+        self._resume_id = resume_id
         self._lookup_error = t("episode_unavailable")
         self._downloader = self._make_downloader(fallback_sources)
         self._title = title
@@ -194,9 +219,10 @@ class DownloadTask(QRunnable):
             concurrent_fragments=self._fragments,
             socket_timeout=self._socket_timeout,
             fallback_sources=fallbacks,
+            resume_id=self._resume_id,
         )
 
-    async def _resolve_episode(self, episode: EpisodeDownload) -> ResolvedVideo:
+    async def _resolve_episode(self, episode: EpisodeDownload | SavedDownload) -> ResolvedVideo:
         lookup = asyncio.create_task(episode.resolve())
         try:
             while not self._cancel_event.is_set():

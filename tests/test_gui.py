@@ -645,6 +645,8 @@ def test_anime_page_queues_selected_episodes_and_keeps_going_on_error(
         }
 
     stream = str(media_server)
+    respx.get(stream).pass_through()
+    respx.get(stream.replace("stream.m3u8", "missing.m3u8")).pass_through()
     respx.get("https://api.yani.tv/anime/42/videos").respond(
         json={
             "response": [
@@ -686,3 +688,17 @@ def test_anime_page_queues_selected_episodes_and_keeps_going_on_error(
     assert len(list((window.settings.download_dir / "Sample Series").glob("*.mp4"))) == 2
     window.url_edit.setText("https://example.org/")
     assert not picker.download.isEnabled()
+    assert picker.isHidden()
+    window.url_edit.setText(page)
+    assert not picker.isHidden()
+
+
+def test_download_refuses_the_previous_result_after_a_link_edit(window: MainWindow) -> None:
+    window.url_edit.setText(PAGE_URL)
+    window._url_in_use = PAGE_URL
+    window._on_resolved(window._request_id, _sample_video())
+    window.url_edit.setText("https://example.org/video.mp4")
+    window._on_download()
+
+    assert window.result_card.isHidden()
+    assert not window.downloads.jobs

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import contextlib
+import re
+import shutil
 import time
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QCloseEvent,
     QDesktopServices,
@@ -24,6 +28,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -38,11 +43,13 @@ from kodikdown.config import ConfigStore, Settings
 from kodikdown.downloader import (
     ProgressSnapshot,
     fallback_sources_for,
+    partial_directory,
     safe_filename,
 )
 from kodikdown.gui.appearance import AppearanceOverlay
 from kodikdown.gui.desktop import open_directory, open_path, reveal_path
 from kodikdown.gui.download_queue import DownloadJob, DownloadQueue
+from kodikdown.gui.favorites import Favorite, Favorites
 from kodikdown.gui.icons import app_icon, icon
 from kodikdown.gui.media_controller import MediaController
 from kodikdown.gui.media_page import MediaPage
@@ -67,12 +74,17 @@ from kodikdown.gui.widgets import (
 from kodikdown.gui.workers import (
     EpisodeDownload,
     ResolverWorker,
+    SavedDownload,
 )
 from kodikdown.i18n import set_language, t
 from kodikdown.kodik.errors import InvalidUrlError
 from kodikdown.kodik.models import ResolvedVideo, Translation
 from kodikdown.kodik.parser import extract_embed
+from kodikdown.output_locks import any_reserved
 from kodikdown.sources import EpisodeRequest, Series, public_source, recognized_link
+
+if TYPE_CHECKING:
+    from kodikdown.gui.player import VideoPlayer
 
 _MAX_TOASTS = 3
 _TOAST_LIFETIME_MS = 4200
@@ -86,6 +98,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.store = store
         self.settings = settings
+        self.favorites = Favorites(store.path.parent)
+        self._favorite: Favorite | None = None
+        self._player: VideoPlayer | None = None
         self._palette = palette_for(settings.theme)
 
         self.resolver = ResolverWorker(self)
@@ -93,7 +108,7 @@ class MainWindow(QMainWindow):
         self.resolver.catalog_ready.connect(self._on_catalog_ready)
         self.resolver.failed.connect(self._on_resolve_failed)
 
-        self.downloads = DownloadQueue(settings.concurrent_downloads, self)
+        self.downloads = DownloadQueue(settings.concurrent_downloads, store.path.parent, self)
         self.downloads.started.connect(self._on_job_started)
         self.downloads.progress.connect(self._on_progress)
         self.downloads.finished.connect(self._on_job_finished)
@@ -143,6 +158,7 @@ class MainWindow(QMainWindow):
         self._media_timer.setInterval(3000)
         self._media_timer.timeout.connect(self._poll_media)
         self._media_timer.start()
+        self._restore_queue()
         self._request_media_refresh()
         hints = QGuiApplication.styleHints()
         hints.colorSchemeChanged.connect(self._system_theme_changed)
@@ -181,6 +197,7 @@ class MainWindow(QMainWindow):
         body.addWidget(self.result_card)
         self.series_picker = SeriesPicker()
         self.series_picker.download_requested.connect(self._download_episodes)
+        self.series_picker.favorite_requested.connect(self._save_favorite)
         body.addWidget(self.series_picker)
         body.addWidget(self._build_downloads_header())
         body.addWidget(self._build_downloads_area(), 1)
@@ -287,6 +304,8 @@ class MainWindow(QMainWindow):
         self.paste_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.paste_button.setIcon(icon("clipboard", self._palette.text_muted, 15))
         self.paste_button.clicked.connect(self._paste)
+        self.favorites_button = QPushButton(t("favorites"))
+        self.favorites_button.clicked.connect(self._show_favorites)
 
         self.find_button = QPushButton(t("resolve"))
         self.find_button.setObjectName("primary")
@@ -297,6 +316,7 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.url_edit, 1)
         layout.addWidget(self.paste_button)
+        layout.addWidget(self.favorites_button)
         layout.addWidget(self.find_button)
         return container
 
@@ -330,6 +350,8 @@ class MainWindow(QMainWindow):
         self.clear_button.setIcon(icon("trash", self._palette.accent, 14))
         self.clear_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_button.clicked.connect(self._clear_finished)
+        self.queue_button = QPushButton(t("queue_actions"))
+        self.queue_button.clicked.connect(self._queue_actions)
 
         self.remove_selected_button = QPushButton()
         self.remove_selected_button.setObjectName("link")
@@ -338,6 +360,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.downloads_caption)
         layout.addStretch(1)
         layout.addWidget(self.remove_selected_button)
+        layout.addWidget(self.queue_button)
         layout.addWidget(self.clear_button)
         return container
 
@@ -449,6 +472,8 @@ class MainWindow(QMainWindow):
         self.result_card.open_folder_button.setText(t("open_folder"))
         self.downloads_caption.setText(t("downloads_section").upper())
         self.clear_button.setText(t("clear_finished"))
+        self.queue_button.setText(t("queue_actions"))
+        self.favorites_button.setText(t("favorites"))
         self.downloads_empty.setText(t("downloads_empty"))
         self.folder_button.setText(t("open_folder"))
         self._selection_changed()
@@ -506,6 +531,7 @@ class MainWindow(QMainWindow):
             self._cancel_resolve()
         matches = raw.strip() == self._resolved_url
         self.result_card.setVisible(matches and self._resolved is not None)
+        self.series_picker.setVisible(matches and self.series_picker.series is not None)
         self.series_picker.set_busy(self._resolving or not matches)
 
     def _translation_for(self, raw: str) -> Translation | None:
@@ -589,7 +615,7 @@ class MainWindow(QMainWindow):
             self.result_card.name_edited = False
         self._resolved_url = self._url_in_use
         self._resolved = resolved
-        self.series_picker.hide()
+        self.series_picker.clear()
         self._set_resolving(False)
         self.result_card.populate(
             resolved,
@@ -622,6 +648,75 @@ class MainWindow(QMainWindow):
             series, 1080 if quality == "ask" else int(quality), self.settings.group_series
         )
         self.set_status("")
+        favorite = self._favorite
+        if favorite is not None and favorite.url == self._url_in_use:
+            self.series_picker.group.setChecked(favorite.group)
+            self.series_picker.quality.setCurrentIndex(
+                max(0, self.series_picker.quality.findData(favorite.quality))
+            )
+            if not self.series_picker.select_source(favorite.player, favorite.voice):
+                self._toast(t("favorite_source_missing"), "warning")
+                return
+            choice = self.series_picker.choice()
+            if choice is not None:
+                saved = self._saved_episode_links() | self.downloads.active_urls
+                self.series_picker.select_episodes(
+                    {
+                        episode.number
+                        for episode in choice.episodes
+                        if EpisodeRequest(episode.number, choice.player, choice.voice).link(
+                            series.url
+                        )
+                        not in saved
+                    }
+                )
+
+    def _show_favorites(self) -> None:
+        menu = QMenu(self)
+        for item in self.favorites.entries():
+            group = menu.addMenu(item.title)
+            group.addAction(t("resolve"), partial(self._open_favorite, item))
+            group.addAction(t("remove"), partial(self._remove_favorite, item))
+        if not menu.actions():
+            menu.addAction(t("favorites_empty")).setEnabled(False)
+        menu.exec(self.favorites_button.mapToGlobal(self.favorites_button.rect().bottomLeft()))
+        menu.deleteLater()
+
+    def _open_favorite(self, favorite: Favorite) -> None:
+        self.url_edit.setText(favorite.url)
+        self._favorite = favorite
+        self._start_resolve(favorite.url, None)
+
+    def _save_favorite(self) -> None:
+        picker = self.series_picker
+        series, choice = picker.series, picker.choice()
+        if series is None or choice is None:
+            return
+        favorite = Favorite(
+            series.url,
+            series.title,
+            choice.player,
+            choice.voice,
+            int(picker.quality.currentData()),
+            picker.group.isChecked(),
+            self.settings.prefer_mp4,
+        )
+        try:
+            self.favorites.save(favorite)
+        except OSError as exc:
+            self._toast(t("settings_save_failed", detail=exc), "error")
+            return
+        self._favorite = favorite
+        self._toast(t("favorite_saved"), "success")
+
+    def _remove_favorite(self, favorite: Favorite) -> None:
+        try:
+            self.favorites.remove(favorite)
+        except OSError as exc:
+            self._toast(t("settings_save_failed", detail=exc), "error")
+            return
+        if self._favorite == favorite:
+            self._favorite = None
 
     def _on_resolve_failed(self, request_id: int, kind: str, detail: str) -> None:
         if request_id != self._request_id:
@@ -631,7 +726,7 @@ class MainWindow(QMainWindow):
         self.result_card.variants = ()
         self._set_resolving(False)
         self.result_card.hide()
-        self.series_picker.hide()
+        self.series_picker.clear()
         if kind == "network":
             self.set_status(t("network_error", detail=detail or "?"), state="error")
         elif kind == "unexpected":
@@ -640,7 +735,7 @@ class MainWindow(QMainWindow):
             self.set_status(t(kind, detail=detail), state="error")
 
     def _on_download(self, *, confirmed: bool = False, retry: HistoryEntry | None = None) -> None:
-        if self._resolving:
+        if self._resolving or self.url_edit.text().strip() != self._resolved_url:
             return
         resolved = self._resolved
         variant = self.result_card.selected_variant()
@@ -692,13 +787,15 @@ class MainWindow(QMainWindow):
         if self.url_edit.text().strip() != self._resolved_url:
             return
         quality = int(picker.quality.currentData())
-        prefer_mp4 = self.settings.prefer_mp4
+        favorite = self._favorite
+        prefer_mp4 = (
+            favorite.prefer_mp4
+            if favorite is not None and favorite.url == series.url
+            else self.settings.prefer_mp4
+        )
         group = series.title if picker.group.isChecked() else ""
         original = public_source(self._resolved_url)
-        saved = [
-            entry for entry in self.library.entries if entry.path and readable_file(entry.path)
-        ]
-        saved_sources = {entry.retry_input or entry.source_input for entry in saved}
+        saved_sources = self._saved_episode_links()
         directory = self._series_directory(group)
         queued: list[HistoryEntry] = []
         skipped = 0
@@ -745,6 +842,13 @@ class MainWindow(QMainWindow):
             message += " " + t("episodes_skipped", count=skipped)
         self._toast(message, "info" if queued else "warning")
 
+    def _saved_episode_links(self) -> set[str]:
+        return {
+            entry.retry_input or entry.source_input
+            for entry in self.library.entries
+            if entry.path and readable_file(entry.path)
+        }
+
     def _enqueue_download(
         self,
         url: str,
@@ -760,24 +864,18 @@ class MainWindow(QMainWindow):
         retry_input: str = "",
         series: str = "",
     ) -> HistoryEntry:
+        directory = self._series_directory(series).absolute()
         job = self.downloads.add(
             url,
             title,
-            self._series_directory(series),
+            directory,
             quality,
             self._palette,
             referer,
             fallback_sources_for(resolved, quality, prefer_mp4) if resolved else (),
             episode,
         )
-        row = job.row
         job_id = job.task.job_id
-        row.cancel_requested.connect(self._request_cancel_job)
-        row.remove_requested.connect(self._remove_job)
-        row.selection_requested.connect(self._toggle_download_selection)
-        row.open_requested.connect(self._open_file)
-        row.folder_requested.connect(self._reveal_file)
-        row.mark_starting()
 
         entry = HistoryEntry(
             job_id,
@@ -790,15 +888,139 @@ class MainWindow(QMainWindow):
             prefer_mp4=prefer_mp4,
             retry_input=retry_input,
             series=series,
+            queue_directory=str(directory),
+            queue_url=url,
+            queue_referer=referer,
         )
+        self._connect_job(job)
+        job.row.mark_starting()
         if episode is None:
             self.history.put(entry)
             self._render_history()
             self._update_settings_lock()
-        self._insert_row(row)
-        self.downloads.pool.start(job.task)
+        self.downloads.start(job)
         self._later(_QUEUE_HINT_MS, lambda: self._hint_queued(job_id))
         return entry
+
+    def _connect_job(self, job: DownloadJob) -> None:
+        row = job.row
+        row.cancel_requested.connect(self._request_cancel_job)
+        row.remove_requested.connect(self._remove_job)
+        row.selection_requested.connect(self._toggle_download_selection)
+        row.open_requested.connect(self._open_file)
+        row.folder_requested.connect(self._reveal_file)
+        row.pause_requested.connect(self._pause_job)
+        row.resume_requested.connect(self._resume_job)
+        row.priority_requested.connect(self._prioritize_job)
+        self._insert_row(row)
+
+    def _saved_download(self, entry: HistoryEntry) -> SavedDownload:
+        return SavedDownload(
+            entry.retry_input or entry.source_input or entry.queue_url,
+            entry.translation,
+            entry.quality or None,
+            entry.prefer_mp4,
+        )
+
+    def _restore_queue(self) -> None:
+        entries = sorted(
+            self.history.entries, key=lambda entry: (-entry.queue_priority, entry.created)
+        )
+        for entry in entries:
+            if not entry.queue_directory or entry.status not in ("paused", "interrupted", "failed"):
+                continue
+            if (
+                re.fullmatch(r"[a-f0-9]{32}", entry.id) is None
+                or not Path(entry.queue_directory).is_absolute()
+            ):
+                continue
+            try:
+                job = self.downloads.add(
+                    entry.queue_url,
+                    entry.title,
+                    Path(entry.queue_directory),
+                    entry.quality,
+                    self._palette,
+                    entry.queue_referer,
+                    (),
+                    self._saved_download(entry),
+                    job_id=entry.id,
+                    priority=max(0, min(entry.queue_priority, 2**30)),
+                )
+            except FileExistsError:
+                continue
+            except OSError as exc:
+                self._toast(t("history_save_failed", detail=exc), "error")
+                break
+            self._connect_job(job)
+            if entry.status == "paused":
+                job.status = "paused"
+                job.row.mark_paused()
+            elif entry.status == "failed":
+                job.status = "failed"
+                job.finished = True
+                job.row.mark_failed(entry.error)
+                self.downloads.settle(job, release_lock=False)
+            else:
+                job.row.mark_queued()
+                self.history.update(entry.id, status="queued")
+                self.downloads.start(job)
+        self._update_settings_lock()
+        self._render_history()
+
+    def _queue_actions(self) -> None:
+        menu = QMenu(self)
+        statuses = {job.status for job in self.downloads.jobs.values()}
+        for label, available, run in (
+            ("pause_all", bool(statuses & {"queued", "downloading"}), self._pause_all),
+            ("resume_all", "paused" in statuses, self._resume_all),
+            ("retry_failed", "failed" in statuses, self._retry_failed),
+        ):
+            menu.addAction(t(label), run).setEnabled(available)
+        menu.exec(self.queue_button.mapToGlobal(self.queue_button.rect().bottomLeft()))
+        menu.deleteLater()
+
+    def _pause_all(self) -> None:
+        jobs = sorted(self.downloads.jobs.values(), key=lambda job: job.status != "queued")
+        for job in jobs:
+            self._pause_job(job.task.job_id)
+
+    def _resume_all(self) -> None:
+        self._resume_jobs("paused")
+
+    def _retry_failed(self) -> None:
+        self._resume_jobs("failed")
+
+    def _resume_jobs(self, status: str) -> None:
+        jobs = sorted(self.downloads.jobs.values(), key=lambda job: -job.priority)
+        for job in jobs:
+            if job.status == status:
+                self._resume_job(job.task.job_id)
+
+    def _pause_job(self, identifier: str) -> None:
+        job = self.downloads.jobs.get(identifier)
+        if job is not None and job.status in ("queued", "downloading") and not job.cancelling:
+            self.history.update(identifier, status="paused")
+            self.downloads.cancel(job, pause=True)
+
+    def _resume_job(self, identifier: str) -> None:
+        job, entry = self.downloads.jobs.get(identifier), self.history.get(identifier)
+        if job is None or entry is None or job.status not in ("paused", "failed"):
+            return
+        self._selected_jobs.discard(identifier)
+        self._selection_changed()
+        job.row.reset_for_queue()
+        self.history.update(identifier, status="queued", error="")
+        self.downloads.restart(job, self._saved_download(entry))
+        self._update_settings_lock()
+        self._render_history()
+
+    def _prioritize_job(self, identifier: str) -> None:
+        job = self.downloads.jobs.get(identifier)
+        if job is not None and self.downloads.prioritize(job):
+            self.history.update(identifier, queue_priority=job.priority)
+            self.downloads_layout.removeWidget(job.row)
+            self.downloads_layout.insertWidget(1, job.row)
 
     def _insert_row(self, row: DownloadRow) -> None:
         self.downloads_empty.hide()
@@ -807,7 +1029,7 @@ class MainWindow(QMainWindow):
 
     def _hint_queued(self, job_id: str) -> None:
         job = self.downloads.jobs.get(job_id)
-        if job is not None and not job.started and not job.finished:
+        if job is not None and job.status == "queued" and not job.started and not job.cancelling:
             job.row.mark_queued()
 
     def _cancel_job(self, job_id: str) -> None:
@@ -818,6 +1040,9 @@ class MainWindow(QMainWindow):
         """
         job = self.downloads.jobs.get(job_id)
         if job is None or job.finished or job.status == "assembling":
+            return
+        if job.status == "paused":
+            self._on_job_cancelled(job_id)
             return
         self.downloads.cancel(job)
 
@@ -875,7 +1100,10 @@ class MainWindow(QMainWindow):
         job.row.mark_done(path)
         job.row.refresh_availability(available)
         job.status = "finished"
-        self.history.update(job_id, status="finished", path=path, file_size=size)
+        self.history.update(
+            job_id, status="finished", path=path, file_size=size, queue_directory=""
+        )
+        self.history.after_save(partial(self._discard_partial, job))
         if entry := self.history.get(job_id):
             self.library.put(entry)
         self._job_settled(job)
@@ -889,6 +1117,7 @@ class MainWindow(QMainWindow):
         if job is None or job.finished:
             return
         job.finished = True
+        job.cancelling = job.pausing = False
         job.row.mark_failed(detail)
         job.status = "failed"
         self.history.update(job_id, status="failed", error=detail)
@@ -898,10 +1127,20 @@ class MainWindow(QMainWindow):
         job = self.downloads.jobs.get(job_id)
         if job is None or job.finished:
             return
+        if job.pausing:
+            job.pausing = job.cancelling = False
+            job.status = "paused"
+            job.row.mark_paused()
+            if not self._closing:
+                self.history.update(job_id, status="paused")
+            self._update_settings_lock()
+            self._render_history()
+            return
         job.finished = True
         job.row.mark_cancelled()
         job.status = "cancelled"
-        self.history.update(job_id, status="cancelled")
+        self._discard_partial(job)
+        self.history.update(job_id, status="cancelled", queue_directory="")
         self._job_settled(job)
         self._toast(t("cancelled"))
 
@@ -909,9 +1148,7 @@ class MainWindow(QMainWindow):
         for job_id, job in list(self.downloads.jobs.items()):
             if not job.finished:
                 continue
-            job.row.setParent(None)
-            job.row.deleteLater()
-            del self.downloads.jobs[job_id]
+            self._remove_job(job_id)
         self._selected_jobs.intersection_update(self.downloads.jobs)
         self._selection_changed()
         self._update_empty_state()
@@ -939,7 +1176,9 @@ class MainWindow(QMainWindow):
             self._auto_paste()
 
     def _transfers_busy(self) -> bool:
-        return self._resolving or any(not job.finished for job in self.downloads.jobs.values())
+        return self._resolving or any(
+            not job.finished and job.status != "paused" for job in self.downloads.jobs.values()
+        )
 
     def _update_settings_lock(self) -> None:
         self.settings_page.set_transfer_locked(self._transfers_busy())
@@ -947,7 +1186,11 @@ class MainWindow(QMainWindow):
             self._update_tray()
 
     def _update_tray(self) -> None:
-        active = [job for job in self.downloads.jobs.values() if not job.finished]
+        active = [
+            job
+            for job in self.downloads.jobs.values()
+            if not job.finished and job.status != "paused"
+        ]
         current = next((job for job in active if job.started), None)
         self.tray.set_progress(
             len(active), current.title if current else "", current.percent if current else None
@@ -1065,7 +1308,7 @@ class MainWindow(QMainWindow):
             self._cancel_job(identifier)
 
     def _job_settled(self, job: DownloadJob) -> None:
-        self.downloads.settle(job)
+        self.downloads.settle(job, release_lock=False)
         self._update_settings_lock()
         self._render_history()
         self._request_media_refresh()
@@ -1074,12 +1317,19 @@ class MainWindow(QMainWindow):
         job = self.downloads.jobs.get(identifier)
         if job is None or not job.finished:
             return
+        if job.status == "failed":
+            self._discard_partial(job)
+            self.history.update(identifier, queue_directory="")
+        self.downloads.release(identifier)
         job.row.setParent(None)
         job.row.deleteLater()
         del self.downloads.jobs[identifier]
         self._selected_jobs.discard(identifier)
         self._selection_changed()
         self._update_empty_state()
+
+    def _discard_partial(self, job: DownloadJob) -> None:
+        shutil.rmtree(partial_directory(job.directory, job.task.job_id), ignore_errors=True)
 
     def _toggle_download_selection(self, identifier: str) -> None:
         job = self.downloads.jobs.get(identifier)
@@ -1114,7 +1364,15 @@ class MainWindow(QMainWindow):
             remove()
 
     def _active_ids(self) -> set[str]:
-        return {identifier for identifier, job in self.downloads.jobs.items() if not job.finished}
+        identifiers = {
+            identifier for identifier, job in self.downloads.jobs.items() if not job.finished
+        }
+        for entry in self.history.entries:
+            if entry.queue_directory and entry.id not in self.downloads.jobs:
+                with contextlib.suppress(OSError):
+                    if any_reserved(self.store.path.parent, (f"download-{entry.id}",)):
+                        identifiers.add(entry.id)
+        return identifiers
 
     def _render_history(self) -> None:
         self.history_page.set_history(
@@ -1315,8 +1573,24 @@ class MainWindow(QMainWindow):
             self._request_media_refresh()
             self._toast(t("file_missing"), "warning")
             return
-        if not open_path(target):
+        try:
+            from kodikdown.gui.player import VideoPlayer
+
+            if self._player is not None:
+                self._player.close()
+            player = VideoPlayer(target, self.store.path.parent, self)
+        except (ImportError, OSError):
+            if open_path(target):
+                return
             self._open_folder(target.parent)
+            return
+        self._player = player
+        player.destroyed.connect(lambda: self._release_player(player))
+        player.show()
+
+    def _release_player(self, player: VideoPlayer) -> None:
+        if self._player is player:
+            self._player = None
 
     def _reveal_file(self, path: str) -> None:
         target = Path(path)
@@ -1444,7 +1718,11 @@ class MainWindow(QMainWindow):
             event.ignore()
             self._confirmation.raise_()
             return
-        active = [job for job in self.downloads.jobs.values() if not job.finished]
+        active = [
+            job
+            for job in self.downloads.jobs.values()
+            if not job.finished and job.status != "paused"
+        ]
         if any(job.status == "assembling" for job in active):
             self._toast(t("assembly_protected"), "warning")
             event.ignore()
@@ -1453,18 +1731,23 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self._closing = True
+        if self._player is not None:
+            self._player.close()
         self.tray.close()
         self.save_indicator.finish()
         self.appearance_overlay.finish()
-        for identifier, job in self.downloads.jobs.items():
-            if not job.finished:
-                self.history.update(identifier, status="cancelled")
         for job in active:
+            job.pausing = not job.cancelling or job.pausing
             job.task.cancel()
         self.downloads.pool.clear()
         self.resolver.shutdown()
-        self.downloads.pool.waitForDone(5000)
+        stopped = self.downloads.pool.waitForDone(5000)
+        if stopped:
+            QCoreApplication.sendPostedEvents(self.downloads, int(QEvent.Type.MetaCall))
+            QCoreApplication.sendPostedEvents(self, int(QEvent.Type.MetaCall))
         self.media.close()
+        if stopped:
+            self.downloads.release_all()
         self._media_timer.stop()
         super().closeEvent(event)
         self.exit_requested.emit()

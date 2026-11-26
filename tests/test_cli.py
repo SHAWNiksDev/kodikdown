@@ -212,6 +212,39 @@ def test_download_print_url_with_mp4(
     assert url.endswith(".mp4")
 
 
+@pytest.mark.parametrize(
+    ("flags", "quality", "mp4"),
+    [
+        ([], 480, True),
+        (["--quality", "720", "--no-mp4"], 720, False),
+    ],
+)
+def test_cli_uses_saved_quality_and_format_unless_overridden(monkeypatch, flags, quality, mp4):
+    from kodikdown.config import Settings
+    from kodikdown.kodik.models import ResolvedVideo, StreamVariant
+
+    variants = tuple(
+        StreamVariant(
+            height,
+            f"https://cdn.example/{height}.m3u8",
+            direct_mp4=f"https://cdn.example/{height}.mp4",
+        )
+        for height in (720, 480)
+    )
+
+    async def resolve(*args, **kwargs):
+        return ResolvedVideo("Example", variants)
+
+    monkeypatch.setattr("kodikdown.cli._resolve", resolve)
+    monkeypatch.setattr(
+        "kodikdown.cli.ConfigStore.load", lambda _: Settings(default_quality="480", prefer_mp4=True)
+    )
+    result = CliRunner().invoke(app, ["download", PAGE_URL, "--print-url", *flags])
+    assert result.exit_code == 0
+    ext = "mp4" if mp4 else "m3u8"
+    assert result.stdout.strip() == f"https://cdn.example/{quality}.{ext}"
+
+
 def test_gui_command_passes_url(monkeypatch) -> None:
     passed_url = None
 

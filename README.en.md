@@ -22,7 +22,7 @@
 | **Linux x64** | [AppImage](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64.AppImage) · [standalone binary](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64) | Make the file executable |
 | **Android 7.0+** | [Download APK](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-android.apk) | Open the APK on your phone |
 
-On Android, install 4.6.0 over the official 4.5.0 APK to keep your history and settings. If Android reports a signature conflict with an older or test build, uninstall it before upgrading. Uninstalling clears app settings and history. Videos in shared storage stay on your device.
+On Android, install 4.7.0 over the official 4.6.0 APK to keep your history and settings. If Android reports a signature conflict with an older or test build, uninstall it before upgrading. Uninstalling clears app settings and history. Videos in shared storage stay on your device.
 
 The Linux AppImage includes Python and Qt. It targets x86_64 distributions with glibc 2.35 or newer, including Ubuntu 22.04 and Debian 12. Open a terminal in the download folder.
 
@@ -57,6 +57,10 @@ Episodes, voice-overs and resolutions vary by source. Alloha downloads are curre
 
 - Queue multiple episodes and see progress and speed. Check background downloads in the desktop tray or a silent Android notification.
 - Find episodes by series folder and play downloaded files from the library. Copy the original link or retry a download from history.
+- On desktop, search the library and history by title, series, or voice-over.
+- In 4.7.0, the queue survives app restarts. The **Queue** menu can pause, resume, and retry downloads. Use a download's menu to move it to the front. Partial downloads resume when the app can verify that the server is still serving the same file or playlist.
+- **Save to favorites** remembers the series' player, voice-over, and quality. Open a favorite to refresh the episode list and download missing episodes.
+- Downloaded videos open in the built-in player, which remembers your playback position. Use **Open externally** to watch in another player.
 - Change the theme, language, download folder and default quality in settings.
 
 <p align="center">
@@ -90,6 +94,8 @@ kodikdown-cli download --help
 Look for `-cli` in the filenames of packaged command-line builds.
 
 The CLI downloads one episode per command. Use the number from `--list-episodes` with `--source` to select a player and voice-over. By default, the CLI selects the first source that has the requested episode. Downloads with the same name use filename suffixes such as `(2)` and `(3)`.
+
+The CLI uses your saved quality and MP4 preferences. Use `--quality`, `--mp4`, or `--no-mp4` to override them for one download.
 
 </details>
 

@@ -67,6 +67,27 @@ class HlsPlaylistTest {
     }
 
     @Test(expected = IOException::class)
+    fun byteRangesCannotBeOverwrittenBeforeASegment() {
+        HlsPlaylist.parse(
+            base,
+            "#EXTM3U\n#EXT-X-BYTERANGE:10@0\n#EXT-X-BYTERANGE:5@10\nvideo.ts\n#EXT-X-ENDLIST",
+        )
+    }
+
+    @Test(expected = IOException::class)
+    fun initSegmentCannotBeAppliedToEarlierSegments() {
+        HlsPlaylist.parse(
+            base,
+            "#EXTM3U\nfirst.ts\n#EXT-X-MAP:URI=\"init.mp4\"\nsecond.m4s\n#EXT-X-ENDLIST",
+        )
+    }
+
+    @Test(expected = IOException::class)
+    fun keyframeOnlyPlaylistCannotBeSavedAsNormalVideo() {
+        HlsPlaylist.parse(base, "#EXTM3U\n#EXT-X-I-FRAMES-ONLY\nvideo.m4s\n#EXT-X-ENDLIST")
+    }
+
+    @Test(expected = IOException::class)
     fun encryptedHlsIsRejectedBeforeDownload() {
         HlsPlaylist.parse(
             base,

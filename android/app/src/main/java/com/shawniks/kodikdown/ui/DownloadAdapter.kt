@@ -20,6 +20,7 @@ class DownloadAdapter(
     private val onOpenClicked: (DownloadItem) -> Unit,
     private val onItemClick: (DownloadItem) -> Unit = {},
     private val onItemLongClick: (DownloadItem) -> Boolean = { false },
+    private val onOptionsClicked: (View, DownloadItem) -> Unit,
     private val onShareClicked: (DownloadItem) -> Unit
 ) : ListAdapter<DownloadItem, DownloadAdapter.ViewHolder>(DiffCallback) {
 
@@ -93,15 +94,22 @@ class DownloadAdapter(
             binding.btnCancel.setOnClickListener { onCancelClicked(item) }
             binding.btnOpen.setOnClickListener { onOpenClicked(item) }
             binding.btnShare.setOnClickListener { onShareClicked(item) }
+            binding.btnDownloadOptions.visibility = if (!isSelectionMode && item.status in setOf(
+                DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING, DownloadStatus.PAUSED, DownloadStatus.FAILED,
+            )) View.VISIBLE else View.GONE
+            binding.btnDownloadOptions.setOnClickListener { onOptionsClicked(it, item) }
 
             when (item.status) {
-                DownloadStatus.QUEUED -> {
+                DownloadStatus.QUEUED, DownloadStatus.PAUSED -> {
                     binding.cardLayout.setBackgroundResource(R.drawable.bg_card)
                     binding.progressBar.visibility = View.VISIBLE
-                    binding.progressBar.isIndeterminate = true
+                    binding.progressBar.isIndeterminate = item.status == DownloadStatus.QUEUED
+                    if (item.status == DownloadStatus.PAUSED) binding.progressBar.progress = (item.progress * 100).toInt()
                     binding.btnCancel.visibility = View.VISIBLE
                     binding.layoutActions.visibility = View.GONE
-                    binding.tvStatus.text = context.getString(R.string.queued)
+                    binding.tvStatus.text = context.getString(
+                        if (item.status == DownloadStatus.PAUSED) R.string.download_paused else R.string.queued,
+                    )
                     binding.tvStatus.setTextColor(getThemeColor(context, R.attr.app_text_muted))
                 }
                 DownloadStatus.DOWNLOADING -> {

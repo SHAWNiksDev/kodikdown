@@ -63,6 +63,18 @@
             android:src="@drawable/ic_close"
             app:tint="?attr/app_text_muted"
             xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+        <TextView
+            android:id="@+id/btnDownloadOptions"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/queue_actions"
+            android:gravity="center"
+            android:text="⋮"
+            android:textColor="?attr/app_text_muted"
+            android:textSize="22sp"
+            tools:ignore="HardcodedText" />
     </LinearLayout>
 
     <!-- Progress bar -->

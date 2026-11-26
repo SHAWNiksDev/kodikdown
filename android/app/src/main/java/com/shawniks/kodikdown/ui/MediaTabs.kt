@@ -6,6 +6,7 @@ import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.PopupMenu
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.ItemTouchHelper
@@ -14,6 +15,8 @@ import androidx.recyclerview.widget.SimpleItemAnimator
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.shawniks.kodikdown.R
 import com.shawniks.kodikdown.data.HistoryItem
+import com.shawniks.kodikdown.data.DownloadItem
+import com.shawniks.kodikdown.data.DownloadStatus
 import com.shawniks.kodikdown.data.HistoryLinks
 import com.shawniks.kodikdown.data.HistoryManager
 import com.shawniks.kodikdown.data.LibraryItem
@@ -36,6 +39,7 @@ internal class MediaTabs(
     private val onTransfersChanged: () -> Unit,
     private val requestHistoryRetry: (HistoryItem) -> Unit,
     private val copyLink: (String) -> Unit,
+    private val canResume: () -> Boolean,
 ) {
     private val binding get() = currentBinding()
     private val uiCollectors = mutableListOf<Job>()
@@ -92,6 +96,7 @@ internal class MediaTabs(
     }
 
     private fun initDownloadsList() {
+        binding.btnQueueActions.setOnClickListener(::showQueueOptions)
         downloadAdapter =
             DownloadAdapter(
                 onItemClick = {
@@ -108,10 +113,11 @@ internal class MediaTabs(
                 onCancelClicked = { item ->
                     requestDownloadCancellation(item.id)
                 },
+                onOptionsClicked = ::showDownloadOptions,
                 onOpenClicked = { item ->
                     val pathOrUri = item.contentUri ?: item.savedPath
                     if (!pathOrUri.isNullOrEmpty()) {
-                        FileUtils.openFile(activity, pathOrUri)
+                        PlayerActivity.open(activity, pathOrUri, item.title)
                     }
                 },
                 onShareClicked = { item ->
@@ -153,7 +159,8 @@ internal class MediaTabs(
 
         uiCollectors += activity.lifecycleScope.launch {
             DownloadManager.items.collect { items ->
-                downloadAdapter.submitList(items)
+                downloadAdapter.submitList(items.filterNot { it.isTerminal } +
+                    items.asReversed().filter { it.isTerminal })
                 cancelDownloadDialogId?.let { id ->
                     if (!DownloadManager.isActive(id) || DownloadManager.isAssembling(id)) cancelDownloadDialog?.dismiss()
                 }
@@ -180,13 +187,65 @@ internal class MediaTabs(
         }
     }
 
+    private fun showQueueOptions(anchor: View) {
+        val items = DownloadManager.items.value
+        PopupMenu(activity, anchor).apply {
+            menu.add(R.string.pause_all).apply {
+                isEnabled = items.any { it.status in setOf(DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING) }
+                setOnMenuItemClickListener { DownloadManager.pauseAll(); true }
+            }
+            menu.add(R.string.resume_all).apply {
+                isEnabled = items.any { it.status == DownloadStatus.PAUSED }
+                setOnMenuItemClickListener {
+                    if (canResume()) DownloadManager.resumeAll(activity, DownloadStatus.PAUSED)
+                    true
+                }
+            }
+            menu.add(R.string.retry_failed).apply {
+                isEnabled = items.any { it.status == DownloadStatus.FAILED }
+                setOnMenuItemClickListener {
+                    if (canResume()) DownloadManager.resumeAll(activity, DownloadStatus.FAILED)
+                    true
+                }
+            }
+            show()
+        }
+    }
+
+    private fun showDownloadOptions(anchor: View, item: DownloadItem) {
+        val popup = PopupMenu(activity, anchor)
+        when (item.status) {
+            DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING -> {
+                popup.menu.add(R.string.pause_download).setOnMenuItemClickListener {
+                    DownloadManager.pauseDownload(item.id)
+                    true
+                }
+                if (item.status == DownloadStatus.QUEUED) {
+                    popup.menu.add(R.string.prioritize_download).setOnMenuItemClickListener {
+                        DownloadManager.prioritize(item.id)
+                        true
+                    }
+                }
+            }
+            DownloadStatus.PAUSED, DownloadStatus.FAILED -> {
+                val label = if (item.status == DownloadStatus.PAUSED) R.string.resume_download else R.string.download_again
+                popup.menu.add(label).setOnMenuItemClickListener {
+                    if (canResume()) DownloadManager.resume(activity, item.id)
+                    true
+                }
+            }
+            else -> return
+        }
+        popup.show()
+    }
+
     private fun initLibrary() {
         libraryAdapter =
             LibraryAdapter(
                 onPlayClicked = { item ->
                     val uriOrPath = item.contentUri ?: item.filePath
                     if (!uriOrPath.isNullOrEmpty()) {
-                        FileUtils.openFile(activity, uriOrPath)
+                        PlayerActivity.open(activity, uriOrPath, item.title)
                     }
                 },
                 onShareClicked = { item ->
@@ -302,7 +361,7 @@ internal class MediaTabs(
                 onPlayClicked = { item ->
                     val uriOrPath = item.contentUri ?: item.savedPath
                     if (!uriOrPath.isNullOrEmpty()) {
-                        FileUtils.openFile(activity, uriOrPath)
+                        PlayerActivity.open(activity, uriOrPath, item.title)
                     } else {
                         FileUtils.openFolder(activity, prefs.downloadDir)
                     }

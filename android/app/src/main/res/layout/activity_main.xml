@@ -260,6 +260,18 @@
                     </LinearLayout>
                 </com.shawniks.kodikdown.ui.AdaptiveRow>
 
+                <TextView
+                    android:id="@+id/btnFavorites"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:layout_gravity="end"
+                    android:background="?attr/selectableItemBackground"
+                    android:gravity="center"
+                    android:paddingHorizontal="8dp"
+                    android:text="@string/favorites"
+                    android:textColor="?attr/app_accent"
+                    android:textSize="13sp" />
+
                 <!-- Status row -->
                 <TextView
                     android:id="@+id/tvStatus"
@@ -479,7 +491,7 @@
                 </LinearLayout>
 
                 <!-- Downloads Header -->
-                <LinearLayout
+                <com.shawniks.kodikdown.ui.AdaptiveRow
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
@@ -498,6 +510,17 @@
                         android:layout_width="0dp"
                         android:layout_height="1dp"
                         android:layout_weight="1" />
+
+                    <TextView
+                        android:id="@+id/btnQueueActions"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:background="?attr/selectableItemBackground"
+                        android:gravity="center"
+                        android:paddingHorizontal="8dp"
+                        android:text="@string/queue_actions"
+                        android:textColor="?attr/app_accent"
+                        android:textSize="12sp" />
 
                     <LinearLayout
                         android:id="@+id/btnClearFinished"
@@ -523,7 +546,7 @@
                             android:textSize="12sp"
                             android:textStyle="bold" />
                     </LinearLayout>
-                </LinearLayout>
+                </com.shawniks.kodikdown.ui.AdaptiveRow>
 
                 <!-- Downloads empty state -->
                 <TextView

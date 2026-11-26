@@ -1,26 +1,144 @@
 package com.shawniks.kodikdown
 
 import android.content.Intent
+import android.net.Uri
 import android.test.InstrumentationTestCase
 import android.util.Log
+import android.view.View
+import android.widget.EditText
+import android.widget.TextView
 import com.shawniks.kodikdown.data.*
 import com.shawniks.kodikdown.downloader.DownloadManager
 import com.shawniks.kodikdown.downloader.HlsDownloader
 import com.shawniks.kodikdown.kodik.CatalogClient
 import com.shawniks.kodikdown.kodik.KodikClient
+import com.shawniks.kodikdown.ui.PlayerActivity
 import com.shawniks.kodikdown.util.FileUtils
 import java.io.File
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 
 @Suppress("DEPRECATION")
 class ReliabilityDeviceTest : InstrumentationTestCase() {
+    fun testBuiltInPlayerLoadsLocalVideo() = runBlocking {
+        val context = instrumentation.targetContext
+        val clip = File(context.cacheDir, "player-test.mp4")
+        instrumentation.context.assets.open("resume.mp4").use { input ->
+            clip.outputStream().use { input.copyTo(it) }
+        }
+        val activity = instrumentation.startActivitySync(Intent(context, PlayerActivity::class.java)
+            .putExtra("source", clip.absolutePath)
+            .putExtra("title", "Test video")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try {
+            val seek = activity.findViewById<android.widget.SeekBar>(R.id.playerPosition)
+            withTimeout(10000) {
+                var enabled = false
+                while (!enabled) {
+                    instrumentation.runOnMainSync { enabled = seek.isEnabled && seek.max > 0 }
+                    if (!enabled) delay(40)
+                }
+            }
+            instrumentation.runOnMainSync {
+                activity.findViewById<View>(R.id.playerFullscreen).performClick()
+            }
+            assertEquals(View.GONE, activity.findViewById<View>(R.id.playerHeader).visibility)
+            assertEquals("Test video", activity.findViewById<TextView>(R.id.playerTitle).text.toString())
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+            instrumentation.waitForIdleSync()
+            clip.delete()
+        }
+    }
+
+    fun testPausedQueueResumesTheSameMp4(): Unit = runBlocking {
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        val clip = instrumentation.context.assets.open("resume.mp4").use { it.readBytes() }
+        val padding = ByteArray(512 * 1024)
+        ByteBuffer.wrap(padding).putInt(padding.size).put("free".toByteArray())
+        val data = clip + padding
+        val server = ServerSocket(0)
+        val firstChunk = CountDownLatch(1)
+        val resumeServer = CountDownLatch(1)
+        val ranges = CopyOnWriteArrayList<Int>()
+        thread(isDaemon = true) {
+            runCatching {
+                repeat(2) { index ->
+                    server.accept().use { socket ->
+                        val reader = socket.getInputStream().bufferedReader()
+                        var line = reader.readLine()
+                        var offset = 0
+                        while (!line.isNullOrEmpty()) {
+                            if (line.startsWith("Range:", ignoreCase = true)) {
+                                offset = line.substringAfter("bytes=").substringBefore('-').toInt()
+                            }
+                            line = reader.readLine()
+                        }
+                        ranges.add(offset)
+                        val header = if (offset > 0)
+                            "206 Partial Content\r\nContent-Range: bytes $offset-${data.size - 1}/${data.size}"
+                        else "200 OK"
+                        val output = socket.getOutputStream()
+                        output.write(("HTTP/1.1 $header\r\nETag: \"stable\"\r\n" +
+                            "Content-Length: ${data.size - offset}\r\nConnection: close\r\n\r\n").toByteArray())
+                        output.write(data, offset, if (index == 0) data.size / 2 else data.size - offset)
+                        output.flush()
+                        if (index == 0) {
+                            firstChunk.countDown()
+                            resumeServer.await(10, TimeUnit.SECONDS)
+                        }
+                    }
+                }
+            }
+        }
+        var id = ""
+        try {
+            instrumentation.runOnMainSync {
+                id = DownloadManager.enqueueDownload(context, "Pause test", "pause-qa",
+                    "http://127.0.0.1:${server.localPort}/video.mp4", 360, true, qaDownloadDirectory())
+            }
+            assertTrue(firstChunk.await(8, TimeUnit.SECONDS))
+            val received = withTimeoutOrNull(8000) {
+                DownloadManager.items.first { list -> list.any { it.id == id && it.downloadedBytes > 0 } }
+            }
+            assertNotNull("Download must receive bytes before pausing", received)
+            instrumentation.runOnMainSync { DownloadManager.pauseDownload(id) }
+            val pausedItems = withTimeoutOrNull(8000) {
+                DownloadManager.items.first { list -> list.any { it.id == id && it.status == DownloadStatus.PAUSED } }
+            }
+            assertNotNull("Cancelling the socket should finish pausing", pausedItems)
+            val paused = context.getSharedPreferences("download_queue", 0).getString("entries", "").orEmpty()
+            assertTrue(id in paused && "PAUSED" in paused)
+            resumeServer.countDown()
+            instrumentation.runOnMainSync { DownloadManager.resume(context, id) }
+            val completed = withTimeout(15000) {
+                DownloadManager.items.first { list -> list.any { it.id == id && it.isTerminal } }
+                    .first { it.id == id }
+            }
+            assertEquals(completed.errorMessage, DownloadStatus.FINISHED, completed.status)
+            assertTrue(ranges.last() > 0)
+            completed.contentUri?.let { FileUtils.deleteFile(context, it) }
+        } finally {
+            resumeServer.countDown()
+            server.close()
+            DownloadManager.cancelDownload(id)
+            DownloadManager.removeDownload(id)
+            HistoryManager.remove(context, id)
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
     fun testAniDubReadsBothPlayerLayouts() {
         val expected = "vid.php?v=%2Fs9%2Fepisode&lang=ru"
         assertEquals(expected, CatalogClient.dubManifest(
@@ -39,6 +157,34 @@ class ReliabilityDeviceTest : InstrumentationTestCase() {
             assertEquals("episode.2", video.title)
             assertEquals(kind, video.best.kind)
             assertEquals(url, video.best.url)
+        }
+    }
+
+    fun testEditingTheLinkHidesTheOldResult() {
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(Intent(Intent.ACTION_VIEW,
+            Uri.parse("https://example.com/first.mp4"), context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        val input = activity.findViewById<EditText>(R.id.etUrl)
+        val card = activity.findViewById<View>(R.id.cardResult)
+        val title = activity.findViewById<TextView>(R.id.tvResultTitle)
+        val download = activity.findViewById<View>(R.id.btnDownload)
+        try {
+            instrumentation.waitForIdleSync()
+            assertEquals("first", title.text.toString())
+            assertTrue(download.isEnabled)
+
+            instrumentation.runOnMainSync { input.setText("https://example.com/second.mp4") }
+            assertEquals(View.GONE, card.visibility)
+            assertFalse(download.isEnabled)
+
+            instrumentation.runOnMainSync { activity.findViewById<View>(R.id.btnFind).performClick() }
+            instrumentation.waitForIdleSync()
+            assertEquals("second", title.text.toString())
+            assertEquals(View.VISIBLE, card.visibility)
+            assertTrue(download.isEnabled)
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
         }
     }
 

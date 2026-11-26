@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import http.server
 import multiprocessing
+import re
 import shutil
 import socket
 import stat
@@ -24,6 +25,7 @@ from kodikdown.downloader import (
     _bytes_on_disk,
     _is_transient,
     is_pending_output,
+    partial_directory,
     release_target,
     safe_filename,
     unique_target,
@@ -587,6 +589,71 @@ def test_slow_mp4_reports_progress_and_can_cancel_before_end_of_file(tmp_path: P
         progress.set()
         server.shutdown()
         server.server_close()
+
+
+def test_reopened_download_uses_saved_bytes_and_recovers_published_file(tmp_path: Path) -> None:
+    payload = bytes(range(256)) * 4096
+    ranges: list[int] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def send_media(self, start: int, end: int, *, sliced: bool) -> None:
+            self.send_response(206 if sliced else 200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(end - start + 1))
+            self.send_header("ETag", '"original"')
+            if sliced:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{len(payload)}")
+            self.end_headers()
+
+        def do_HEAD(self) -> None:
+            self.send_media(0, len(payload) - 1, sliced=False)
+
+        def do_GET(self) -> None:
+            match = re.fullmatch(r"bytes=(\d+)-(\d*)", self.headers.get("Range", ""))
+            start = int(match[1]) if match else 0
+            end = min(int(match[2]), len(payload) - 1) if match and match[2] else len(payload) - 1
+            ranges.append(start)
+            self.send_media(start, end, sliced=bool(match))
+            try:
+                for offset in range(start, end + 1, 16384):
+                    self.wfile.write(payload[offset : min(offset + 16384, end + 1)])
+                    self.wfile.flush()
+                    time.sleep(0.003)
+            except OSError:
+                pass
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        url = f"http://127.0.0.1:{server.server_port}/clip.mp4"
+        job_id = "a" * 32
+
+        def pause(snapshot: ProgressSnapshot) -> None:
+            if 0 < snapshot.downloaded < len(payload):
+                first.cancel()
+
+        first = Downloader(tmp_path, listener=pause, resume_id=job_id)
+        try:
+            with pytest.raises(DownloadCancelled):
+                first.download_blocking(url, "Episode", url)
+            partial = partial_directory(tmp_path, job_id) / "video.mp4.part"
+            offset = partial.stat().st_size
+            assert 0 < offset < len(payload)
+            assert not (tmp_path / "Episode.mp4").exists()
+            second = Downloader(tmp_path, resume_id=job_id)
+            path = second.download_blocking(url, "Episode", url)
+            assert offset in ranges
+            assert path.read_bytes() == payload
+            requests = len(ranges)
+            assert (
+                Downloader(tmp_path, resume_id=job_id).download_blocking(url, "Episode", url)
+                == path
+            )
+            assert len(ranges) == requests
+        finally:
+            server.shutdown()
 
 
 def test_download_blocking_handles_bracketed_title(hls_server: object, tmp_path: Path) -> None:

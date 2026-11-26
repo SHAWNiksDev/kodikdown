@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -40,6 +41,8 @@ class MediaPage(QWidget):
         self._available: dict[str, bool] = {}
         self._active: set[str] = set()
         self._signature: object = None
+        self._expanded_groups: set[str] = set()
+        self._filtering = False
         self._paths: dict[str, str] = {}
         self._entries: dict[str, HistoryEntry] = {}
         layout = QVBoxLayout(self)
@@ -57,6 +60,10 @@ class MediaPage(QWidget):
         self.refresh_button.clicked.connect(self.refresh_requested.emit)
         header.addWidget(self.refresh_button)
         layout.addLayout(header)
+        self.search = QLineEdit()
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(lambda _: self._populate())
+        layout.addWidget(self.search)
         self.table = QTreeWidget()
         self.table.setObjectName("media-list")
         self.table.setRootIsDecorated(True)
@@ -71,7 +78,7 @@ class MediaPage(QWidget):
         for column, width in ((1, 180 if history else 100), (2, 90), (3, 155)):
             self.table.setColumnWidth(column, width)
         self.table.itemSelectionChanged.connect(self._selection_changed)
-        self.table.itemDoubleClicked.connect(lambda *_: self._play())
+        self.table.itemDoubleClicked.connect(self._on_double_click)
         layout.addWidget(self.table, 1)
         self.empty = QLabel()
         self.empty.setObjectName("muted")
@@ -117,21 +124,25 @@ class MediaPage(QWidget):
         self._populate()
 
     def _populate(self, *, force: bool = False) -> None:
-        signature = (
+        query = tuple(self.search.text().casefold().split())
+        data = (
             (self._history, tuple(self._available.items()), frozenset(self._active))
             if self.is_history
             else self._files
         )
+        signature = query, data
         if not force and signature == self._signature:
             return
         self._signature = signature
         selected = self.selected_ids()
         group_role = Qt.ItemDataRole.UserRole + 1
-        expanded = {
-            item.data(0, group_role)
-            for index in range(self.table.topLevelItemCount())
-            if (item := self.table.topLevelItem(index)) is not None and item.isExpanded()
-        }
+        if not self._filtering:
+            self._expanded_groups = {
+                item.data(0, group_role)
+                for index in range(self.table.topLevelItemCount())
+                if (item := self.table.topLevelItem(index)) is not None and item.isExpanded()
+            }
+        self._filtering = bool(query)
         scroll = self.table.verticalScrollBar().value()
         self.table.blockSignals(True)
         self.table.clear()
@@ -140,9 +151,16 @@ class MediaPage(QWidget):
         locale = QLocale(current_language())
         groups: dict[str, QTreeWidgetItem] = {}
 
-        def add(row: QTreeWidgetItem, series: str) -> None:
+        def matches(*fields: str) -> bool:
+            if not query:
+                return True
+            text = " ".join(fields).casefold()
+            return all(word in text for word in query)
+
+        def add(row: QTreeWidgetItem, series: str, was_selected: bool) -> None:
             if not series:
                 self.table.addTopLevelItem(row)
+                row.setSelected(was_selected)
                 return
             group = groups.get(series)
             if group is None:
@@ -150,12 +168,15 @@ class MediaPage(QWidget):
                 group.setData(0, group_role, series)
                 group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
                 self.table.addTopLevelItem(group)
-                group.setExpanded(series in expanded)
+                group.setExpanded(self._filtering or series in self._expanded_groups)
                 groups[series] = group
             group.addChild(row)
+            row.setSelected(was_selected and group.isExpanded())
 
         if self.is_history:
             for entry in self._history:
+                if not matches(entry.title, entry.file_name, entry.series, entry.translation):
+                    continue
                 available = self._available.get(entry.path, False)
                 status = (
                     t("file_missing")
@@ -188,10 +209,11 @@ class MediaPage(QWidget):
                         else self._palette.text_muted
                     )
                     row.setForeground(1, QColor(colour))
-                add(row, entry.series)
-                row.setSelected(entry.id in selected)
+                add(row, entry.series, entry.id in selected)
         else:
             for file in self._files:
+                if not matches(file.title, file.series, file.translation):
+                    continue
                 row = QTreeWidgetItem(
                     [
                         file.title,
@@ -205,12 +227,15 @@ class MediaPage(QWidget):
                 row.setData(0, Qt.ItemDataRole.UserRole, file.path)
                 row.setToolTip(0, file.path)
                 self._paths[file.path] = file.path
-                add(row, file.series)
-                row.setSelected(file.path in selected)
+                add(row, file.series, file.path in selected)
         self.table.blockSignals(False)
         self.table.verticalScrollBar().setValue(scroll)
         count = len(self._paths)
         self.count.setText(t("video_count", count=count))
+        empty_key = "history_empty" if self.is_history else "library_empty"
+        if self._filtering and (self._history or self._files):
+            empty_key = "media_no_matches"
+        self.empty.setText(t(empty_key))
         self.table.setVisible(count > 0)
         self.empty.setVisible(count == 0)
         self._selection_changed()
@@ -231,6 +256,10 @@ class MediaPage(QWidget):
         if self.play_button.isEnabled():
             identifier = next(iter(self.selected_ids()))
             self.play_requested.emit(self._paths[identifier])
+
+    def _on_double_click(self, item: QTreeWidgetItem, column: int) -> None:
+        if item.data(0, Qt.ItemDataRole.UserRole) is not None:
+            self._play()
 
     def _reveal(self) -> None:
         if self.reveal_button.isEnabled():
@@ -261,7 +290,8 @@ class MediaPage(QWidget):
 
     def retranslate(self) -> None:
         self.heading.setText(t("tab_history" if self.is_history else "tab_library"))
-        self.empty.setText(t("history_empty" if self.is_history else "library_empty"))
+        self.search.setPlaceholderText(t("media_search"))
+        self.search.setAccessibleName(t("media_search"))
         self.table.setHeaderLabels([t("file_name"), t("status"), t("file_size"), t("date")])
         for button, key in (
             (self.play_button, "play"),

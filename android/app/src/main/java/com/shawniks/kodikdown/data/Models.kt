@@ -125,6 +125,7 @@ data class ResolvedVideo(
 enum class DownloadStatus {
     QUEUED,
     DOWNLOADING,
+    PAUSED,
     ASSEMBLING,
     FINISHED,
     FAILED,
@@ -156,6 +157,10 @@ data class DownloadItem(
 ) {
     val isFinished: Boolean
         get() = status == DownloadStatus.FINISHED
+
+    val isWorking: Boolean
+        get() = status == DownloadStatus.QUEUED ||
+            status == DownloadStatus.DOWNLOADING || status == DownloadStatus.ASSEMBLING
 
     val isTerminal: Boolean
         get() =
@@ -210,4 +215,5 @@ data class LibraryItem(
     val quality: Int? = null,
     val isMp4: Boolean = true,
     val series: String? = null,
+    val retryInput: String? = null,
 )

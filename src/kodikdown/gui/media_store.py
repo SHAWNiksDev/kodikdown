@@ -36,6 +36,10 @@ class HistoryEntry:
     file_size: int = 0
     retry_input: str = ""
     series: str = ""
+    queue_directory: str = ""
+    queue_url: str = ""
+    queue_referer: str = ""
+    queue_priority: int = 0
 
     @classmethod
     def from_json(cls, raw: object) -> HistoryEntry | None:
@@ -49,7 +53,17 @@ class HistoryEntry:
         allowed = {name: value for name, value in raw.items() if name in cls.__dataclass_fields__}
         if any(
             not isinstance(allowed.get(key, ""), str)
-            for key in ("status", "translation", "path", "error", "retry_input", "series")
+            for key in (
+                "status",
+                "translation",
+                "path",
+                "error",
+                "retry_input",
+                "series",
+                "queue_directory",
+                "queue_url",
+                "queue_referer",
+            )
         ):
             return None
         if not 0 <= raw["created"] <= 253402300799 or not math.isfinite(raw["created"]):
@@ -58,6 +72,8 @@ class HistoryEntry:
             allowed["prefer_mp4"] = False
         if type(allowed.get("file_size", 0)) is not int or allowed.get("file_size", 0) < 0:
             allowed["file_size"] = 0
+        if type(allowed.get("queue_priority", 0)) is not int:
+            allowed["queue_priority"] = 0
         return cls(**allowed)
 
 
@@ -77,6 +93,8 @@ class HistoryChanges(TypedDict, total=False):
     quality: int
     error: str
     file_size: int
+    queue_directory: str
+    queue_priority: int
 
 
 class HistoryStore:
@@ -85,6 +103,7 @@ class HistoryStore:
         self._on_error = on_error
         self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kodikdown-history")
         self._pending: Future[None] | None = None
+        self._unwritten: dict[str, HistoryEntry | None] = {}
         self._closed = False
         try:
             self._entries = _read_history(path)
@@ -132,6 +151,9 @@ class HistoryStore:
         self._pending.add_done_callback(self._written)
 
     def _write(self, updates: dict[str, HistoryEntry], removed: set[str]) -> None:
+        # Keep changes from a failed write so the next save can apply them too.
+        self._unwritten.update(updates)
+        self._unwritten.update(dict.fromkeys(removed))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + 5
         while not try_reserve(self.path):
@@ -140,11 +162,14 @@ class HistoryStore:
             time.sleep(0.05)
         try:
             entries = _read_history(self.path)
-            entries.update(updates)
-            for identifier in removed:
-                entries.pop(identifier, None)
+            for identifier, entry in self._unwritten.items():
+                if entry is None:
+                    entries.pop(identifier, None)
+                else:
+                    entries[identifier] = entry
             ordered = sorted(entries.values(), key=lambda entry: entry.created, reverse=True)
             self._replace_file(json.dumps([asdict(entry) for entry in ordered], ensure_ascii=False))
+            self._unwritten.clear()
         finally:
             release(self.path)
 
@@ -171,6 +196,12 @@ class HistoryStore:
         if self._pending is not None:
             self._pending.result(timeout=10)
 
+    def after_save(self, action: Callable[[], None]) -> None:
+        if self._pending is not None:
+            self._pending.add_done_callback(
+                lambda future: action() if future.exception() is None else None
+            )
+
     def close(self) -> None:
         if not self._closed:
             self._closed = True
@@ -184,6 +215,7 @@ class MediaFile:
     size: int
     modified: float
     series: str = ""
+    translation: str = ""
 
 
 def readable_file(raw: str) -> bool:
@@ -254,7 +286,14 @@ class MediaScan(QRunnable):
                 continue
             seen.add(entry.path)
             files.append(
-                MediaFile(entry.path, entry.title, stat.st_size, stat.st_mtime, entry.series)
+                MediaFile(
+                    entry.path,
+                    entry.title,
+                    stat.st_size,
+                    stat.st_mtime,
+                    entry.series,
+                    entry.translation,
+                )
             )
         with contextlib.suppress(RuntimeError):
             self.signals.ready.emit(

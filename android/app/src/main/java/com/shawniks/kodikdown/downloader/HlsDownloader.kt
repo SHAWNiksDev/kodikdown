@@ -4,13 +4,16 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.os.Build
+import android.util.AtomicFile
 import com.shawniks.kodikdown.kodik.KodikClient
 import com.shawniks.kodikdown.net.readResponse
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.net.URI
 import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
@@ -25,6 +28,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 
 internal class DownloadHttpException(val code: Int, resource: String) : IOException("$resource HTTP $code")
 
@@ -61,12 +65,16 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
         onNetworkWait: (Boolean) -> Unit = {},
         onProcessing: () -> Unit = {},
         referer: String? = null,
+        keepPartial: Boolean = false,
     ) =
         withContext(Dispatchers.IO) {
             val part = File("${targetFile.absolutePath}.part")
+            val checkpoint = AtomicFile(File("${targetFile.absolutePath}.direct.json"))
+            val identity = fingerprint(url)
             val progress = Progress(onProgress)
             try {
-                var validator: String? = null
+                var validator = if (keepPartial) readCheckpoint(checkpoint, identity)?.optString("validator")
+                    ?.takeIf(String::isNotEmpty) else null
                 retryNetwork(onNetworkWait) {
                     val offset = if (validator != null) part.length() else 0L
                     val builder = request(url, referer).header("Accept-Encoding", "identity")
@@ -101,6 +109,11 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
                         validator = receivedValidator ?: if (append) validator else null
                         body.byteStream().buffered(BUFFER_SIZE).use { input ->
                             FileOutputStream(part, append).buffered(BUFFER_SIZE).use { output ->
+                                if (keepPartial) {
+                                    if (validator == null) checkpoint.delete()
+                                    else writeCheckpoint(checkpoint, JSONObject().put("source", identity)
+                                        .put("validator", validator))
+                                }
                                 val buffer = ByteArray(BUFFER_SIZE)
                                 while (true) {
                                     checkCancelled(isCancelled)
@@ -125,7 +138,10 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
                 publish(part, targetFile)
                 onProgress(targetFile.length(), targetFile.length(), 0, 0)
             } finally {
-                part.delete()
+                if (!keepPartial || targetFile.isFile) {
+                    part.delete()
+                    checkpoint.delete()
+                }
             }
         }
 
@@ -139,24 +155,37 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
         onNetworkWait: (Boolean) -> Unit = {},
         onProcessing: () -> Unit = {},
         referer: String? = null,
+        keepPartial: Boolean = false,
     ) =
         withContext(Dispatchers.IO) {
-            val part = File("${targetFile.absolutePath}.part")
+            val part = File("${targetFile.absolutePath}.hls.part")
             val muxed = File("${targetFile.absolutePath}.mux.part")
             val fragments = File("${targetFile.absolutePath}.fragments")
+            val checkpoint = AtomicFile(File("${targetFile.absolutePath}.hls.json"))
             try {
                 if (!fragments.mkdirs() && !fragments.isDirectory) throw IOException("Could not create fragment cache")
                 val master = loadText(manifestUrl, onNetworkWait, referer)
                 val variant = HlsPlaylist.selectVariant(master.url, master.text, quality?.takeIf { it > 0 })
                 val media = if (variant == null) master else loadText(variant, onNetworkWait, referer)
                 val playlist = HlsPlaylist.parse(media.url, media.text)
-                var bytesWritten = 0L
+                val identity = fingerprint(media.url + "\n" + media.text)
+                val saved = if (keepPartial) readCheckpoint(checkpoint, identity) else null
+                val count = playlist.segments.size
+                var done = saved?.optInt("segments", 0)?.takeIf { it in 1..count } ?: 0
+                var bytesWritten = saved?.optLong("bytes", 0)?.takeIf { it in 1..part.length() } ?: 0
+                if (bytesWritten == 0L) done = 0
+                if (done == 0) {
+                    bytesWritten = 0
+                    checkpoint.delete()
+                }
+                RandomAccessFile(part, "rw").use { it.setLength(bytesWritten) }
                 val progress = Progress(onProgress)
-                onFragmentProgress(0, playlist.segments.size)
-                part.outputStream().buffered(BUFFER_SIZE).use { output ->
-                    playlist.init?.let {
+                onFragmentProgress(done, count)
+                FileOutputStream(part, true).buffered(BUFFER_SIZE).use { output ->
+                    playlist.init?.takeIf { done == 0 }?.let {
                         val init = loadSegment(it, File(fragments, "init"), isCancelled, onNetworkWait, referer)
                         init.inputStream().use { input -> input.copyTo(output, BUFFER_SIZE) }
+                        bytesWritten += init.length()
                         init.delete()
                     }
                     coroutineScope {
@@ -167,14 +196,18 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
                                     isCancelled, onNetworkWait, referer)
                             })
                         }
-                        val count = playlist.segments.size
-                        val window = minOf(CONCURRENT_FRAGMENTS, count)
-                        repeat(window, ::launchFragment)
-                        for (index in 0 until count) {
+                        val window = minOf(CONCURRENT_FRAGMENTS, count - done)
+                        repeat(window) { launchFragment(done + it) }
+                        for (index in done until count) {
                             checkCancelled(isCancelled)
                             val fragment = downloads.removeFirst().await()
                             bytesWritten += fragment.length()
                             fragment.inputStream().use { input -> input.copyTo(output, BUFFER_SIZE) }
+                            if (keepPartial) {
+                                output.flush()
+                                writeCheckpoint(checkpoint, JSONObject().put("source", identity)
+                                    .put("segments", index + 1).put("bytes", bytesWritten))
+                            }
                             fragment.delete()
                             if (index + window < count) launchFragment(index + window)
                             onFragmentProgress(index + 1, count)
@@ -191,11 +224,34 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
                 publish(muxed, targetFile)
                 onProgress(targetFile.length(), targetFile.length(), 0, 0)
             } finally {
-                part.delete()
+                if (!keepPartial || targetFile.isFile) {
+                    part.delete()
+                    checkpoint.delete()
+                }
                 muxed.delete()
                 fragments.deleteRecursively()
             }
         }
+
+    private fun fingerprint(value: String): String =
+        MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") {
+            "%02x".format(it.toInt() and 0xff)
+        }
+
+    private fun readCheckpoint(file: AtomicFile, source: String): JSONObject? =
+        runCatching { JSONObject(file.readFully().toString(Charsets.UTF_8)) }.getOrNull()
+            ?.takeIf { it.optString("source") == source }
+
+    private fun writeCheckpoint(file: AtomicFile, data: JSONObject) {
+        val output = file.startWrite()
+        try {
+            output.write(data.toString().toByteArray())
+            file.finishWrite(output)
+        } catch (error: IOException) {
+            file.failWrite(output)
+            throw error
+        }
+    }
 
     private data class Manifest(val url: String, val text: String)
 
@@ -382,7 +438,7 @@ class HlsDownloader(private val client: OkHttpClient = KodikClient.defaultHttpCl
         fun report(bytes: Long, total: Long?) {
             val now = System.nanoTime()
             val elapsed = now - lastTime
-            if (elapsed < 200_000_000L) return
+            if (elapsed <= 0L || (lastBytes > 0L && elapsed < 200_000_000L)) return
             val speed = ((bytes - lastBytes) * 1_000_000_000L / elapsed).coerceAtLeast(0)
             listener(
                 bytes,

@@ -1,18 +1,22 @@
 package com.shawniks.kodikdown.downloader
 
 import android.content.Context
+import android.util.Log
 import com.shawniks.kodikdown.KodikApp
 import com.shawniks.kodikdown.data.DownloadItem
 import com.shawniks.kodikdown.data.DownloadStatus
+import com.shawniks.kodikdown.data.HistoryItem
 import com.shawniks.kodikdown.data.HistoryManager
+import com.shawniks.kodikdown.data.HistoryRetry
 import com.shawniks.kodikdown.data.LibraryManager
 import com.shawniks.kodikdown.data.ResolvedVideo
 import com.shawniks.kodikdown.data.StreamVariant
+import com.shawniks.kodikdown.kodik.CatalogClient
+import com.shawniks.kodikdown.kodik.KodikClient
 import com.shawniks.kodikdown.util.FileUtils
 import java.io.File
 import java.io.IOException
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -30,17 +34,44 @@ import kotlinx.coroutines.launch
 object DownloadManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val downloader = HlsDownloader()
-    private val limiter = DownloadLimiter(3)
     private val _items = MutableStateFlow<List<DownloadItem>>(emptyList())
     val items: StateFlow<List<DownloadItem>> = _items.asStateFlow()
-    private val activeJobs = ConcurrentHashMap<String, Job>()
-    private val cancelledItems = ConcurrentHashMap.newKeySet<String>()
+    private val activeJobs = mutableMapOf<String, Job>()
+    private val pending = mutableMapOf<String, PendingDownload>()
+    private val prepareFirst = mutableMapOf<String, suspend () -> ResolvedVideo>()
+    private val attempted = mutableSetOf<String>()
+    private val stops = mutableMapOf<String, DownloadStatus>()
+    private var storage: PendingDownloads? = null
+    @Volatile var maxConcurrentDownloads = 3
+        set(value) { field = value.coerceIn(1, 5) }
 
-    var maxConcurrentDownloads = 3
-        set(value) {
-            field = value.coerceIn(1, 5)
-            limiter.setLimit(field)
+    @Synchronized
+    fun restore(context: Context) {
+        if (storage != null) return
+        val store = PendingDownloads(context)
+        val completed = LibraryManager.recordedIds(context)
+        for (download in store.load()) {
+            if (download.item.id in completed) continue
+            pending[download.item.id] = download
+            attempted.add(download.item.id)
         }
+        _items.value = pending.values.map { it.item }
+        storage = store
+        val abandoned = File(context.filesDir, "downloads").listFiles().orEmpty()
+            .filter { it.name !in pending }
+        if (abandoned.isNotEmpty()) scope.launch { abandoned.forEach { it.deleteRecursively() } }
+    }
+
+    @Synchronized
+    fun resumePending(context: Context) {
+        if (_items.value.none { it.status == DownloadStatus.QUEUED }) return
+        try {
+            DownloadService.start(context.applicationContext)
+            schedule(context.applicationContext)
+        } catch (error: IllegalStateException) {
+            Log.w("DownloadManager", "Downloads will resume when the app is open", error)
+        }
+    }
 
     fun isActive(id: String): Boolean = _items.value.any { it.id == id && !it.isTerminal }
 
@@ -74,60 +105,113 @@ object DownloadManager {
         referer: String? = null,
     ): String {
         val app = context.applicationContext
+        restore(app)
         val name = FileUtils.safeFileName(fileName)
         if (isAlreadyActive(url, name, series)) return ""
         val item = DownloadItem(UUID.randomUUID().toString(), title, name, url, quality, isMp4,
             sourceInput = sourceInput, retryInput = retryInput, series = series)
-        _items.update { listOf(item) + it }
+        pending[item.id] = PendingDownload(item, downloadDir, translationTitle, hlsUrl, fallbackVariants, referer)
+        if (prepare != null) prepareFirst[item.id] = prepare
+        _items.update { it + item }
         HistoryManager.recordFromDownload(app, item, translationTitle)
-        try {
-            DownloadService.start(app)
-        } catch (e: Exception) {
-            updateItem(item.id) {
-                it.copy(status = DownloadStatus.FAILED, errorMessage = e.message)
-            }
-            return item.id
-        }
-        val job =
-            scope.launch(start = CoroutineStart.LAZY) {
-                try {
-                    limiter.withSlot {
-                        val resolved = prepare?.invoke()
-                        if (resolved == null) {
-                            executeDownload(app, item, downloadDir, hlsUrl, fallbackVariants, referer)
-                        } else {
-                            val variant = resolved.pick(quality)
-                            val direct = variant.directMp4.takeIf { isMp4 }
-                            executeDownload(app, item.copy(
-                                url = direct ?: variant.url, quality = variant.quality.takeIf { it > 0 } ?: quality,
-                                isMp4 = variant.kind == "mp4" || direct != null,
-                            ), downloadDir, variant.url, resolved.variants, variant.referer)
-                        }
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    currentCoroutineContext().ensureActive()
-                    updateItem(item.id) {
-                        it.copy(
-                            status = DownloadStatus.FAILED,
-                            errorMessage = e.message ?: "Download failed",
-                        )
-                    }
-                }
-            }
-        activeJobs[item.id] = job
-        job.invokeOnCompletion { cause ->
-            if (cause is CancellationException) {
-                updateItem(item.id) {
-                    if (it.isTerminal) it else it.copy(status = DownloadStatus.CANCELLED)
-                }
-            }
-            activeJobs.remove(item.id)
-            cancelledItems.remove(item.id)
-        }
-        job.start()
+        saveQueue()
+        resumePending(app)
         return item.id
+    }
+
+    private fun schedule(context: Context) {
+        val freeSlots = maxConcurrentDownloads - activeJobs.size
+        if (freeSlots <= 0) return
+        val next = _items.value.filter { it.status == DownloadStatus.QUEUED && it.id !in activeJobs }
+        for (row in next.take(freeSlots)) {
+            val request = pending[row.id] ?: continue
+            val prepare = prepareFirst.remove(row.id)
+            val retry = !attempted.add(row.id)
+            val job = scope.launch(start = CoroutineStart.LAZY) {
+                try {
+                    val resolved = prepare?.invoke()
+                    val transfer = when {
+                        resolved != null -> pickTransfer(request, resolved.pick(row.quality), resolved.variants)
+                        retry -> refreshTransfer(request)
+                        else -> request
+                    }
+                    executeDownload(context, transfer.item, transfer.directory, transfer.hls,
+                        transfer.variants, transfer.referer)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    currentCoroutineContext().ensureActive()
+                    updateItem(row.id) {
+                        it.copy(status = DownloadStatus.FAILED, errorMessage = error.message ?: "Download failed")
+                    }
+                }
+            }
+            activeJobs[row.id] = job
+            job.invokeOnCompletion { complete(context, row.id, it) }
+            updateItem(row.id) { it.copy(status = DownloadStatus.DOWNLOADING) }
+            job.start()
+        }
+    }
+
+    private suspend fun refreshTransfer(request: PendingDownload): PendingDownload {
+        val item = request.item
+        val kodik = KodikClient()
+        val catalogs = CatalogClient(kodik)
+        val history = HistoryItem(item.id, item.title, item.fileName, item.url, item.quality,
+            translation = request.translation, isMp4 = item.isMp4, sourceInput = item.sourceInput,
+            retryInput = item.retryInput, series = item.series)
+        if (item.retryInput == null && item.sourceInput == null) return request
+        val selection = HistoryRetry.resolve(history) { url, track ->
+            if (track == null) catalogs.resolve(url) else kodik.resolve(url, track)
+        }
+        return pickTransfer(request, selection.variant, selection.variants)
+    }
+
+    private fun pickTransfer(request: PendingDownload, variant: StreamVariant, variants: List<StreamVariant>): PendingDownload {
+        val direct = variant.directMp4.takeIf { request.item.isMp4 }
+        return request.copy(
+            item = request.item.copy(url = direct ?: variant.url,
+                quality = variant.quality.takeIf { it > 0 } ?: request.item.quality,
+                isMp4 = variant.kind == "mp4" || direct != null),
+            hls = variant.url,
+            variants = variants,
+            referer = variant.referer,
+        )
+    }
+
+    @Synchronized
+    private fun complete(context: Context, id: String, cause: Throwable?) {
+        activeJobs.remove(id)
+        val stop = stops.remove(id)
+        if (cause is CancellationException) {
+            updateItem(id) {
+                if (it.isTerminal) it else it.copy(status = stop ?: DownloadStatus.PAUSED, waitingForNetwork = false)
+            }
+        }
+        val item = _items.value.firstOrNull { it.id == id }
+        if (item?.status == DownloadStatus.CANCELLED || item?.status == DownloadStatus.FINISHED) {
+            pending.remove(id)
+            attempted.remove(id)
+            workDirectory(context, id).deleteRecursively()
+        }
+        saveQueue()
+        schedule(context)
+    }
+
+    private fun workDirectory(context: Context, id: String) = File(context.filesDir, "downloads/$id")
+
+    private fun saveQueue() {
+        val entries = _items.value.mapNotNull { row ->
+            val status = stops[row.id] ?: row.status
+            if (status == DownloadStatus.CANCELLED || status == DownloadStatus.FINISHED) return@mapNotNull null
+            pending[row.id]?.let { request ->
+                request.copy(item = request.item.copy(status = status,
+                    errorMessage = row.errorMessage))
+            }
+        }
+        if (storage?.save(entries) == false) {
+            Log.e("DownloadManager", "Could not save the download queue")
+        }
     }
 
     private suspend fun executeDownload(
@@ -145,10 +229,10 @@ object DownloadManager {
                     etaSeconds = if (waiting) null else it.etaSeconds) }
             }
         }
-        val directory = File(context.cacheDir, "downloads")
+        val directory = workDirectory(context, item.id)
         if (!directory.mkdirs() && !directory.isDirectory)
             throw IOException("Could not create download cache")
-        val tempFile = File(directory, "${item.id}.mp4")
+        val tempFile = File(directory, "video.mp4")
         val primaryKind = if (item.isMp4 && (hlsUrl == null || hlsUrl == item.url)) "mp4" else "hls"
         val primary =
             StreamVariant(
@@ -199,7 +283,7 @@ object DownloadManager {
                 suspend fun downloadHls() = downloader.downloadHls(
                     source.url,
                     tempFile,
-                    { item.id in cancelledItems },
+                    { stopRequested(item.id) },
                     source.quality,
                     onProgress = progress,
                     onFragmentProgress = { done, count ->
@@ -211,6 +295,7 @@ object DownloadManager {
                     onNetworkWait = networkWait,
                     onProcessing = processing,
                     referer = source.referer,
+                    keepPartial = true,
                 )
                 try {
                     if (direct != null || source.kind == "mp4") {
@@ -218,11 +303,12 @@ object DownloadManager {
                             downloader.downloadDirectMp4(
                                 direct ?: source.url,
                                 tempFile,
-                                { item.id in cancelledItems },
+                                { stopRequested(item.id) },
                                 progress,
                                 onNetworkWait = networkWait,
                                 onProcessing = processing,
                                 referer = source.referer,
+                                keepPartial = true,
                             )
                         } catch (e: IOException) {
                             if (source.kind == "mp4" || source.url == direct) throw e
@@ -251,7 +337,7 @@ object DownloadManager {
             enterAssembly(item.id)
             val (path, uri) =
                 FileUtils.saveToPublicStorage(context, tempFile, item.fileName, downloadDir, item.series) {
-                    item.id in cancelledItems
+                    stopRequested(item.id)
                 }
             updateItem(item.id) {
                 it.copy(
@@ -265,33 +351,97 @@ object DownloadManager {
             LibraryManager.record(context, finished)
         } finally {
             tempFile.delete()
-            File("${tempFile.absolutePath}.part").delete()
             File("${tempFile.absolutePath}.mux.part").delete()
         }
     }
 
     @Synchronized
     private fun enterAssembly(id: String) {
-        if (id in cancelledItems) throw CancellationException("Download cancelled")
+        if (id in stops) throw CancellationException("Download cancelled")
         updateItem(id) {
             it.copy(status = DownloadStatus.ASSEMBLING, speedBytesPerSec = 0, etaSeconds = null)
         }
     }
 
     @Synchronized
-    fun cancelDownload(id: String) {
-        if (_items.value.none { it.id == id && !it.isTerminal } || isAssembling(id)) return
-        cancelledItems.add(id)
-        activeJobs[id]?.cancel()
+    private fun stopRequested(id: String): Boolean = id in stops
+
+    @Synchronized
+    fun cancelDownload(id: String) = stop(id, DownloadStatus.CANCELLED)
+
+    @Synchronized
+    fun pauseDownload(id: String) = stop(id, DownloadStatus.PAUSED)
+
+    private fun stop(id: String, status: DownloadStatus) {
+        val item = _items.value.firstOrNull { it.id == id } ?: return
+        if (item.isTerminal || item.status == DownloadStatus.ASSEMBLING || id in stops) return
+        val job = activeJobs[id]
+        if (job == null) {
+            updateItem(id) { it.copy(status = status, waitingForNetwork = false) }
+            if (status == DownloadStatus.CANCELLED) {
+                pending.remove(id)
+                attempted.remove(id)
+                prepareFirst.remove(id)
+                workDirectory(KodikApp.instance, id).deleteRecursively()
+            }
+            saveQueue()
+        } else {
+            stops[id] = status
+            saveQueue()
+            job.cancel()
+        }
+    }
+
+    @Synchronized
+    fun pauseAll() {
+        // Withdraw queued work before a running download can free its slot.
+        _items.value.filter { it.status == DownloadStatus.QUEUED }.forEach { pauseDownload(it.id) }
+        _items.value.filter { it.status == DownloadStatus.DOWNLOADING }.forEach { pauseDownload(it.id) }
+    }
+
+    @Synchronized
+    fun resume(context: Context, id: String) {
+        requeue(id)
+        saveQueue()
+        resumePending(context)
+    }
+
+    @Synchronized
+    fun resumeAll(context: Context, status: DownloadStatus) {
+        _items.value.filter { it.status == status }.forEach { requeue(it.id) }
+        saveQueue()
+        resumePending(context)
+    }
+
+    private fun requeue(id: String) {
+        if (id in pending && id !in activeJobs) updateItem(id) {
+            if (it.status == DownloadStatus.PAUSED || it.status == DownloadStatus.FAILED)
+                it.copy(status = DownloadStatus.QUEUED, errorMessage = null, waitingForNetwork = false)
+            else it
+        }
+    }
+
+    @Synchronized
+    fun prioritize(id: String) {
+        val item = _items.value.firstOrNull { it.id == id && it.status == DownloadStatus.QUEUED } ?: return
+        _items.update { listOf(item) + it.filterNot { row -> row.id == id } }
+        saveQueue()
     }
 
     @Synchronized
     fun removeDownload(id: String) {
-        _items.update { list -> list.filterNot { it.id == id && it.isTerminal } }
+        if (_items.value.none { it.id == id && it.isTerminal } || id in activeJobs) return
+        _items.update { list -> list.filterNot { it.id == id } }
+        if (pending.remove(id) != null) {
+            attempted.remove(id)
+            workDirectory(KodikApp.instance, id).deleteRecursively()
+        }
+        saveQueue()
     }
 
+    @Synchronized
     fun clearFinished() {
-        _items.update { list -> list.filterNot { it.isTerminal } }
+        _items.value.filter { it.isTerminal }.forEach { removeDownload(it.id) }
     }
 
     @Synchronized
@@ -300,7 +450,7 @@ object DownloadManager {
         val updated = transform(previous)
         _items.update { list -> list.map { if (it.id == id) updated else it } }
         if (updated.status != previous.status) {
-            HistoryManager.recordFromDownload(KodikApp.instance, updated)
+            HistoryManager.recordFromDownload(KodikApp.instance, updated, pending[id]?.translation)
         }
     }
 }

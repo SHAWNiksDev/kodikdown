@@ -25,12 +25,15 @@ object LibraryManager {
     private fun preferences(context: Context) =
         context.getSharedPreferences("download_library", Context.MODE_PRIVATE)
 
+    internal fun recordedIds(context: Context): Set<String> = read(context).mapTo(mutableSetOf()) { it.id }
+
     @Synchronized
     fun migrate(context: Context, history: List<HistoryItem>) {
         val prefs = preferences(context)
         if (prefs.contains("entries")) return
         write(context, history.filter { it.status == DownloadStatus.FINISHED }.mapNotNull {
-            item(it.id, it.title, it.fileName, it.savedPath, it.contentUri, it.fileSize, it.timestamp, it.quality, it.series)
+            item(it.id, it.title, it.fileName, it.savedPath, it.contentUri, it.fileSize, it.timestamp,
+                it.quality, it.series, it.retryInput)
         })
         refresh(context)
     }
@@ -38,7 +41,8 @@ object LibraryManager {
     @Synchronized
     fun record(context: Context, download: DownloadItem) {
         val entry = item(download.id, download.title, download.fileName, download.savedPath,
-            download.contentUri, download.downloadedBytes, System.currentTimeMillis(), download.quality, download.series) ?: return
+            download.contentUri, download.downloadedBytes, System.currentTimeMillis(), download.quality,
+            download.series, download.retryInput) ?: return
         val existing = read(context)
         write(context, listOf(entry) + existing.filterNot {
             it.id == entry.id || entry.filePath != null && it.filePath == entry.filePath ||
@@ -82,11 +86,12 @@ object LibraryManager {
     }
 
     private fun item(id: String, title: String, name: String, path: String?, uri: String?,
-        size: Long, time: Long, quality: Int, series: String?): LibraryItem? {
+        size: Long, time: Long, quality: Int, series: String?, retry: String?): LibraryItem? {
         if (path.isNullOrBlank() && uri.isNullOrBlank()) return null
         val fileName = path?.takeUnless { it.startsWith("content://") }?.let { File(it).name }
             ?: "${name.removeSuffix(".mp4")}.mp4"
-        return LibraryItem(id, title, fileName, path, uri, size, time, quality.takeIf { it > 0 }, series = series)
+        return LibraryItem(id, title, fileName, path, uri, size, time, quality.takeIf { it > 0 },
+            series = series, retryInput = retry)
     }
 
     private fun read(context: Context): List<LibraryItem> {
@@ -98,7 +103,8 @@ object LibraryManager {
                 entry.optString("path").takeIf { it.isNotBlank() },
                 entry.optString("uri").takeIf { it.startsWith("content://") || it.startsWith("file://") },
                 entry.optLong("size"), entry.optLong("time"), entry.optInt("quality"),
-                entry.optString("series").takeIf { it.isNotBlank() })
+                entry.optString("series").takeIf { it.isNotBlank() },
+                entry.optString("retry").takeIf { it.isNotBlank() })
         }
     }
 
@@ -107,7 +113,8 @@ object LibraryManager {
         items.forEach {
             data.put(JSONObject().put("id", it.id).put("title", it.title).put("name", it.fileName)
                 .put("path", it.filePath).put("uri", it.contentUri).put("size", it.fileSizeBytes)
-                .put("time", it.dateModified).put("quality", it.quality).put("series", it.series))
+                .put("time", it.dateModified).put("quality", it.quality).put("series", it.series)
+                .put("retry", it.retryInput))
         }
         preferences(context).edit().putString("entries", data.toString()).apply()
     }

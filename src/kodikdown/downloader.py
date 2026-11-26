@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import gc
+import json
 import os
 import re
 import threading
@@ -10,9 +11,12 @@ import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from glob import escape as glob_escape
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import urlsplit
 
+import httpx
 import yt_dlp
 
 from kodikdown.kodik.models import ResolvedVideo, referer_for
@@ -137,6 +141,12 @@ def safe_filename(name: str, fallback: str = "video") -> str:
     return cleaned
 
 
+def partial_directory(directory: Path, job_id: str) -> Path:
+    if re.fullmatch(r"[a-f0-9]{32}", job_id) is None:
+        raise ValueError("Invalid download identifier")
+    return directory / f".kodikdown-{job_id}"
+
+
 def is_pending_output(path: Path) -> bool:
     """Whether a video is still owned by a transfer or postprocessor."""
     return any_reserved(
@@ -225,6 +235,7 @@ class Downloader:
         retries: int = 10,
         filename: str | None = None,
         fallback_sources: tuple[DownloadSource, ...] = (),
+        resume_id: str | None = None,
     ) -> None:
         self.output_dir = Path(output_dir)
         self._listener = listener
@@ -234,6 +245,8 @@ class Downloader:
         self._retries = max(0, retries)
         self._filename = filename
         self._fallback_sources = fallback_sources
+        self._resume_id = resume_id
+        self._resume_etag = ""
         self._last_emit = 0.0
         self._last_snapshot: ProgressSnapshot | None = None
         self._logger = _CollectingLogger()
@@ -264,26 +277,51 @@ class Downloader:
         if not self.output_dir.is_dir():
             raise DownloadFailed(f"{self.output_dir} is not a folder")
 
+        stage = None
+        if self._resume_id:
+            stage = partial_directory(self.output_dir, self._resume_id)
+            if recovered := _published_file(stage):
+                return recovered
+
         stem = safe_filename(self._filename or title)
         try:
             destination = unique_target(self.output_dir, stem)
         except OSError as exc:
             raise DownloadFailed(f"could not reserve a file in {self.output_dir}: {exc}") from exc
         try:
+            if stage is not None:
+                stage.mkdir(exist_ok=True)
+                if stage.is_symlink():
+                    raise DownloadFailed(f"Invalid staging folder: {stage}")
+                return self._publish(
+                    stage / "video", destination, url, referer, record=stage / "published"
+                )
             with TemporaryDirectory(
                 prefix=".kodikdown-", dir=self.output_dir, ignore_cleanup_errors=True
             ) as directory:
-                staged = Path(directory) / destination.name
-                produced = self._download_to(staged, url, referer)
-                target = destination.parent / produced.name
-                if target.exists() or target.is_symlink():
-                    raise DownloadFailed(f"the destination already exists: {target}")
-                os.replace(produced, target)
-                return target.resolve()
+                return self._publish(Path(directory) / destination.name, destination, url, referer)
         except OSError as exc:
             raise DownloadFailed(f"could not write to {self.output_dir}: {exc}") from exc
         finally:
             release_target(destination)
+
+    def _publish(
+        self, staged: Path, destination: Path, url: str, referer: str, *, record: Path | None = None
+    ) -> Path:
+        produced = self._download_to(staged, url, referer)
+        if self.cancelled:
+            raise DownloadCancelled
+        target = destination.with_name(destination.name + produced.name[len(staged.name) :])
+        if target.exists() or target.is_symlink():
+            raise DownloadFailed(f"the destination already exists: {target}")
+        if record is not None:
+            stat = produced.stat()
+            record.write_text(
+                json.dumps([target.name, stat.st_size, stat.st_mtime_ns, stat.st_ino]),
+                encoding="utf-8",
+            )
+        os.replace(produced, target)
+        return target.resolve()
 
     def _download_to(self, target_base: Path, url: str, referer: str) -> Path:
         self._start_monitor(target_base)
@@ -301,10 +339,12 @@ class Downloader:
 
         # Windows may keep a file open until yt-dlp's exception is collected.
         if cancelled or self.cancelled:
-            self._cleanup_cancelled(target_base)
+            if not self._resume_id:
+                self._cleanup_cancelled(target_base)
             raise DownloadCancelled
         if failure is not None:
-            self._cleanup_cancelled(target_base)
+            if not self._resume_id:
+                self._cleanup_cancelled(target_base)
             raise DownloadFailed(failure)
         produced = self._pick_result(target_base)
         if produced is None or produced.stat().st_size == 0:
@@ -365,14 +405,15 @@ class Downloader:
                     raise DownloadFailed("could not remove the previous stream's partial files")
                 self._last_snapshot = None
                 self._emit(ProgressSnapshot(quality=source.quality), force=True)
+            source_referer = source.referer or referer_for(source.url)
+            if self._resume_id:
+                self._verify_partial(target_base, source.url, source_referer)
             for attempt in range(_TRANSFER_ATTEMPTS):
                 if self.cancelled:
                     raise DownloadCancelled
                 self._logger.last_error = ""
                 try:
-                    self._transfer(
-                        target_base, source.url, source.referer or referer_for(source.url)
-                    )
+                    self._transfer(target_base, source.url, source_referer)
                     return
                 except DownloadFailed as exc:
                     if self.cancelled:
@@ -391,6 +432,58 @@ class Downloader:
                         raise
                     if self._cancel_event.wait(_RETRY_DELAY * (attempt + 1)):
                         raise DownloadCancelled from exc
+
+    def _verify_partial(self, target: Path, url: str, referer: str) -> None:
+        marker = target.parent / "source"
+        previous = marker.read_text(encoding="ascii", errors="replace") if marker.is_file() else ""
+        identity, self._resume_etag = self._stream_identity(url, referer)
+        if self.cancelled:
+            raise DownloadCancelled
+        if identity is None and previous:
+            raise DownloadFailed(
+                "Could not verify the saved partial download. Try again when online."
+            )
+        if not identity or previous != identity:
+            for path in _target_files(target):
+                path.unlink()
+        if identity:
+            marker.write_text(identity, encoding="ascii")
+        else:
+            marker.unlink(missing_ok=True)
+
+    def _stream_identity(self, url: str, referer: str) -> tuple[str | None, str]:
+        suffix = Path(urlsplit(url).path).suffix.lower()
+        if suffix not in (".mp4", ".m3u8"):
+            return "", ""
+        headers = {"Referer": referer, "User-Agent": USER_AGENT, "Accept-Encoding": "identity"}
+        try:
+            with httpx.Client(follow_redirects=True, timeout=5, headers=headers) as client:
+                method = "HEAD" if suffix == ".mp4" else "GET"
+                with client.stream(method, url) as response:
+                    response.raise_for_status()
+                    digest = sha256(str(response.url).encode())
+                    if suffix == ".mp4":
+                        tag = response.headers.get("etag", "")
+                        if not tag.startswith('"') or not tag.endswith('"'):
+                            return "", ""
+                        digest.update(tag.encode())
+                        return digest.hexdigest(), tag
+                    else:
+                        manifest = bytearray()
+                        for chunk in response.iter_bytes():
+                            manifest.extend(chunk)
+                            if len(manifest) > 1024 * 1024 or self.cancelled:
+                                return "", ""
+                        if not any(
+                            line.strip() == b"#EXT-X-ENDLIST" for line in manifest.splitlines()
+                        ):
+                            return "", ""
+                        digest.update(manifest)
+                    return digest.hexdigest(), ""
+        except httpx.RequestError:
+            return None, ""
+        except httpx.HTTPError:
+            return "", ""
 
     def _transfer(self, target_base: Path, url: str, referer: str) -> None:
         try:
@@ -442,6 +535,9 @@ class Downloader:
         return message[:400] if message else "yt-dlp failed"
 
     def _options(self, target_base: Path, referer: str) -> dict[str, object]:
+        headers = {"Referer": referer, "User-Agent": USER_AGENT}
+        if self._resume_etag:
+            headers["If-Match"] = self._resume_etag
         return {
             "format": "best/bestvideo+bestaudio",
             "paths": {"home": str(target_base.parent)},
@@ -467,7 +563,7 @@ class Downloader:
             "noprogress": True,
             "cachedir": False,
             "logger": self._logger,
-            "http_headers": {"Referer": referer, "User-Agent": USER_AGENT},
+            "http_headers": headers,
             "progress_hooks": [self._hook],
             "postprocessor_hooks": [self._pp_hook],
         }
@@ -561,6 +657,32 @@ def _bytes_on_disk(target_base: Path) -> int:
         except OSError:
             continue
     return total
+
+
+def _published_file(stage: Path) -> Path | None:
+    if stage.is_symlink():
+        return None
+    try:
+        name, size, modified, inode = json.loads((stage / "published").read_text(encoding="utf-8"))
+        if (
+            not isinstance(name, str)
+            or Path(name).name != name
+            or not _MEDIA_SUFFIX_RE.search(name)
+        ):
+            return None
+        path = stage.parent / name
+        if path.is_symlink():
+            return None
+        stat = path.stat()
+        if path.is_file() and (size, modified, inode) == (
+            stat.st_size,
+            stat.st_mtime_ns,
+            stat.st_ino,
+        ):
+            return path.resolve()
+    except (OSError, TypeError, ValueError):
+        pass
+    return None
 
 
 def _is_transient(message: str) -> bool:

@@ -118,6 +118,10 @@ class HistoryAdapter(
                     binding.tvHistoryStatus.text = context.getString(R.string.stage_processing)
                     binding.tvHistoryStatus.setTextColor(ContextCompat.getColor(context, R.color.dark_accent))
                 }
+                DownloadStatus.PAUSED -> {
+                    binding.tvHistoryStatus.setText(R.string.download_paused)
+                    binding.tvHistoryStatus.setTextColor(ContextCompat.getColor(context, R.color.dark_text_muted))
+                }
                 else -> {
                     binding.tvHistoryStatus.text = context.getString(R.string.queued)
                     binding.tvHistoryStatus.setTextColor(ContextCompat.getColor(context, R.color.dark_accent))

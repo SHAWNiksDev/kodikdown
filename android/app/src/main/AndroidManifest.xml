@@ -72,6 +72,8 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".ui.PlayerActivity" android:exported="false" />
+
         <service
             android:name=".downloader.DownloadService"
             android:enabled="true"
