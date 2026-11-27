@@ -12,6 +12,13 @@ if __name__ == "__main__":
             print(f"kodikdown {__version__}")
         raise SystemExit(0)
 
+    if len(sys.argv) == 3 and sys.argv[1] == "--check-playback":
+        from pathlib import Path
+
+        from kodikdown.gui.player import check_playback
+
+        raise SystemExit(check_playback(Path(sys.argv[2])))
+
     from kodikdown.gui.app import run
 
     raise SystemExit(run())

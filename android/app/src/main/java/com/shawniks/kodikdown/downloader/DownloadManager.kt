@@ -17,6 +17,7 @@ import com.shawniks.kodikdown.util.FileUtils
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+import kotlin.math.abs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -242,10 +243,10 @@ object DownloadManager {
                 if (item.isMp4) item.url else null,
                 referer,
             )
-        val sources =
-            (listOf(primary) + fallbackVariants.filter { it.quality < item.quality }).distinctBy {
-                it.url
-            }
+        val alternatives = fallbackVariants.filter { it.quality != item.quality }
+            .sortedWith(compareBy<StreamVariant> { it.quality > item.quality }
+                .thenBy { abs(it.quality - item.quality) })
+        val sources = (listOf(primary) + alternatives).distinctBy { it.url }
         try {
             for ((index, source) in sources.withIndex()) {
                 currentCoroutineContext().ensureActive()
@@ -330,7 +331,9 @@ object DownloadManager {
                     break
                 } catch (e: IOException) {
                     tempFile.delete()
-                    if (index == sources.lastIndex || e !is DownloadHttpException || e.code !in setOf(403, 404)) throw e
+                    val code = (e as? DownloadHttpException)?.code ?: throw e
+                    val canTryAnother = code == 403 || code == 404 || code in 500..599
+                    if (index == sources.lastIndex || !canTryAnother) throw e
                 }
             }
             currentCoroutineContext().ensureActive()

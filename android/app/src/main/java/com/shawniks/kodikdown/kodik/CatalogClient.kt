@@ -24,7 +24,8 @@ data class Catalog(
 class CatalogClient(private val kodik: KodikClient) {
     private val http = KodikClient.defaultHttpClient()
     private val yummy = "https://api.yani.tv"
-    private val libria = "https://aniliberty.top/api/v1"
+    private val libriaOrigin = "https://aniliberty.top"
+    private val libria = "$libriaOrigin/api/v1"
     private val cvh = "https://plapi.cdnvideohub.com/api/v1/player/sv"
 
     private suspend fun text(url: String, referer: String? = null, ajax: Boolean = false): String = http.readResponse(
@@ -60,16 +61,13 @@ class CatalogClient(private val kodik: KodikClient) {
         if (host.dubHost() && path.matches(Regex("/(?:[\\p{L}\\p{N}_-]+/)*[0-9]+-[\\p{L}\\p{N}_-]+\\.html"))) {
             return dubCatalog(url.toString())
         }
-        if (!slug.matches(Regex("[\\p{L}\\p{N}_-]+"))) return null
-        return when {
-            host.yummyHost() && (path == "/catalog/item/$slug" || path == "/anime/$slug") ->
-                yummyCatalog(raw, slug)
-            host.removePrefix("www.") in LIBRIA_HOSTS && path in setOf(
-                "/anime/releases/$slug", "/anime/releases/release/$slug", "/release/$slug",
-            ) ->
-                libriaCatalog(raw, slug)
-            else -> null
+        if (host.removePrefix("www.") in LIBRIA_HOSTS) {
+            return libriaSlug(path)?.let { libriaCatalog(url.toString(), it) }
         }
+        if (!slug.matches(Regex("[\\p{L}\\p{N}_-]+"))) return null
+        return if (host.yummyHost() && (path == "/catalog/item/$slug" || path == "/anime/$slug")) {
+            yummyCatalog(url.toString(), slug)
+        } else null
     }
 
     private suspend fun yummyCatalog(url: String, slug: String): Catalog {
@@ -108,7 +106,7 @@ class CatalogClient(private val kodik: KodikClient) {
         return Catalog(
             url, release.getJSONObject("name").optString("main", slug),
             listOf(CatalogChoice("AniLiberty", "AniLiberty", entries)),
-            release.optString("description"), if (poster.startsWith("/")) "https://aniliberty.top$poster" else poster,
+            release.optString("description"), if (poster.startsWith("/")) "$libriaOrigin$poster" else poster,
         )
     }
 
@@ -262,7 +260,7 @@ class CatalogClient(private val kodik: KodikClient) {
 
     private fun libriaVariants(entry: JSONObject) = listOf(1080, 720, 480).mapNotNull { quality ->
         entry.optString("hls_$quality").takeIf { it.startsWith("https://") }?.let {
-            StreamVariant(quality, it)
+            StreamVariant(quality, it, referer = "$libriaOrigin/")
         }
     }
 
@@ -278,6 +276,7 @@ class CatalogClient(private val kodik: KodikClient) {
         private val EPISODE_NUMBER = Regex("[0-9]{1,6}(?:\\.[0-9]{1,4})?")
         private val ID = Regex("[0-9]{1,24}")
         private val LIBRIA_HOSTS = setOf("aniliberty.top", "anilibria.top", "anilibria.app")
+        private val LIBRIA_RELEASE = Regex("/(?:anime/releases/(?:release/)?|release/)([\\p{L}\\p{N}_-]+)(?:\\.html)?")
         private val GO_HOSTS = setOf("animego.me", "animego.org", "www.animego.me", "www.animego.org")
         private val DUB_HOSTS = setOf("anidub.com", "anidub.life", "anidub.pro", "anidub.digital")
         private val YUMMY_HOSTS = setOf("yani.tv", "yummyani.me", "yummy-anime.ru")
@@ -287,6 +286,7 @@ class CatalogClient(private val kodik: KodikClient) {
         )
 
         private fun String.yummyHost() = YUMMY_HOSTS.any { this == it || endsWith(".$it") }
+        internal fun libriaSlug(path: String): String? = LIBRIA_RELEASE.matchEntire(path)?.groupValues?.get(1)
         private fun String.dubHost() = DUB_HOSTS.any { this == it || endsWith(".$it") }
         private fun isDubPlayer(host: String) = host.matches(Regex("player[0-9]+\\.ladonyvesna2005\\.info"))
         private fun voiceKey(value: String) = value.lowercase().filter { it.isLetterOrDigit() }

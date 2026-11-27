@@ -7,7 +7,7 @@
     <string name="paste_empty">Буфер обмена пуст</string>
     <string name="paste_failed">Не удалось прочитать буфер обмена</string>
     <string name="resolving">Ищу видео…</string>
-    <string name="invalid_url">Не похоже на ссылку плеера Kodik</string>
+    <string name="invalid_url">Этот сайт или плеер пока не поддерживается</string>
     <string name="network_error">Проблема с сетью или сервером: %1$s</string>
     <string name="page_changed">Страница плеера изменилась — не удалось её разобрать</string>
     <string name="no_streams">Плеер не отдал ссылки на видео</string>

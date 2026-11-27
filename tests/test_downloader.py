@@ -24,12 +24,14 @@ from kodikdown.downloader import (
     ProgressSnapshot,
     _bytes_on_disk,
     _is_transient,
+    fallback_sources_for,
     is_pending_output,
     partial_directory,
     release_target,
     safe_filename,
     unique_target,
 )
+from kodikdown.kodik.models import ResolvedVideo, StreamVariant
 
 
 def test_safe_filename_strips_illegal_chars() -> None:
@@ -776,17 +778,43 @@ def test_cancel_interrupts_slow_download(tmp_path: Path) -> None:
         server.shutdown()
 
 
-def test_transfer_with_retries_uses_supplied_fallback_on_404(tmp_path: Path, monkeypatch) -> None:
+def test_quality_fallback_keeps_same_quality_first_then_lower_before_higher():
+    variants = tuple(
+        StreamVariant(quality, f"https://cdn/{quality}.m3u8") for quality in (1080, 720, 480, 360)
+    )
+    variants = (
+        *variants[:2],
+        StreamVariant(480, variants[2].url, direct_mp4="https://cdn/480.mp4"),
+        variants[3],
+    )
+    candidates = fallback_sources_for(ResolvedVideo("Episode", variants), 480, True)
+
+    assert [source.url for source in candidates] == [
+        "https://cdn/480.m3u8",
+        "https://cdn/360.m3u8",
+        "https://cdn/720.m3u8",
+        "https://cdn/1080.m3u8",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("error", "primary_attempts"),
+    [("HTTP Error 404", 1), ("HTTP Error 500", 3), ("Connection timed out", 3)],
+)
+def test_transfer_with_retries_uses_supplied_fallback_on_http_error(
+    tmp_path: Path, monkeypatch, error: str, primary_attempts: int
+) -> None:
     attempts: list[str] = []
 
     def mock_transfer(self: Downloader, target_base: Path, url: str, referer: str) -> None:
         attempts.append(url)
         if "720.mp4" in url:
-            raise DownloadFailed("HTTP Error 404: Not Found")
+            raise DownloadFailed(error)
         # 480 succeeds
         target_base.with_suffix(".mp4").write_bytes(b"fallback content")
 
     monkeypatch.setattr(Downloader, "_transfer", mock_transfer)
+    monkeypatch.setattr("kodikdown.downloader._RETRY_DELAY", 0)
     downloader = Downloader(
         output_dir=tmp_path,
         fallback_sources=(DownloadSource("https://cdn/video/480.mp4:hls:manifest.m3u8", 480),),
@@ -795,9 +823,9 @@ def test_transfer_with_retries_uses_supplied_fallback_on_404(tmp_path: Path, mon
         "https://cdn/video/720.mp4:hls:manifest.m3u8", "clip", "https://cdn/"
     )
 
-    assert len(attempts) == 2
-    assert "720.mp4" in attempts[0]
-    assert "480.mp4" in attempts[1]
+    assert len(attempts) == primary_attempts + 1
+    assert all("720.mp4" in url for url in attempts[:-1])
+    assert "480.mp4" in attempts[-1]
     assert produced.name == "clip.mp4"
     assert produced.read_bytes() == b"fallback content"
 

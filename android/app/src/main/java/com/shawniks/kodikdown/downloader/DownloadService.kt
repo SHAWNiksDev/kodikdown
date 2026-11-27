@@ -29,6 +29,8 @@ class DownloadService : Service() {
     companion object {
         const val CHANNEL_ID = "kodikdown_download_progress"
         const val NOTIFICATION_ID = 1001
+        const val ACTION_SHOW_DOWNLOADS = "com.shawniks.kodikdown.SHOW_DOWNLOADS"
+
         fun start(context: Context) {
             val intent = Intent(context, DownloadService::class.java)
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent)
@@ -111,6 +113,7 @@ class DownloadService : Service() {
             }
         }
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java).apply {
+            action = ACTION_SHOW_DOWNLOADS
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val text = first?.let { description(it) } ?: ctx.getString(R.string.starting)

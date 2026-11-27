@@ -50,6 +50,9 @@ jobs:
           test "$(APPIMAGE_EXTRACT_AND_RUN=1 "$image" --version)" = "$expected"
           xvfb-run -a bash packaging/check_linux_gui.sh dist/kodikdown-linux-x86_64
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a bash packaging/check_linux_gui.sh "$image"
+          clip=android/app/src/androidTest/assets/resume.mp4
+          xvfb-run -a dist/kodikdown-linux-x86_64 --check-playback "$clip"
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a "$image" --check-playback "$clip"
       - uses: actions/upload-artifact@v4
         with:
           name: kodikdown-linux

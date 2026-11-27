@@ -8,7 +8,7 @@
     <string name="paste_empty">Clipboard is empty</string>
     <string name="paste_failed">Could not read the clipboard</string>
     <string name="resolving">Looking up the video…</string>
-    <string name="invalid_url">That does not look like a Kodik player link</string>
+    <string name="invalid_url">This site or player is not supported</string>
     <string name="network_error">Network or server problem: %1$s</string>
     <string name="page_changed">The player page changed — could not read it</string>
     <string name="no_streams">The player returned no streams for this video</string>

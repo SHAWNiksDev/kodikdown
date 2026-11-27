@@ -721,6 +721,8 @@ class FadeMixin:
 
     @staticmethod
     def fade_in(widget: QWidget, duration: int = 220, start: float = 0.0) -> None:
+        if widget.window().property("kodikdownAnimations") is False:
+            return
         effect = QGraphicsOpacityEffect(widget)
         widget.setGraphicsEffect(effect)
         effect.setOpacity(start)

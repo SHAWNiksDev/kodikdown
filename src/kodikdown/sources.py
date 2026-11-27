@@ -28,7 +28,8 @@ from kodikdown.kodik.parser import extract_title
 from kodikdown.net import build_client
 
 YUMMY_API = "https://api.yani.tv"
-LIBRIA_API = "https://aniliberty.top/api/v1"
+LIBRIA_ORIGIN = "https://aniliberty.top/"
+LIBRIA_API = urljoin(LIBRIA_ORIGIN, "api/v1")
 GO_HEADERS = {"X-Requested-With": "XMLHttpRequest"}
 YUMMY_HOSTS = {"yani.tv", "yummyani.me", "yummy-anime.ru"}
 GO_HOSTS = {"animego.org", "animego.me"}
@@ -464,7 +465,7 @@ class MediaClient:
             title,
             _choices({("AniLiberty", "AniLiberty"): episodes}) if episodes else (),
             description=release.get("description") or "",
-            poster_url=urljoin("https://aniliberty.top/", poster) if poster else "",
+            poster_url=urljoin(LIBRIA_ORIGIN, poster) if poster else "",
         )
 
     async def resolve_episode(self, title: str, choice: Choice, episode: Episode) -> ResolvedVideo:
@@ -551,7 +552,7 @@ def _libria_variants(entry: Any) -> tuple[StreamVariant, ...]:
     if not isinstance(entry, dict):
         raise PageStructureError()
     return tuple(
-        StreamVariant(height, link)
+        StreamVariant(height, link, referer=LIBRIA_ORIGIN)
         for height in (1080, 720, 480)
         if isinstance(link := entry.get(f"hls_{height}"), str) and link.startswith("https://")
     )

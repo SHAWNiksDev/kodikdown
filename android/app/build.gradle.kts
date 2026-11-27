@@ -88,8 +88,8 @@ android {
         applicationId = "com.shawniks.kodikdown"
         minSdk = 24
         targetSdk = 34
-        versionCode = 40700
-        versionName = "4.7.0"
+        versionCode = 40701
+        versionName = "4.7.1"
 
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
         vectorDrawables {

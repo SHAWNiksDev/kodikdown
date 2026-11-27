@@ -51,6 +51,8 @@ import com.shawniks.kodikdown.data.StreamVariant
 import com.shawniks.kodikdown.data.Translation
 import com.shawniks.kodikdown.databinding.ActivityMainBinding
 import com.shawniks.kodikdown.downloader.DownloadManager
+import com.shawniks.kodikdown.downloader.DownloadService
+import com.shawniks.kodikdown.kodik.InvalidPlayerUrl
 import com.shawniks.kodikdown.kodik.CatalogClient
 import com.shawniks.kodikdown.ui.AnimationExtensions.applyPressEffect
 import com.shawniks.kodikdown.ui.AnimationExtensions.popBounce
@@ -454,7 +456,7 @@ class MainActivity : AppCompatActivity() {
         switchTab(savedTab, isBack = false)
     }
 
-    private fun switchTab(index: Int, isBack: Boolean = false) {
+    private fun switchTab(index: Int, isBack: Boolean = false, autoPaste: Boolean = true) {
         if (currentTab == index && isViewInitialized(index)) return
 
         if (mediaTabs.isSelectionMode) {
@@ -493,7 +495,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         when (index) {
-            0 -> if (prefs.autoPaste && !settingsTab.appearanceBusy) checkAutoPaste()
+            0 -> if (autoPaste && prefs.autoPaste && !settingsTab.appearanceBusy) checkAutoPaste()
             1 -> LibraryManager.refresh(this, prefs.downloadDir)
             2 -> HistoryManager.init(this)
             3 -> settingsTab.bind()
@@ -600,6 +602,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent == null) return
+        if (intent.action == DownloadService.ACTION_SHOW_DOWNLOADS) {
+            switchTab(0, autoPaste = false)
+            return
+        }
         val text =
             when (intent.action) {
                 Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
@@ -609,6 +615,7 @@ class MainActivity : AppCompatActivity() {
         if (!text.isNullOrEmpty()) {
             val cleaned = extractUrlFromText(text)
             if (cleaned.isEmpty()) return
+            switchTab(0, autoPaste = false)
             binding.etUrl.setText(cleaned)
             binding.etUrl.setSelection(cleaned.length)
             startResolving(cleaned)
@@ -825,7 +832,8 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     if (generation == resolveGeneration) {
                         hideResultCard()
-                        val msg = e.message ?: getString(R.string.network_error, "Unknown error")
+                        val msg = if (e is InvalidPlayerUrl) getString(R.string.invalid_url)
+                            else e.message ?: getString(R.string.network_error, "Unknown error")
                         binding.tvStatus.text = msg
                         ToastManager.show(binding.toastContainer, msg, isError = true)
                     }

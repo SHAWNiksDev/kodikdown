@@ -53,8 +53,8 @@ class CatalogDialog(
             text = description.take(360) + if (description.length > 360) "…" else ""
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (details.childCount > 0) {
-            content.addView(Button(context).apply {
-                setText(R.string.hide_details)
+            details.visibility = View.GONE
+            content.addView(actionButton(R.string.show_details).apply {
                 setOnClickListener {
                     val visible = details.visibility == View.VISIBLE
                     details.visibility = if (visible) View.GONE else View.VISIBLE
@@ -78,11 +78,11 @@ class CatalogDialog(
             isChecked = groupSeries
         }
         content.addView(group)
-        val favoriteButton = Button(context).apply { setText(R.string.save_favorite) }
+        val favoriteButton = actionButton(R.string.save_favorite)
         content.addView(favoriteButton)
         val count = TextView(context).apply { setPadding(0, dp(8), 0, 0) }
         content.addView(count)
-        val selectAll = Button(context)
+        val selectAll = actionButton(R.string.select_all_episodes)
         content.addView(selectAll)
         val episodes = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         content.addView(episodes)
@@ -183,6 +183,16 @@ class CatalogDialog(
         }
         layout.addView(field, LinearLayout.LayoutParams(-1, -2))
         return field
+    }
+
+    private fun actionButton(label: Int) = Button(context).apply {
+        setText(label)
+        isAllCaps = false
+        setBackgroundResource(R.drawable.bg_button_secondary)
+        layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
+            topMargin = dp(4)
+            bottomMargin = dp(8)
+        }
     }
 
     private fun Spinner.items(items: List<String>) {

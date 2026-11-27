@@ -22,7 +22,9 @@
 | **Linux x64** | [AppImage](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64.AppImage) · [standalone binary](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-linux-x86_64) | Make the file executable |
 | **Android 7.0+** | [Download APK](https://github.com/SHAWNiksDev/kodikdown/releases/latest/download/kodikdown-android.apk) | Open the APK on your phone |
 
-On Android, install 4.7.0 over the official 4.6.0 APK to keep your history and settings. If Android reports a signature conflict with an older or test build, uninstall it before upgrading. Uninstalling clears app settings and history. Videos in shared storage stay on your device.
+Windows may show a SmartScreen warning when you first open the EXE. Download it from the KodikDown release page and use `SHA256SUMS` to verify the file if needed.
+
+On Android, open the downloaded APK. If prompted to allow installation from this source, open Settings from the prompt and grant permission to the browser or file manager that opened the APK. Install 4.7.1 over the official 4.7.0 APK to keep your history and settings. If Android reports a signature conflict with an older or test build, uninstall it before upgrading. Uninstalling clears app settings and history. Videos in shared storage stay on your device.
 
 The Linux AppImage includes Python and Qt. It targets x86_64 distributions with glibc 2.35 or newer, including Ubuntu 22.04 and Debian 12. Open a terminal in the download folder.
 
@@ -53,12 +55,14 @@ You can also paste a player link or `<iframe>` embed code into the same field. [
 
 Episodes, voice-overs and resolutions vary by source. Alloha downloads are currently unavailable. Android supports completed, unencrypted HLS streams with no separate audio track. [Player links and stream formats](docs/guide-en.md#copy-a-player-link)
 
+[Sites tested and download results](docs/site-checks.md)
+
 ## Downloads, library and history
 
 - Queue multiple episodes and see progress and speed. Check background downloads in the desktop tray or a silent Android notification.
 - Find episodes by series folder and play downloaded files from the library. Copy the original link or retry a download from history.
 - On desktop, search the library and history by title, series, or voice-over.
-- In 4.7.0, the queue survives app restarts. The **Queue** menu can pause, resume, and retry downloads. Use a download's menu to move it to the front. Partial downloads resume when the app can verify that the server is still serving the same file or playlist.
+- The queue survives app restarts. The **Queue** menu can pause, resume, and retry downloads. Use a download's menu to move it to the front. Partial downloads resume when the app can verify that the server is still serving the same file or playlist.
 - **Save to favorites** remembers the series' player, voice-over, and quality. Open a favorite to refresh the episode list and download missing episodes.
 - Downloaded videos open in the built-in player, which remembers your playback position. Use **Open externally** to watch in another player.
 - Change the theme, language, download folder and default quality in settings.

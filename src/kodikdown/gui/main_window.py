@@ -98,6 +98,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.store = store
         self.settings = settings
+        self.setProperty("kodikdownAnimations", settings.animations)
         self.favorites = Favorites(store.path.parent)
         self._favorite: Favorite | None = None
         self._player: VideoPlayer | None = None
@@ -1233,6 +1234,7 @@ class MainWindow(QMainWindow):
             if central is not None:
                 self.appearance_overlay.capture(central.rect().center(), circular=False)
         self.settings = updated
+        self.setProperty("kodikdownAnimations", updated.animations)
         self.downloads.pool.setMaxThreadCount(updated.concurrent_downloads)
         self.folder_label.setText(str(updated.download_dir))
         if updated.prefer_mp4 != previous.prefer_mp4:
@@ -1404,8 +1406,7 @@ class MainWindow(QMainWindow):
             return
 
         def remove() -> None:
-            self.history.remove(identifiers, self._active_ids())
-            self._render_history()
+            self._remove_history_entries(identifiers)
 
         if self.settings.confirm_delete:
             self._ask(t("remove_history_confirm", count=len(identifiers)), remove, action="remove")
@@ -1417,10 +1418,18 @@ class MainWindow(QMainWindow):
             return
 
         def clear() -> None:
-            self.history.clear(self._active_ids())
-            self._render_history()
+            self._remove_history_entries({entry.id for entry in self.history.entries})
 
         self._ask(t("clear_history_confirm"), clear, action="clear_history")
+
+    def _remove_history_entries(self, identifiers: set[str]) -> None:
+        protected = self._active_ids()
+        for identifier in identifiers - protected:
+            job = self.downloads.jobs.get(identifier)
+            if job is not None and job.status == "failed":
+                self._remove_job(identifier)
+        self.history.remove(identifiers, protected)
+        self._render_history()
 
     def _copy_history_link(self, identifier: str) -> None:
         entry = self.history.get(identifier)

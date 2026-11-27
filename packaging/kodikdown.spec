@@ -86,7 +86,6 @@ exe = EXE(  # noqa: F821 - injected by PyInstaller
     [] if ONEDIR else a.datas,
     exclude_binaries=ONEDIR,
     name=NAME,
-    strip=sys.platform == "linux",
     upx=False,
     console=False,
     icon=str(ROOT / "docs" / "app.ico") if sys.platform == "win32" else None,
@@ -98,6 +97,5 @@ if ONEDIR:
         a.binaries,
         a.datas,
         name=NAME,
-        strip=sys.platform == "linux",
         upx=False,
     )

@@ -5,9 +5,10 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QKeyEvent, QKeySequence, QShortcut
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoFrame, QVideoSink
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QHBoxLayout,
@@ -20,6 +21,28 @@ from PySide6.QtWidgets import (
 
 from kodikdown.gui.desktop import open_path
 from kodikdown.i18n import t
+
+
+def check_playback(path: Path) -> int:
+    """Check that this build can decode a video frame using its own Qt backend."""
+    app = QApplication([])
+    player = QMediaPlayer()
+    sink = QVideoSink()
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(lambda: app.exit(1))
+
+    def frame_changed(frame: QVideoFrame) -> None:
+        if frame.isValid():
+            app.exit(0)
+
+    player.errorOccurred.connect(lambda *_: QTimer.singleShot(0, lambda: app.exit(1)))
+    sink.videoFrameChanged.connect(frame_changed)
+    player.setVideoSink(sink)
+    player.setSource(QUrl.fromLocalFile(str(path.resolve())))
+    QTimer.singleShot(0, player.play)
+    timeout.start(10000)
+    return app.exec()
 
 
 class VideoPlayer(QDialog):

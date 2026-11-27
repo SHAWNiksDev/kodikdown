@@ -9,7 +9,7 @@ from PySide6.QtCore import QPoint, QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QMessageBox
 
 from kodikdown.config import ConfigStore, Settings
-from kodikdown.downloader import ProgressSnapshot, release_target, unique_target
+from kodikdown.downloader import ProgressSnapshot, partial_directory, release_target, unique_target
 from kodikdown.gui.appearance import AppearanceOverlay
 from kodikdown.gui.favorites import Favorites
 from kodikdown.gui.main_window import MainWindow
@@ -59,6 +59,13 @@ def enqueue(window, monkeypatch):
     window._on_resolved(window._request_id, video())
     window._on_download()
     return next(iter(window.downloads.jobs.items()))
+
+
+def test_disabled_animations_leave_video_card_opaque(window):
+    window.show()
+    window._apply_settings(window.settings.updated(animations=False), force=True)
+    window._on_resolved(window._request_id, video())
+    assert window.result_card.graphicsEffect() is None
 
 
 def test_settings_are_a_page_and_preserve_downloader_inputs(window):
@@ -583,6 +590,25 @@ def test_clearing_history_keeps_existing_session_download_available(window, monk
     window._request_media_refresh()
     qtbot.waitUntil(lambda: not window.media.scanning, timeout=3000)
     assert job.row.open_button.isHidden()
+
+
+@pytest.mark.parametrize("clear_all", [False, True])
+def test_deleting_failed_history_removes_the_queue_item(window, monkeypatch, clear_all):
+    identifier, job = enqueue(window, monkeypatch)
+    partial = partial_directory(job.directory, identifier)
+    partial.mkdir(parents=True)
+    (partial / "video.mp4.part").write_bytes(b"partial video")
+    window._on_job_failed(identifier, "network error")
+    if clear_all:
+        monkeypatch.setattr(window, "_ask", lambda text, callback, **kwargs: callback())
+        window._clear_history()
+    else:
+        window.settings = window.settings.updated(confirm_delete=False)
+        window._remove_history({identifier})
+
+    assert window.history.get(identifier) is None
+    assert identifier not in window.downloads.jobs
+    assert not partial.exists()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX named-home expansion")

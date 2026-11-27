@@ -60,8 +60,12 @@ def fallback_sources_for(
     resolved: ResolvedVideo, quality: int, prefer_mp4: bool
 ) -> tuple[DownloadSource, ...]:
     sources: list[DownloadSource] = []
-    for variant in resolved.variants:
-        if variant.quality < quality:
+    ordered = sorted(
+        resolved.variants,
+        key=lambda variant: (variant.quality > quality, abs(variant.quality - quality)),
+    )
+    for variant in ordered:
+        if variant.quality != quality:
             sources.append(
                 DownloadSource(
                     variant.download_url(prefer_mp4),
@@ -69,12 +73,8 @@ def fallback_sources_for(
                     variant.download_referer(prefer_mp4),
                 )
             )
-        if (
-            prefer_mp4
-            and variant.quality <= quality
-            and variant.direct_mp4 not in (None, variant.url)
-        ):
-            reported_quality = variant.quality if variant.quality < quality else None
+        if prefer_mp4 and variant.direct_mp4 not in (None, variant.url):
+            reported_quality = variant.quality if variant.quality != quality else None
             sources.append(
                 DownloadSource(variant.url, reported_quality, variant.download_referer(False))
             )
@@ -423,12 +423,13 @@ class Downloader:
                     for path in _target_files(target_base):
                         if _MEDIA_SUFFIX_RE.search(path.name):
                             path.unlink()
-                    unavailable = any(
-                        marker in str(exc).lower() for marker in ("403", "404", "not found")
-                    )
-                    if unavailable and index + 1 < len(sources):
+                    message = str(exc).lower()
+                    unavailable = any(marker in message for marker in ("403", "404", "not found"))
+                    exhausted = attempt + 1 == _TRANSFER_ATTEMPTS
+                    transient = _is_transient(message)
+                    if (unavailable or (exhausted and transient)) and index + 1 < len(sources):
                         break
-                    if attempt + 1 == _TRANSFER_ATTEMPTS or not _is_transient(str(exc)):
+                    if exhausted or not transient:
                         raise
                     if self._cancel_event.wait(_RETRY_DELAY * (attempt + 1)):
                         raise DownloadCancelled from exc

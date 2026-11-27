@@ -10,6 +10,8 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.util.regex.Pattern
 
+internal class InvalidPlayerUrl : IllegalArgumentException()
+
 object KodikParser {
     val DEFAULT_HOSTS = listOf(
         "kodikplayer.com",
@@ -96,7 +98,7 @@ object KodikParser {
 
         val matcher = EMBED_RE.matcher(text)
         if (!matcher.find()) {
-            throw IllegalArgumentException("Not a kodik embed URL: $raw")
+            throw InvalidPlayerUrl()
         }
 
         val mediaType = matcher.group(1)!!.lowercase()

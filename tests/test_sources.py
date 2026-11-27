@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 import respx
 
-from kodikdown.sources import MediaClient, Series
+from kodikdown.sources import Choice, Episode, MediaClient, Series
 
 
 async def test_direct_video_decodes_title_without_changing_the_stream_url() -> None:
@@ -37,6 +37,21 @@ async def test_aniliberty_accepts_current_and_older_release_links(prefix: str) -
     assert isinstance(catalog, Series)
     assert catalog.title == "Sample Series"
     assert catalog.choices[0].episodes[0].number == "1"
+
+
+@respx.mock
+async def test_aniliberty_stream_uses_the_site_as_referer() -> None:
+    respx.get("https://aniliberty.top/api/v1/anime/releases/episodes/example").respond(
+        json={"hls_720": "https://cache.libria.fun/clip.m3u8"}
+    )
+    episode = Episode(
+        "1", "https://aniliberty.top/api/v1/anime/releases/episodes/example", source="libria"
+    )
+    async with MediaClient() as client:
+        video = await client.resolve_episode(
+            "Sample", Choice("AniLiberty", "", (episode,)), episode
+        )
+    assert video.best.download_referer(False) == "https://aniliberty.top/"
 
 
 @pytest.mark.parametrize(

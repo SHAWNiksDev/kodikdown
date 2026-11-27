@@ -234,7 +234,6 @@ class SettingsDeviceTest : InstrumentationTestCase() {
                 assertFalse(activity.findViewById<View>(R.id.btnSettingsPlusConcurrent).isEnabled)
                 assertFalse(activity.findViewById<View>(R.id.btnSettingsBrowseFolder).isEnabled)
                 assertTrue(activity.findViewById<View>(R.id.btnThemeLight).isEnabled)
-                activity.findViewById<View>(R.id.tabDownloader).performClick()
             }
             Thread.sleep(1200)
             val manager = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
@@ -249,8 +248,11 @@ class SettingsDeviceTest : InstrumentationTestCase() {
             assertNotNull("Download notification must be visible immediately", notification)
             assertTrue(notification!!.extras.getString(Notification.EXTRA_TEXT).orEmpty().contains("25%"))
             assertTrue(notification.actions.isNullOrEmpty())
+            notification.contentIntent.send()
+            instrumentation.waitForIdleSync()
             assertTrue(HistoryManager.items.value.any { it.id == jobId })
             main {
+                assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.viewDownloader).visibility)
                 val list = activity.findViewById<RecyclerView>(R.id.rvDownloads)
                 val row = list.getChildAt(0)
                 val progress = row.findViewById<LinearProgressIndicator>(R.id.progressBar)

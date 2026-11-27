@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.7.1] - 2026-11-27
+
+### Русский
+
+- В AppImage и обычной Linux-сборке снова работает встроенный плеер. GitHub Actions теперь проверяет декодирование видео в готовых сборках для Linux и Windows.
+- Если источник перестал отдавать выбранный поток, приложение пробует другие доступные варианты. Сначала выбирает ближайшее качество ниже, затем ближайшее выше.
+- При загрузке с AniLiberty приложение передаёт адрес сайта в запросах к видеосерверу. Это исправляет ошибку 404 у доступных эпизодов.
+- Удаление неудачной загрузки из истории на ПК убирает её из очереди. Завершённые видео остаются в библиотеке.
+- На Android нажатие на уведомление или отправка ссылки из браузера открывает вкладку загрузок. Краткая карточка сериала оставляет больше места для списка серий.
+- На Android снова распознаются старые ссылки AniLiberty с `.html`. Сообщение о неподдерживаемой ссылке переведено на язык интерфейса.
+- На ПК настройка анимаций применяется к появлению карточек и индикаторов загрузки.
+
+### English
+
+- The built-in player works again in both Linux builds. GitHub Actions now verifies video decoding in packaged Linux and Windows apps.
+- If a source stops serving the selected stream, the app tries other available streams, preferring the closest lower resolution before higher resolutions.
+- AniLiberty downloads send the site's address to the video server, fixing HTTP 404 errors on available episodes.
+- Deleting a failed download from desktop history removes it from the queue. Finished videos remain in the library.
+- On Android, opening a download notification or sharing a link from the browser switches to the downloads tab. The compact series dialog leaves room for more episodes.
+- Android recognizes legacy AniLiberty links ending in `.html` and shows a localized message for unsupported links.
+- The desktop animation setting also applies to cards and download indicators.
+
 ## [4.7.0] - 2026-11-26
 
 ### Русский

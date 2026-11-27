@@ -54,23 +54,46 @@ jobs:
         run: |
           import ctypes
           from ctypes import wintypes
+          import functools
+          import http.server
           import subprocess
+          import tempfile
+          import threading
           import time
           from pathlib import Path
           from kodikdown import __version__
 
-          version = subprocess.check_output(
-              [str(Path("dist/kodikdown-windows-x86_64-cli.exe").resolve()), "--version"],
-              text=True, timeout=60,
-          )
+          cli = str(Path("dist/kodikdown-windows-x86_64-cli.exe").resolve())
+          version = subprocess.check_output([cli, "--version"], text=True, timeout=60)
           assert version.strip() == f"kodikdown {__version__}", version
           print(version.strip())
+          clip = Path("android/app/src/androidTest/assets/resume.mp4").resolve()
+          handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(clip.parent))
+          with tempfile.TemporaryDirectory() as output, http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
+              threading.Thread(target=server.serve_forever, daemon=True).start()
+              try:
+                  url = f"http://127.0.0.1:{server.server_port}/{clip.name}"
+                  subprocess.run([cli, "download", url, "-o", output, "-n", "downloaded"], check=True, timeout=60)
+                  assert (Path(output) / "downloaded.mp4").read_bytes() == clip.read_bytes()
+              finally:
+                  server.shutdown()
+          desktop = str(Path("dist/kodikdown-windows-x86_64.exe").resolve())
+          subprocess.run(
+              [desktop, "--check-playback", str(clip)],
+              check=True, timeout=60,
+          )
           user32 = ctypes.WinDLL("user32", use_last_error=True)
           user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
           user32.FindWindowW.restype = wintypes.HWND
           user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
           user32.GetWindowRect.restype = wintypes.BOOL
-          process = subprocess.Popen([str(Path("dist/kodikdown-windows-x86_64.exe").resolve())])
+          user32.IsWindowVisible.argtypes = [wintypes.HWND]
+          user32.IsWindowVisible.restype = wintypes.BOOL
+          user32.IsIconic.argtypes = [wintypes.HWND]
+          user32.IsIconic.restype = wintypes.BOOL
+          user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+          user32.PostMessageW.restype = wintypes.BOOL
+          process = subprocess.Popen([desktop])
           try:
               deadline = time.monotonic() + 60
               while time.monotonic() < deadline:
@@ -85,7 +108,16 @@ jobs:
                   raise RuntimeError("The packaged desktop app did not open its main window")
               time.sleep(5)
               assert process.poll() is None, "Desktop app exited after opening"
-              print("Packaged Windows GUI opened its main window and stayed running.")
+              assert user32.PostMessageW(window, 0x0010, 0, 0), "Could not send WM_CLOSE"
+              deadline = time.monotonic() + 10
+              while time.monotonic() < deadline:
+                  assert process.poll() is None, "Desktop app exited when its window closed"
+                  if not user32.IsWindowVisible(window) or user32.IsIconic(window):
+                      break
+                  time.sleep(0.2)
+              else:
+                  raise RuntimeError("Closing the main window left it visible")
+              print("The packaged Windows app opened, played video and stayed running after closing its window.")
           finally:
               subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False)
               process.wait(timeout=15)

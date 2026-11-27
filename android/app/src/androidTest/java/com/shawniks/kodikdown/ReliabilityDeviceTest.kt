@@ -121,7 +121,10 @@ class ReliabilityDeviceTest : InstrumentationTestCase() {
             val paused = context.getSharedPreferences("download_queue", 0).getString("entries", "").orEmpty()
             assertTrue(id in paused && "PAUSED" in paused)
             resumeServer.countDown()
-            instrumentation.runOnMainSync { DownloadManager.resume(context, id) }
+            instrumentation.runOnMainSync {
+                DownloadManager.resume(context, id)
+                assertTrue(activity.moveTaskToBack(true))
+            }
             val completed = withTimeout(15000) {
                 DownloadManager.items.first { list -> list.any { it.id == id && it.isTerminal } }
                     .first { it.id == id }
@@ -147,6 +150,17 @@ class ReliabilityDeviceTest : InstrumentationTestCase() {
         assertEquals(expected, CatalogClient.dubManifest(
             """<source id="vsource" src="vid.php?v=%2Fs9%2Fepisode&amp;lang=ru">"""
         ))
+    }
+
+    fun testAniLibertyRecognizesCurrentAndLegacyReleaseLinks() {
+        for (path in listOf(
+            "/anime/releases/release/sample-series",
+            "/anime/releases/sample-series",
+            "/release/sample-series.html",
+        )) {
+            assertEquals("sample-series", CatalogClient.libriaSlug(path))
+        }
+        assertNull(CatalogClient.libriaSlug("/anime/releases/episodes/sample-series"))
     }
 
     fun testDirectMediaTitlesOmitTheExtension(): Unit = runBlocking {
