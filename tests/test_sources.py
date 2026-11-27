@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 import respx
 
+from kodikdown.kodik.errors import RequestFailedError
 from kodikdown.sources import Choice, Episode, MediaClient, Series
 
 
@@ -13,6 +14,16 @@ async def test_direct_video_decodes_title_without_changing_the_stream_url() -> N
 
     assert video.title == "Episode 2"
     assert video.best.url == url
+
+
+async def test_external_player_timeout_reports_the_host(monkeypatch) -> None:
+    async def timeout(*args, **kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr("kodikdown.sources.extract_async", timeout)
+    async with MediaClient() as client:
+        with pytest.raises(RequestFailedError, match=r"aser\.pro: request timed out"):
+            await client.resolve_player("https://aser.pro/vod/1234")
 
 
 @pytest.mark.parametrize("prefix", ("anime/releases", "anime/releases/release", "release"))

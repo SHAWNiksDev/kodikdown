@@ -9,9 +9,11 @@
 | [AnimeGO](https://animego.me/anime/klub-igr-po-vyzhivaniyu-4516) | Первая серия скачана через Kodik. Когда прямой MP4 не открылся, загрузка завершилась через HLS. |
 | [AnimeGO, AniBoom](https://animego.me/anime/grotesk-4518) | Страница вернула список плееров, AniBoom отдал HLS. Полная загрузка не завершилась за время проверки. |
 | [AnimeGO, карточка без серий](https://animego.me/anime/raz-uzh-my-risuyem-4520) | Страница открылась. Плееры и эпизоды для загрузки не найдены. |
-| [AniLiberty](https://aniliberty.top/anime/releases/release/tensei-shitara-ken-deshita-2nd-season) | В Linux и на Pixel 8 найдено девять серий. Проверен действующий адрес и старый формат `/release/<название>.html`. После исправления запроса к CDN первая серия полностью скачалась в 480p на Linux. |
+| [AniLiberty](https://aniliberty.top/anime/releases/release/tensei-shitara-ken-deshita-2nd-season) | В Linux и на Pixel 8 найдено девять серий. Проверен действующий адрес и старый формат `/release/<название>.html`. После исправления запросов к CDN первая серия скачалась в 480p на обеих платформах. На телефоне загрузка и сборка файла завершились после выхода на главный экран. |
 | [AniDUB.life](https://anidub.life/12511-s-devjati-do-shesti.html) | Найдены две серии и потоки 480p и 720p. Сервер сегментов переставал отвечать во время загрузки. |
 
 Отдельно проверены ссылки с открытых в Chrome сайтов [AniDUB.org](https://anidub.org/8175-ty_umeesh_khranit_sekrety.html), [AnimeLib](https://animelib.org/ru/anime/26532--tetsuryou-meet-with-tetsudou-musume-anime) и [YummyAnime.tv](https://yummyanime.tv/series-y73/), а также примеры с [AnimeVost](https://animevost.org/tip/tv/3640-chitose-kun-wa-ramune-bin-no-naka.html), [Jut.su](https://jut.su/ken-deshita/season-2/episode-9.html) и [Shikimori](https://shikimori.io/animes/245-great-teacher-onizuka). Эти страницы приложение отклоняет как неподдерживаемые.
+
+Проверены и прямые ссылки на отдельные плееры для ПК. [Sibnet](https://video.sibnet.ru/shell.php?videoid=2589828) вернул 403. [Animedia](https://aser.pro/vod/20182) не ответил вовремя. [VK Видео](https://vk.com/video_ext.php?oid=-33905270&id=456239024) не вернул поток для проверенного ролика.
 
 Для проверки без зависимости от сайтов на ПК и Android использовались тестовые MP4 и HLS. В KDE проверены уход в трей, завершение загрузки со скрытым окном и возврат окна. На Pixel 8 проверены фоновая загрузка, докачка, уведомление с прогрессом и переход из уведомления в очередь.

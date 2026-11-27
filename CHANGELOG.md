@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - На Android снова распознаются старые ссылки AniLiberty с `.html`. Сообщение о неподдерживаемой ссылке переведено на язык интерфейса.
 - На Android открываются одноэпизодные страницы AnimeGO, где сайт отдаёт только плеер.
 - На ПК настройка анимаций применяется к появлению карточек и индикаторов загрузки.
+- При тайм-ауте стороннего плеера CLI сообщает, какой сервер не ответил.
 
 ### English
 
@@ -28,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Android recognizes legacy AniLiberty links ending in `.html` and shows a localized message for unsupported links.
 - Android can open single-episode AnimeGO pages that have an embedded player but no episode list.
 - The desktop animation setting also applies to cards and download indicators.
+- The CLI reports which server timed out when looking up an external player.
 
 ## [4.7.0] - 2026-11-26
 

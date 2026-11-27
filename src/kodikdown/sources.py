@@ -533,6 +533,8 @@ class MediaClient:
                 result = await extract_async(url, timeout=12)
         except NetworkError as exc:
             raise RequestFailedError(parsed.hostname or kind) from exc
+        except TimeoutError as exc:
+            raise RequestFailedError(f"{parsed.hostname or kind}: request timed out") from exc
         except ServiceError as exc:
             detail = f": HTTP {exc.status}" if exc.status else ""
             raise RequestFailedError((parsed.hostname or kind) + detail) from exc
