@@ -139,11 +139,11 @@ class CatalogClient(private val kodik: KodikClient) {
             val indexes = JSONArray(pages).objects().map { it.optInt("page") }.filter { it in 1..100 }.distinct()
             for (page in indexes) addEpisodes(goPage("$pageUrl/episodes?page=$page"))
         }
-        val choices = goEmbeds(initial).keys.mapNotNull { (player, voice) ->
+        val choices = goEmbeds(initial).mapNotNull { (source, embed) ->
+            val (player, voice) = source
             if (player.lowercase() !in setOf("kodik", "cvh", "aniboom")) return@mapNotNull null
             val key = Uri.Builder().appendQueryParameter("player", player).appendQueryParameter("voice", voice).build().encodedQuery
-            val entries = episodes.map { (number, link) -> CatalogEpisode(number, "$link#$key") }.sortedBy { it.number.toBigDecimal() }
-            CatalogChoice(player, voice, entries)
+            CatalogChoice(player, voice, goEpisodes(pageUrl, embed, episodes, key.orEmpty()))
         }
         return fromPage(url, text(url), choices)
     }
@@ -287,6 +287,11 @@ class CatalogClient(private val kodik: KodikClient) {
 
         private fun String.yummyHost() = YUMMY_HOSTS.any { this == it || endsWith(".$it") }
         internal fun libriaSlug(path: String): String? = LIBRIA_RELEASE.matchEntire(path)?.groupValues?.get(1)
+        internal fun goEpisodes(base: String, embed: String, episodes: Map<String, String>, selection: String): List<CatalogEpisode> {
+            if (episodes.isEmpty()) return listOf(CatalogEpisode("1", URI(base).resolve(embed).toString()))
+            return episodes.map { (number, link) -> CatalogEpisode(number, "$link#$selection") }
+                .sortedBy { it.number.toBigDecimal() }
+        }
         private fun String.dubHost() = DUB_HOSTS.any { this == it || endsWith(".$it") }
         private fun isDubPlayer(host: String) = host.matches(Regex("player[0-9]+\\.ladonyvesna2005\\.info"))
         private fun voiceKey(value: String) = value.lowercase().filter { it.isLetterOrDigit() }

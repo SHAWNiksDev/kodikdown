@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Удаление неудачной загрузки из истории на ПК убирает её из очереди. Завершённые видео остаются в библиотеке.
 - На Android нажатие на уведомление или отправка ссылки из браузера открывает вкладку загрузок. Краткая карточка сериала оставляет больше места для списка серий.
 - На Android снова распознаются старые ссылки AniLiberty с `.html`. Сообщение о неподдерживаемой ссылке переведено на язык интерфейса.
+- На Android открываются одноэпизодные страницы AnimeGO, где сайт отдаёт только плеер.
 - На ПК настройка анимаций применяется к появлению карточек и индикаторов загрузки.
 
 ### English
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deleting a failed download from desktop history removes it from the queue. Finished videos remain in the library.
 - On Android, opening a download notification or sharing a link from the browser switches to the downloads tab. The compact series dialog leaves room for more episodes.
 - Android recognizes legacy AniLiberty links ending in `.html` and shows a localized message for unsupported links.
+- Android can open single-episode AnimeGO pages that have an embedded player but no episode list.
 - The desktop animation setting also applies to cards and download indicators.
 
 ## [4.7.0] - 2026-11-26

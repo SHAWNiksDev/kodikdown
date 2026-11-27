@@ -163,6 +163,14 @@ class ReliabilityDeviceTest : InstrumentationTestCase() {
         assertNull(CatalogClient.libriaSlug("/anime/releases/episodes/sample-series"))
     }
 
+    fun testAnimeGoUsesTheEmbedWhenThePageHasNoEpisodeList() {
+        val episode = CatalogClient.goEpisodes(
+            "https://animego.me/player/42", "/cdn-iframe/42/1/1", emptyMap(), "player=CVH",
+        ).single()
+        assertEquals("1", episode.number)
+        assertEquals("https://animego.me/cdn-iframe/42/1/1", episode.url)
+    }
+
     fun testDirectMediaTitlesOmitTheExtension(): Unit = runBlocking {
         val catalog = CatalogClient(KodikClient())
         for ((extension, kind) in listOf("MP4" to "mp4", "m3u8" to "hls")) {
