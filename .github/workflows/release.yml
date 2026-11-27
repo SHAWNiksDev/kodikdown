@@ -27,7 +27,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
-            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 xvfb xdotool
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libpulse0 xvfb xdotool
       - run: pip install -e '.[dev]'
       - name: Check the release version
         run: python -c 'import os; from kodikdown import __version__; assert os.environ["GITHUB_REF_NAME"] == f"v{__version__}"'
@@ -51,8 +51,8 @@ jobs:
           xvfb-run -a bash packaging/check_linux_gui.sh dist/kodikdown-linux-x86_64
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a bash packaging/check_linux_gui.sh "$image"
           clip=android/app/src/androidTest/assets/resume.mp4
-          xvfb-run -a dist/kodikdown-linux-x86_64 --check-playback "$clip"
-          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a "$image" --check-playback "$clip"
+          QT_QPA_PLATFORM=offscreen dist/kodikdown-linux-x86_64 --check-playback "$clip"
+          QT_QPA_PLATFORM=offscreen APPIMAGE_EXTRACT_AND_RUN=1 "$image" --check-playback "$clip"
       - uses: actions/upload-artifact@v4
         with:
           name: kodikdown-linux

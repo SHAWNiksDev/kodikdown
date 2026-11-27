@@ -67,7 +67,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
-            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 xvfb xdotool
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libpulse0 xvfb xdotool
       - run: pip install -e '.[dev]'
       - run: pyinstaller packaging/kodikdown.spec --noconfirm
       - run: pyinstaller packaging/kodikdown-cli.spec --noconfirm
@@ -76,7 +76,7 @@ jobs:
       - run: dist/kodikdown-cli --version
       - run: APPIMAGE_EXTRACT_AND_RUN=1 dist/kodikdown-linux-x86_64.AppImage --version
       - run: APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a bash packaging/check_linux_gui.sh dist/kodikdown-linux-x86_64.AppImage
-      - run: APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a dist/kodikdown-linux-x86_64.AppImage --check-playback android/app/src/androidTest/assets/resume.mp4
+      - run: QT_QPA_PLATFORM=offscreen APPIMAGE_EXTRACT_AND_RUN=1 dist/kodikdown-linux-x86_64.AppImage --check-playback android/app/src/androidTest/assets/resume.mp4
       - uses: actions/upload-artifact@v4
         with:
           name: kodikdown-linux-preview
